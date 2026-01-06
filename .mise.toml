@@ -1,0 +1,109 @@
+[tools]
+python = "3.13.11"
+uv = "latest"
+gcloud = "latest"
+
+[env]
+_.file = { path = ".env", tools = true }
+
+[tasks.sync]
+description = "Install all dependencies (dev + vertex + ingestion + observability)"
+run = "uv sync --extra dev --extra vertex --extra ingestion --extra observability"
+
+[tasks.lint]
+description = "Lint + format-check all code (Ruff)"
+run = "uv run ruff check src/contextrouter tests/ && uv run ruff format --check src/contextrouter tests/"
+
+[tasks.format]
+description = "Format all code (Ruff)"
+run = "uv run ruff check --fix src/contextrouter tests/ && uv run ruff format src/contextrouter tests/"
+
+[tasks.test]
+description = "Run all tests"
+run = "uv run python -m pytest tests/ -v"
+
+[tasks.test-unit]
+description = "Run unit tests only"
+run = "uv run python -m pytest tests/unit/ -v"
+
+[tasks.ingest-preprocess]
+description = "Stage 1: Raw -> CleanText"
+run = "uv run contextrouter ingest preprocess"
+
+[tasks.ingest-persona]
+description = "Stage 2: Build persona artifacts"
+run = "uv run contextrouter ingest persona"
+
+[tasks.ingest-structure]
+description = "Stage 3: CleanText -> taxonomy.json + ontology.json"
+run = "uv run contextrouter ingest structure"
+
+[tasks.ingest-structure-force]
+description = "Rebuild taxonomy + ontology from scratch"
+run = "uv run contextrouter ingest structure --force"
+
+[tasks.ingest-index]
+description = "Stage 4: CleanText + taxonomy + ontology -> knowledge_graph.pickle + ShadowRecords"
+run = "uv run contextrouter ingest index"
+
+[tasks.ingest-deploy]
+description = "Stage 5: Export + deploy to storage + generate reports"
+run = "uv run contextrouter ingest deploy"
+
+[tasks.ingest-report]
+description = "Generate ingestion reports (standalone)"
+run = "uv run contextrouter ingest report"
+
+[tasks.ingest-run]
+description = "Run full pipeline: preprocess -> persona -> structure -> index -> deploy"
+run = "uv run contextrouter ingest run"
+
+[tasks.rag-query]
+description = "Query the RAG system"
+run = "uv run contextrouter rag query"
+
+[tasks.rag-chat]
+description = "Start interactive RAG chat"
+run = "uv run contextrouter rag chat"
+
+[tasks.gcloud-auth]
+description = "Authenticate with GCP"
+run = "gcloud auth login"
+
+[tasks.gcloud-adc]
+description = "Set up Application Default Credentials"
+run = "gcloud auth application-default login"
+
+[tasks.gcloud-set-project]
+description = "Set GCP project"
+run = "gcloud config set project $PROJECT_ID"
+
+[tasks.gcloud-check]
+description = "Check active gcloud auth/project"
+run = '''
+echo "active_account=$(gcloud auth list --filter=status:ACTIVE --format=value(account) 2>/dev/null || true)"
+echo "active_project=$(gcloud config get-value project 2>/dev/null || true)"
+echo "expected_PROJECT_ID=$PROJECT_ID"
+'''
+
+[tasks.setup]
+description = "Complete development environment setup"
+run = """
+mise run gcloud-auth &&
+mise run gcloud-adc &&
+mise run sync
+"""
+
+[tasks.clean]
+description = "Clean cache files and build artifacts"
+run = """
+find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+find . -type f -name "*.pyc" -delete 2>/dev/null || true
+find . -type f -name "*.pyo" -delete 2>/dev/null || true
+find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
+rm -rf .pytest_cache/ .ruff_cache/ build/ dist/ 2>/dev/null || true
+"""
+
+[tasks.build]
+description = "Build distribution packages"
+run = "uv build"

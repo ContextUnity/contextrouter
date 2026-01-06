@@ -98,9 +98,9 @@ ipython_config.py
 .python-version
 
 # pipenv
-#   According to pypa/pypenv#1188, it is a recommended practice to gitignore
+#   According to pypa/pipenv#1188, it is a recommended practice to gitignore
 #   Pipfile.lock if you are developing an app instead of a library.
-#   For libraries, see https://github.com/pypenv/issues/1188
+#   For libraries, see https://github.com/pypa/pipenv/issues/1188
 #Pipfile.lock
 
 # poetry
@@ -170,3 +170,4 @@ output/
 shadow/
 assets/source/
 assets/clean_text/
+

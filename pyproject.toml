@@ -1,0 +1,93 @@
+[project]
+name = "contextrouter"
+version = "0.10.0"
+description = "Modular LangGraph-powered agentic brain for multi-source knowledge orchestration and RAG"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Pylypchuk Oleksii", email = "oleksii.pylypchuk@tuta.com" },
+]
+license = { file = "LICENSE.md" }
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Typing :: Typed",
+]
+dependencies = [
+    "python-dotenv>=1.0.0",
+    "langgraph>=0.2.0",
+    "langchain-core>=0.3.0",
+    "langchain-community>=0.3.0",
+    "pydantic>=2.0.0",
+    "click>=8.0.0",
+    "tomli>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit",
+    "ruff",
+    "pytest",
+]
+# Core providers (most common)
+vertex = [
+    "langchain-google-genai>=2.0.0",
+    "langchain-google-community>=2.0.0",
+    "google-cloud-discoveryengine>=0.13.0",
+]
+# Extended providers
+storage = [
+    "google-cloud-storage>=3.0.0",
+    "google-cloud-firestore>=2.16.0",
+    "psycopg[binary]>=3.1.0",
+    "sqlalchemy>=2.0.0",
+]
+# Transport integrations
+integrations = [
+    "python-telegram-bot>=21.0",
+    "google-api-python-client>=2.100.0,<3.0.0",
+    "google-auth>=2.25.0,<3.0.0",
+    "google-auth-oauthlib>=1.2.0,<2.0.0",
+]
+# Ingestion capabilities
+ingestion = [
+    "networkx>=3.0",
+    "trafilatura>=1.6.0",
+    "pymupdf4llm>=0.0.10",
+    "pymupdf-layout>=0.0.0",
+    "beautifulsoup4>=4.12.0",
+]
+# Observability
+observability = [
+    "langfuse>=2.0.0",
+    "opentelemetry-instrumentation-threading>=0.48b0",
+]
+# Alternative LLM providers
+models = [
+    "litellm>=1.80.11",
+    "langchain-litellm>=0.1.0",
+]
+# Everything (for development/testing)
+all = [
+    "contextrouter[vertex,storage,integrations,ingestion,observability,models]"
+]
+
+[project.scripts]
+contextrouter = "contextrouter.cli.app:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/contextrouter"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
