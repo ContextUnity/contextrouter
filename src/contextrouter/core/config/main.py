@@ -16,7 +16,6 @@ from .paths import ConfigPaths
 from .providers import (
     GoogleCSEConfig,
     LangfuseConfig,
-    LiteLLMConfig,
     OpenAIConfig,
     PluginsConfig,
     VertexConfig,
@@ -82,7 +81,6 @@ class Config(BaseModel):
     vertex: VertexConfig = Field(default_factory=VertexConfig)
     openai: OpenAIConfig = Field(default_factory=OpenAIConfig)
     google_cse: GoogleCSEConfig = Field(default_factory=GoogleCSEConfig)
-    litellm: LiteLLMConfig = Field(default_factory=LiteLLMConfig)
     langfuse: LangfuseConfig = Field(default_factory=LangfuseConfig)
 
     # Internal state
@@ -197,12 +195,6 @@ class Config(BaseModel):
             self.google_cse.api_key = cse_key
         if cse_cx := get_env("GOOGLE_CSE_CX"):
             self.google_cse.search_engine_id = cse_cx
-
-        # LiteLLM configuration
-        if litellm_key := get_env("LITELLM_API_KEY"):
-            self.litellm.api_key = litellm_key
-        if litellm_base := get_env("LITELLM_API_BASE"):
-            self.litellm.api_base = litellm_base
 
         # Langfuse configuration
         if langfuse_secret := get_env("LANGFUSE_SECRET_KEY"):

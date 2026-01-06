@@ -36,13 +36,6 @@ class GoogleCSEConfig(BaseModel):
     search_engine_id: str = ""
 
 
-class LiteLLMConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    api_key: str = ""
-    api_base: str | None = None
-
-
 class LangfuseConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

@@ -85,3 +85,9 @@ as the return type for the formatter in `modules/retrieval/formatting/`.
 - **SUGGEST** commit messages but let user execute the commit
 - **PROVIDE** commands but don't execute them automatically
 - **WAIT** for explicit user approval before any git operations
+
+### Documentation Updates
+- **ALWAYS** update documentation in `contextrouter-docs/` when adding, changing, or removing functionality
+- **KEEP** technical docs and user guides in sync with code changes
+- **REVIEW** README files and API documentation for accuracy after code modifications
+- **UPDATE** example scripts and tutorials when breaking changes occur

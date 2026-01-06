@@ -26,7 +26,6 @@ from .models import (
 from .providers import (
     GoogleCSEConfig,
     LangfuseConfig,
-    LiteLLMConfig,
     OpenAIConfig,
     PluginsConfig,
     VertexConfig,
@@ -58,7 +57,6 @@ __all__ = [
     "VertexConfig",
     "OpenAIConfig",
     "GoogleCSEConfig",
-    "LiteLLMConfig",
     "LangfuseConfig",
     "PluginsConfig",
     # Ingestion configs

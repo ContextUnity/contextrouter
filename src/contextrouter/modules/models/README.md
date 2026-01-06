@@ -11,8 +11,6 @@ Models are selected by a **registry key** of the form:
 Examples:
 
 - `vertex/gemini-2.5-flash`
-- `litellm/openai/gpt-4o-mini`
-- `litellm/anthropic/claude-3-5-haiku-latest`
 
 The key is passed verbatim to `model_registry.create_llm(key)` / `model_registry.get_llm()`.
 Keys without `/` are **invalid** (there is no implicit fallback like `vertex/...`).
@@ -36,24 +34,11 @@ Request controls are provider-agnostic:
 - `llm.timeout_sec`
 - `llm.max_retries`
 
-## How API keys are provided (LiteLLM / OpenAI-compatible)
+## How API keys are provided
 
-Contextrouter **does not** store provider secrets in TOML. Keys are expected via environment variables
-used by the underlying SDK (LiteLLM/OpenAI-compatible servers).
+ContextRouter **does not** store provider secrets in TOML. Keys are expected via environment variables used by the underlying SDK.
 
-Common env vars (depending on the chosen `litellm/*` model key):
+Common env vars:
 
+- **Vertex AI**: configured via `vertex` config section
 - **OpenAI**: `OPENAI_API_KEY`
-- **Anthropic**: `ANTHROPIC_API_KEY`
-
-If you use a self-hosted OpenAI-compatible endpoint (proxy), set:
-
-- `CONTEXTROUTER_LITELLM_API_BASE` to your `/v1` base URL
-
-LiteLLM provider settings (optional):
-
-- `CONTEXTROUTER_LITELLM_API_BASE`
-- `CONTEXTROUTER_LITELLM_TIMEOUT_SEC`
-- `CONTEXTROUTER_LITELLM_FALLBACK_MODELS` (comma-separated list of model keys)
-
-

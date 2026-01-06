@@ -1,6 +1,6 @@
 [project]
 name = "contextrouter"
-version = "0.10.3"
+version = "0.10.4"
 description = "Modular LangGraph-powered agentic brain for multi-source knowledge orchestration and RAG"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -68,19 +68,15 @@ observability = [
 ]
 # Alternative LLM providers
 models = [
-    "litellm>=1.80.11",
-    "langchain-litellm>=0.1.0",
 ]
 # Everything (for development/testing)
 all = [
-    # NOTE: keep this extra resolvable/stable. `models` (litellm) currently conflicts
-    # with some Google stacks via `grpcio` pins, so it is intentionally excluded.
     "contextrouter[vertex,storage,integrations,ingestion,observability]"
 ]
 
 # Experimental / optional bundle (may be unsatisfiable depending on resolver + platform)
 all_experimental = [
-    "contextrouter[all,models]"
+    "contextrouter[all]"
 ]
 
 [project.scripts]

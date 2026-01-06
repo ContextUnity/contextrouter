@@ -81,17 +81,6 @@ class ModelRegistry:
             name="embeddings", builtin_map=BUILTIN_EMBEDDINGS
         )
 
-    def _create_litellm(self, key: str, cfg: Config, **kwargs: Any) -> BaseLLM:
-        # Special-case: LiteLLM is a routing layer, so we allow arbitrary model strings:
-        # `litellm/<provider>/<model>` (e.g. litellm/openai/gpt-4o-mini).
-        #
-        # This stays deterministic and opt-in (only activates for keys starting with `litellm/`).
-        from contextrouter.modules.models.llm.litellm import LiteLLMLLM
-
-        # Strip only the leading "litellm/" prefix; do not parse provider/model further.
-        model = key[len("litellm/") :].strip() if key.startswith("litellm/") else ""
-        return LiteLLMLLM(cfg, model=model, **kwargs)
-
     def register_llm(self, provider: str, name: str) -> Callable[[type[BaseLLM]], type[BaseLLM]]:
         key = ModelKey(provider=provider, name=name).as_str()
 
@@ -115,8 +104,6 @@ class ModelRegistry:
     def get_llm(self, key: str | None = None, *, config: Config | None = None) -> BaseLLM:
         cfg = config or get_core_config()
         k = key or cfg.models.default_llm
-        if k.strip().lower().startswith("litellm/"):
-            return self._create_litellm(k, cfg)
         if "/" not in k:
             raise ValueError(
                 "LLM model key must be explicit 'provider/name' (e.g. 'vertex/gemini-2.5-flash-lite')"
@@ -130,8 +117,6 @@ class ModelRegistry:
     def create_llm(self, key: str, *, config: Config | None = None, **kwargs: Any) -> BaseLLM:
         cfg = config or get_core_config()
         k = key
-        if k.strip().lower().startswith("litellm/"):
-            return self._create_litellm(k, cfg, **kwargs)
         if "/" not in k:
             raise ValueError(
                 "LLM model key must be explicit 'provider/name' (e.g. 'vertex/gemini-2.5-flash-lite')"
