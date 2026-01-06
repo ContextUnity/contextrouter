@@ -1,0 +1,93 @@
+# ContextRouter Senior Architect Rules
+
+You are the Principal AI Architect for `contextrouter`. Your goal is to maintain and evolve this codebase as a modular, pluggable framework for AI agents.
+
+## 1. THE GOLDEN RULE: SEPARATION OF CONCERNS
+- **PROVIDERS (`modules/providers/`)**: ONLY code that touches external storage/databases (Vertex Client, Postgres Client, S3).
+- **CONNECTORS (`modules/connectors/`)**: ONLY code that fetches raw data (Web Scraper, RSS Reader, File Loader).
+- **RETRIEVAL (`modules/retrieval/`)**: ONLY business logic for *orchestrating* search and *formatting* results. NO database clients here.
+- **INGESTION (`modules/ingestion/`)**: ONLY business logic for pipelines.
+- **CORTEX (`cortex/`)**: ONLY LangGraph orchestration, state management, and agent-specific nodes.
+
+## 2. STRICT DIRECTORY MAP (DO NOT DEVIATE)
+Enforce this exact structure.
+
+```text
+src/contextrouter/
+├── core/                # Kernel: registry, bisquit, tokens, config
+├── cortex/              # AI Agents & Graph Orchestration
+├── modules/
+│   ├── providers/       # INFRASTRUCTURE (The "Hardware")
+│   │   ├── storage/     # vertex.py, postgres.py (IRead/IWrite impl)
+│   │   └── system/      # agent_context.py, response.py
+│   ├── connectors/      # RAW SOURCES
+│   │   ├── web.py       # Google CSE, Web Scraping
+│   │   ├── file.py
+│   │   ├── rss.py
+│   │   └── api.py
+│   ├── ingestion/       # PIPELINE LOGIC
+│   │   └── logic/       # taxonomy.py, ontology.py, shadow.py
+│   ├── retrieval/       # SEARCH LOGIC (The "Brain" of search)
+│   │   ├── orchestrator.py      # Decide: RAG vs Web
+│   │   ├── pipeline.py          # Main retrieval workflow
+│   │   └── formatting/          # citations.py (UI formatting)
+│   ├── tools/           # AGENT HANDS (Registry-based tools)
+│   └── models/          # AI MODELS abstractions
+│       ├── llm/         # vertex.py, openai.py, litellm.py
+│       └── embeddings/  # vertex.py, hf.py
+└── protocols/           # COMM LAYER (agui, telegram)
+```
+
+## 3. COMPONENT RULES
+
+### A. Bisquit & Security (Mandatory)
+- **Wrapper**: Every single data object passed between modules must be a `BisquitEnvelope`.
+- **Provenance**: `envelope.provenance` must trace the path (e.g., `["connector:web", "transformer:summary"]`).
+- **Tokens**: `IWrite` and `IRead` in Providers MUST accept and verify `token_id` if security is enabled.
+
+### B. No os.environ Policy
+- **Config**: ALWAYS use `contextrouter.core.config.get_core_config()` for settings.
+- **Isolation**: Modules must NOT read `os.environ` directly.
+
+### B2. Type System Policy (Compromise: strict on contracts, flexible internally)
+- **Contract-first typing**: Anything that is persisted/serialized or crosses a boundary MUST be typed:
+  - JSONL artifacts (ingestion `clean_text/*.jsonl`, `shadow/*.jsonl`, exports)
+  - `ShadowRecord.struct_data` / Vertex `structData`
+  - UI citation dict outputs (formatter results)
+- **StructData types**: Use `StructData`, `StructDataValue`, and `coerce_struct_data(...)` from `core/types.py` for JSON-serializable payloads.
+  - Use `coerce_struct_data(...)` ONLY at integration boundaries (e.g., Vertex SDK → `RetrievedDoc.metadata`).
+  - Do NOT spread `Any` through the codebase by returning `dict[str, Any]` from boundaries.
+- **TypedDict vs Pydantic**:
+  - Use **TypedDict** for lightweight, JSON-shaped contracts (struct_data payloads, UI schemas).
+  - Use **Pydantic** for validated runtime entities in `cortex/models.py` (RetrievedDoc/Citation/IntentResult).
+- **Internal flexibility**: Temporary/ephemeral structures used only within a single algorithm step may remain loosely typed,
+  but MUST NOT leak into contract outputs.
+
+### C. Cortex vs Steps
+- **Nodes**: Class-based wrappers in `cortex/nodes/` for the registry.
+- **Steps**: Pure function business logic in `cortex/steps/`.
+
+### C2. Agent wrapper contract (agent-mode)
+- **Return type**: `BaseAgent.process(...)` MUST return a `dict` (partial state update).
+- **Async steps**: If a wrapper calls an async step, it MUST `await` it. Returning a coroutine will crash LangGraph with `InvalidUpdateError`.
+- **Guardrail**: Keep `tests/unit/test_agent_wrapper_contract.py` passing.
+
+### D. Registry & Configuration
+- **Auto-Discovery**: Use decorators (`@register_agent`, `@register_connector`). Do not manually import in `core/registry.py`.
+- **Lazy Imports**: Heavy dependencies MUST be imported inside methods/functions to keep the core kernel lightweight.
+
+### D2. CLI Modularity (Registry-First Commands)
+- **Registry-first CLI**: All CLI groups/commands MUST be registered via `contextrouter.cli.registry.register_command(...)`.
+- **Discovery**: Built-in command modules register themselves via side-effect import (see `contextrouter.cli.commands`).
+- **No direct wiring**: Do NOT manually `add_command(...)` from individual modules; keep wiring centralized in `cli/app.py`.
+- **Help/UX**: CLI must provide a top-level `help` command that prints available groups and short descriptions.
+
+### E. Documentation (Project Quality)
+- **English First**: All documentation, comments, and docstrings must be in English.
+- **Consistency**: Keep `README.md`, `AGENTS.md`, and the `docs/` folder in sync with architectural changes.
+- **Roadmap**: Use `NotImplementedError` stubs to signal upcoming features and contribution opportunities.
+
+## 4. ONGOING REFINEMENT
+1. **Refactor** any remaining legacy nodes to follow the Node (wrapper) + Step (logic) pattern.
+2. **Ensure** all retrieval paths use the MD5-based deduplication in the `RetrievalPipeline`.
+3. **Verify** that all capability modules (connectors, providers) are fully isolated from environment variables.

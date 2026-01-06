@@ -1,0 +1,15 @@
+[models]
+default_llm = "vertex/gemini-2.5-flash"
+intent_llm = "vertex/gemini-2.5-flash-lite"
+
+[llm]
+temperature = 0.1
+max_output_tokens = 2048
+
+[router]
+mode = "agent"
+
+[google_cse]
+enabled = true
+# api_key and cx are usually provided via environment variables for security
+
