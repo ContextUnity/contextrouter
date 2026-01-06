@@ -1,6 +1,9 @@
 """Model and LLM configuration."""
 
-from .base import *
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict
+
 
 class RagConfig(BaseModel):
     """RAG datastore selection (compat for retrieval settings).

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import pickle
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -13,6 +12,10 @@ from typing import Any
 import networkx as nx
 
 from contextrouter.core.config import Config
+from contextrouter.modules.ingestion.rag.graph.serialization import (
+    load_graph_secure,
+    save_graph_secure,
+)
 
 from ..core.types import RawData
 from ..core.utils import (
@@ -349,7 +352,12 @@ class GraphBuilder:
             return ([], [])
 
     def _write_debug_bundle(
-        self, output_path: Path, kind: str, prompt: str, raw_output: str, raw_data: RawData
+        self,
+        output_path: Path,
+        kind: str,
+        prompt: str,
+        raw_output: str,
+        raw_data: RawData,
     ) -> None:
         """Write debug bundle for failed extractions."""
         if self._debug_bundles_written >= 5:
@@ -571,8 +579,8 @@ class GraphBuilder:
         for u, v in set(bad_edges):
             try:
                 self.graph.remove_edge(u, v)
-            except Exception:
-                pass
+            except Exception as e:
+                LOGGER.warning("Failed to remove edge (%s, %s): %s", u, v, e)
         stats["label_edges_removed"] = len(set(bad_edges))
 
         # Remove newly isolated nodes
@@ -594,10 +602,10 @@ class GraphBuilder:
         # Load existing graph if incremental
         if incremental and output_path.exists():
             try:
-                with open(output_path, "rb") as f:
-                    self.graph = pickle.load(f)
+                # Load graph with integrity verification
+                self.graph = load_graph_secure(output_path)
                 LOGGER.info(
-                    "Existing graph loaded with %d nodes and %d edges",
+                    "Existing graph loaded securely with %d nodes and %d edges",
                     self.graph.number_of_nodes(),
                     self.graph.number_of_edges(),
                 )
@@ -645,7 +653,9 @@ class GraphBuilder:
                     LOGGER.warning("Failed to process item: %s", e)
 
         LOGGER.info(
-            "Extracted %d unique entities and %d relations", len(all_entities), len(all_relations)
+            "Extracted %d unique entities and %d relations",
+            len(all_entities),
+            len(all_relations),
         )
 
         initial_nodes = self.graph.number_of_nodes()
@@ -723,16 +733,14 @@ class GraphBuilder:
         for u, v in invalid_edges:
             try:
                 self.graph.remove_edge(u, v)
-            except Exception:
-                pass
+            except Exception as e:
+                LOGGER.warning("Failed to remove invalid edge (%s, %s): %s", u, v, e)
 
         # Cleanup
         cleanup_stats = self._cleanup_graph()
 
-        # Save
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, "wb") as f:
-            pickle.dump(self.graph, f, protocol=pickle.HIGHEST_PROTOCOL)
+        # Save securely with integrity verification
+        save_graph_secure(self.graph, output_path)
 
         new_nodes = self.graph.number_of_nodes() - initial_nodes
         new_edges = self.graph.number_of_edges() - initial_edges
@@ -747,7 +755,10 @@ class GraphBuilder:
         )
 
         if conflicts:
-            LOGGER.info("Graph label conflicts resolved deterministically on %d edges", conflicts)
+            LOGGER.info(
+                "Graph label conflicts resolved deterministically on %d edges",
+                conflicts,
+            )
 
         # Label distribution
         label_counts = Counter(

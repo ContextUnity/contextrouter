@@ -46,5 +46,6 @@ async def retry_with_backoff_async(
             delay = min(max_delay_s, base_delay_s * (2**i)) + (random.random() * jitter_s)
             await asyncio.sleep(delay)
 
-    assert last_exc is not None
+    if last_exc is None:
+        raise RuntimeError("Retry failed but no exception was captured")
     raise last_exc

@@ -1,0 +1,34 @@
+# Bandit configuration file for ContextRouter
+# This file configures Bandit security scanning to be appropriate for our use case
+
+# Exclude directories that don't need security scanning
+exclude_dirs:
+  - "tests"
+  - "examples"
+  - "dist"
+  - ".git"
+
+# Skip certain low-risk patterns that are acceptable in this codebase
+# These patterns are commonly used in data processing applications
+skips:
+  # B110: try_except_pass - Used for graceful degradation in data processing
+  - B110
+
+  # B112: try_except_continue - Used for skipping invalid data in batch processing
+  - B112
+
+  # B101: assert_used - Asserts help catch programming errors in development
+  - B101
+
+  # B311: random - Used for non-cryptographic purposes (sampling, jitter)
+  - B311
+
+  # B403: pickle import - We use secure serialization with integrity checks
+  # The remaining import is in our legacy compatibility function only
+  - B403
+
+  # B301: pickle usage - Same as above, legacy compatibility only
+  - B301
+
+  # B310: urllib.urlopen - We validate URL schemes to only allow HTTP/HTTPS
+  - B310

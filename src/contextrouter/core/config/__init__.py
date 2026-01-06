@@ -21,9 +21,8 @@ from .models import (
     ModelsConfig,
     RouterConfig,
 )
-from .paths import (
-    ConfigPaths as _ConfigPaths,  # Avoid duplicate
-)
+
+# ConfigPaths is already imported from .main above
 from .providers import (
     GoogleCSEConfig,
     LangfuseConfig,

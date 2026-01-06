@@ -70,9 +70,9 @@ def _proto_to_dict(proto_obj: object) -> object:
     if hasattr(proto_obj, "DESCRIPTOR"):
         try:
             return MessageToDict(proto_obj, preserving_proto_field_name=True)
-        except Exception:
+        except Exception as e:
             # Fallback for proto conversion issues
-            pass
+            logger.debug("MessageToDict failed, trying fallback conversion: %s", e)
     if hasattr(proto_obj, "items"):
         try:
             items = cast("dict[object, object]", proto_obj).items()
@@ -214,7 +214,11 @@ async def search_vertex_ai_async(
 
     with retrieval_span(
         name="vertex_search",
-        input_data={"query": query, "source_type": source_type_filter, "max_results": max_results},
+        input_data={
+            "query": query,
+            "source_type": source_type_filter,
+            "max_results": max_results,
+        },
     ) as span_ctx:
         try:
             t0 = time.perf_counter()
@@ -235,7 +239,9 @@ async def search_vertex_ai_async(
         except Exception as e:
             logger.exception("Vertex AI Search failed for query: %s", query[:50])
             raise ProviderError(
-                f"Vertex AI Search failed: {str(e)}", code="VERTEX_SEARCH_ERROR", query=query[:50]
+                f"Vertex AI Search failed: {str(e)}",
+                code="VERTEX_SEARCH_ERROR",
+                query=query[:50],
             ) from e
 
 

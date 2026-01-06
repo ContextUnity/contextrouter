@@ -1,6 +1,9 @@
 """Ingestion pipeline configuration."""
 
-from .base import *
+import os
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RAGConfig(BaseModel):

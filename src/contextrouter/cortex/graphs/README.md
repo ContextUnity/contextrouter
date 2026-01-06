@@ -9,7 +9,7 @@ Business logic lives in:
 ## `brain.py` (central dispatcher)
 
 `brain.py` is the explicit entrypoint that selects which graph to compile/run.
-It uses `Config.router.graph` as a simple key 
+It uses `Config.router.graph` as a simple key
 
 ## `rag_retrieval.py` (chat / RAG retrieval graph)
 
@@ -62,5 +62,3 @@ This format is:
 `compile_graph_from_recipe(recipe)` memoizes compiled graphs **in-process** using a stable
 `recipe_cache_key(recipe)`. This avoids repeated compilation for common recipes like:
 `preprocess-only`, `preprocess+taxonomy`, or `full`.
-
-

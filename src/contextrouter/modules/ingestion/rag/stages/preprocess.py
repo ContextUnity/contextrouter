@@ -16,9 +16,8 @@ from ..core.utils import (
     parallel_map,
     resolve_workers,
 )
-
-# from ..plugins.book import BookPlugin  # TODO: Fix BookPlugin
-from ..plugins.qa import QAPlugin
+from ..plugins import QAPlugin
+from ..plugins.book import BookPlugin
 from ..plugins.text import TextPlugin
 from ..plugins.video import (
     extract_youtube_id_from_filename,
@@ -57,19 +56,21 @@ def preprocess_to_clean_text(
 
         if t == "video":
             items = _preprocess_video(
-                source_dir=get_plugin_source_dir("video", config), config=config, core_cfg=core_cfg
+                source_dir=get_plugin_source_dir("video", config),
+                config=config,
+                core_cfg=core_cfg,
             )
         elif t == "book":
-            book_dir = get_plugin_source_dir("book", config)
-            pdfs = sorted(book_dir.glob("*.pdf")) if book_dir.exists() else []
-            if pdfs:
-                LOGGER.info("preprocess(book): PDFs=%d", len(pdfs))
-                for p in pdfs:
-                    LOGGER.info("preprocess(book): pdf=%s", p.name)
-            items = BookPlugin().load(str(book_dir))
+            items = _preprocess_book(
+                source_dir=get_plugin_source_dir("book", config),
+                config=config,
+                core_cfg=core_cfg,
+            )
         elif t == "qa":
             items = _preprocess_qa(
-                source_dir=get_plugin_source_dir("qa", config), config=config, core_cfg=core_cfg
+                source_dir=get_plugin_source_dir("qa", config),
+                config=config,
+                core_cfg=core_cfg,
             )
         elif t == "web":
             items = WebPlugin().load(str(get_plugin_source_dir("web", config)), config=config)
@@ -83,7 +84,11 @@ def preprocess_to_clean_text(
         count = write_raw_data_jsonl(items, out_path, overwrite=overwrite)
         elapsed = time.perf_counter() - start
         LOGGER.info(
-            "preprocess: wrote=%d type=%s path=%s (%.1fs)", count, t, out_path.name, elapsed
+            "preprocess: wrote=%d type=%s path=%s (%.1fs)",
+            count,
+            t,
+            out_path.name,
+            elapsed,
         )
         return (t, out_path, count)
 
@@ -99,6 +104,15 @@ def preprocess_to_clean_text(
         outputs[tt] = out_path
 
     return outputs
+
+
+def _preprocess_book(
+    *, source_dir: Path, config: RagIngestionConfig, core_cfg: Config
+) -> list[RawData]:
+    """Book preprocessing using BookPlugin for PDF extraction and chapter detection."""
+    plugin = BookPlugin()
+    items = plugin.load(str(source_dir))
+    return items
 
 
 def _preprocess_qa(
@@ -247,7 +261,11 @@ def _identify_session_host(
 
     if llm_host_detect:
         host = _identify_host_llm(
-            interactions, non_persona_speakers, norm_to_corrected, pn_norm, core_cfg=core_cfg
+            interactions,
+            non_persona_speakers,
+            norm_to_corrected,
+            pn_norm,
+            core_cfg=core_cfg,
         )
         if host:
             return host
@@ -328,7 +346,11 @@ HOST:"""
 
     try:
         result = llm_generate(
-            core_cfg=core_cfg, prompt=prompt, model=MODEL_LIGHT, max_tokens=50, temperature=0.0
+            core_cfg=core_cfg,
+            prompt=prompt,
+            model=MODEL_LIGHT,
+            max_tokens=50,
+            temperature=0.0,
         )
         if isinstance(result, str):
             result = result.strip()
@@ -442,7 +464,9 @@ CHUNKS:
             )
         except Exception as e:
             LOGGER.warning(
-                "QA question filtering failed for batch at %d: %s (keeping all)", batch_start, e
+                "QA question filtering failed for batch at %d: %s (keeping all)",
+                batch_start,
+                e,
             )
             # On failure, keep all interactions (safer) - add KEEP decisions
             for i, _ in enumerate(batch):
@@ -452,7 +476,8 @@ CHUNKS:
 
         if not isinstance(text, str) or not text.strip():
             LOGGER.warning(
-                "QA question filtering returned empty for batch at %d (keeping all)", batch_start
+                "QA question filtering returned empty for batch at %d (keeping all)",
+                batch_start,
             )
             # Keep all interactions - add KEEP decisions
             for i, _ in enumerate(batch):
@@ -785,7 +810,9 @@ INPUT JSON:
             )
         except Exception as e:
             LOGGER.warning(
-                "LLM clean failed for batch at %d: %s (keeping original)", batch_start, e
+                "LLM clean failed for batch at %d: %s (keeping original)",
+                batch_start,
+                e,
             )
             # On failure, keep all sentences - add KEEP decisions
             for i, _ in enumerate(batch):
@@ -795,7 +822,8 @@ INPUT JSON:
 
         if not isinstance(raw, str) or not raw.strip():
             LOGGER.warning(
-                "LLM clean returned empty output for batch at %d (keeping original)", batch_start
+                "LLM clean returned empty output for batch at %d (keeping original)",
+                batch_start,
             )
             # Keep all sentences - add KEEP decisions
             for i, _ in enumerate(batch):

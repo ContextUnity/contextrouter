@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import json
 import logging
-import pickle
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from ..config import get_assets_paths
+from ..graph.serialization import load_graph_secure
 from ..settings import RagIngestionConfig
 
 LOGGER = logging.getLogger(__name__)
@@ -67,16 +67,20 @@ def _taxonomy_stats(taxonomy_path: Path) -> dict[str, Any]:
         "path": str(taxonomy_path),
         "exists": taxonomy_path.exists(),
         "categories_count": len(cats) if isinstance(cats, dict) else 0,
-        "canonical_map_count": len(canonical_map) if isinstance(canonical_map, dict) else 0,
+        "canonical_map_count": (len(canonical_map) if isinstance(canonical_map, dict) else 0),
         "total_keywords": int(tax.get("total_count") or 0),
         "category_keyword_counts": {
             "min": cat_keyword_counts_sorted[0] if cat_keyword_counts_sorted else 0,
-            "p50": cat_keyword_counts_sorted[len(cat_keyword_counts_sorted) // 2]
-            if cat_keyword_counts_sorted
-            else 0,
-            "p90": cat_keyword_counts_sorted[int(len(cat_keyword_counts_sorted) * 0.9)]
-            if cat_keyword_counts_sorted
-            else 0,
+            "p50": (
+                cat_keyword_counts_sorted[len(cat_keyword_counts_sorted) // 2]
+                if cat_keyword_counts_sorted
+                else 0
+            ),
+            "p90": (
+                cat_keyword_counts_sorted[int(len(cat_keyword_counts_sorted) * 0.9)]
+                if cat_keyword_counts_sorted
+                else 0
+            ),
             "max": cat_keyword_counts_sorted[-1] if cat_keyword_counts_sorted else 0,
         },
     }
@@ -84,11 +88,17 @@ def _taxonomy_stats(taxonomy_path: Path) -> dict[str, Any]:
 
 def _graph_stats(graph_path: Path) -> dict[str, Any]:
     if not graph_path.exists():
-        return {"path": str(graph_path), "exists": False, "nodes": 0, "edges": 0, "top_labels": []}
+        return {
+            "path": str(graph_path),
+            "exists": False,
+            "nodes": 0,
+            "edges": 0,
+            "top_labels": [],
+        }
 
     try:
-        with open(graph_path, "rb") as f:
-            g = pickle.load(f)
+        # Load graph with integrity verification
+        g = load_graph_secure(graph_path)
     except Exception as e:
         LOGGER.warning("report: failed to load graph %s: %s", graph_path, e)
         return {

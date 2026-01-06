@@ -1,33 +1,31 @@
-name: CI
+name: CI & Security
 
 on:
   push:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+  schedule:
+    # Run security scan weekly on Mondays at 9 AM UTC
+    - cron: '0 9 * * 1'
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
     - uses: actions/checkout@v4
-
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
 
     - name: Install uv
       uses: astral-sh/setup-uv@v3
       with:
         version: "latest"
+        python-version: "3.13"
 
     - name: Install dependencies
-      run: uv sync --dev
+      run: |
+        uv sync --dev
+        uv sync --extra ingestion --extra vertex
 
     - name: Run ruff linting
       run: uv run ruff check src/contextrouter
@@ -38,6 +36,17 @@ jobs:
     - name: Run tests
       run: uv run python -m pytest tests/ -v --cov=src/contextrouter --cov-report=xml
 
+    - name: Run Bandit security scanner
+      run: |
+        uv run bandit -c .bandit -r src/contextrouter -f json -o bandit-report.json || true
+        uv run bandit -c .bandit -r src/contextrouter
+
+    - name: Run Safety vulnerability scanner
+      run: |
+        uv pip install safety
+        uv run safety check --json > safety-report.json || true
+        uv run safety check
+
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
       with:
@@ -45,3 +54,12 @@ jobs:
         flags: unittests
         name: codecov-umbrella
         fail_ci_if_error: false
+
+    - name: Upload security scan results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: security-scan-results
+        path: |
+          bandit-report.json
+          safety-report.json

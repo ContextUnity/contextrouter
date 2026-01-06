@@ -4,7 +4,6 @@ from contextrouter.core.config import Config
 from contextrouter.modules.ingestion.rag.core.plugins import IngestionPlugin
 from contextrouter.modules.ingestion.rag.core.registry import register_plugin
 from contextrouter.modules.ingestion.rag.core.types import (
-    IngestionMetadata,
     RawData,
     ShadowRecord,
 )

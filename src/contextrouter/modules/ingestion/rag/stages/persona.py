@@ -90,7 +90,8 @@ def _iter_glob_paths(root: Path, patterns: Iterable[str]) -> list[Path]:
     for pat in patterns:
         try:
             out.extend(list(root.glob(pat)))
-        except Exception:
+        except Exception as e:
+            LOGGER.debug("Failed to glob pattern '%s': %s", pat, e)
             continue
     # Dedup, keep stable order
     seen: set[Path] = set()

@@ -27,7 +27,7 @@ class TaxonomySample:
 
 def stable_hash_u64(s: str) -> int:
     """Deterministic hash used for sampling (order-independent)."""
-    h = hashlib.sha1(s.encode("utf-8", errors="ignore")).digest()
+    h = hashlib.sha256(s.encode("utf-8", errors="ignore")).digest()
     return int.from_bytes(h[:8], "big", signed=False)
 
 

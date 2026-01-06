@@ -26,7 +26,7 @@ class VertexImportRecord(TypedDict):
 def generate_id(*parts: str) -> str:
     """Generate a stable MD5 hash ID from string parts."""
     combined = "_".join(str(p) for p in parts)
-    return hashlib.md5(combined.encode("utf-8")).hexdigest()
+    return hashlib.sha256(combined.encode("utf-8")).hexdigest()
 
 
 def slugify(value: str, max_length: int = 50) -> str:

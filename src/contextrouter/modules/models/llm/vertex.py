@@ -36,8 +36,6 @@ class VertexLLM(BaseLLM):
         streaming: bool = True,
         **_: Any,
     ) -> None:
-        from langchain_google_genai import ChatGoogleGenerativeAI
-
         self._cfg = config
         self._credentials = None
 
@@ -69,20 +67,43 @@ class VertexLLM(BaseLLM):
             # Keep error explicit and early (enterprise-friendly).
             raise ValueError("VertexLLM requires vertex.project_id and vertex.location in Config")
 
-        self._model = ChatGoogleGenerativeAI(
-            model=chosen_model,
-            project=project_id,
-            location=location,
-            vertexai=True,
-            temperature=config.llm.temperature if temperature is None else temperature,
-            max_output_tokens=config.llm.max_output_tokens
-            if max_output_tokens is None
-            else max_output_tokens,
-            streaming=streaming,
-            credentials=self._credentials,
-            timeout=config.llm.timeout_sec,
-            max_retries=config.llm.max_retries,
-        )
+        # Prefer the Vertex-native LangChain integration when available.
+        # This avoids ctor-arg drift in langchain-google-genai and keeps auth on ADC.
+        try:
+            from langchain_google_vertexai import ChatVertexAI  # type: ignore[import-not-found]
+
+            self._model = ChatVertexAI(
+                model_name=chosen_model,
+                project=project_id,
+                location=location,
+                temperature=(config.llm.temperature if temperature is None else temperature),
+                max_output_tokens=(
+                    config.llm.max_output_tokens if max_output_tokens is None else max_output_tokens
+                ),
+                streaming=streaming,
+                credentials=self._credentials,
+            )
+        except ModuleNotFoundError:
+            # Fallback: langchain-google-genai in Vertex mode.
+            #
+            # IMPORTANT: This relies on `core.config.Config.load()` setting
+            # `GOOGLE_GENAI_USE_VERTEXAI=true` **before** model construction.
+            #
+            # Some versions of langchain-google-genai do not accept project/location ctor args,
+            # so we only pass portable args here.
+            from langchain_google_genai import ChatGoogleGenerativeAI
+
+            self._model = ChatGoogleGenerativeAI(
+                model=chosen_model,
+                temperature=(config.llm.temperature if temperature is None else temperature),
+                max_output_tokens=(
+                    config.llm.max_output_tokens if max_output_tokens is None else max_output_tokens
+                ),
+                streaming=streaming,
+                credentials=self._credentials,
+                timeout=config.llm.timeout_sec,
+                max_retries=config.llm.max_retries,
+            )
 
     async def generate(
         self,

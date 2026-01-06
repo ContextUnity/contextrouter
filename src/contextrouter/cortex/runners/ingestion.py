@@ -16,7 +16,11 @@ from typing import AsyncIterator, Literal, NotRequired, TypedDict, cast
 
 from contextrouter.core import TokenBuilder, UserCtx, get_core_config
 from contextrouter.cortex.graphs import rag_ingestion
-from contextrouter.cortex.graphs.rag_ingestion import IngestionJobSpec, IngestionRecipe, StageName
+from contextrouter.cortex.graphs.rag_ingestion import (
+    IngestionJobSpec,
+    IngestionRecipe,
+    StageName,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -194,11 +198,16 @@ async def invoke_ingestion(
 
     # Add langfuse callbacks for ingestion tracing (if available)
     from contextrouter.modules.observability import get_langfuse_callbacks
+
     callbacks = get_langfuse_callbacks(
         session_id=f"ingestion_{recipe.get('name', 'default') if isinstance(recipe, dict) else 'default'}",
         user_id=user_ctx.get("user_id") if user_ctx else None,
         platform="ingestion",
-        tags=["ingestion", recipe.get("name", "default")] if isinstance(recipe, dict) else ["ingestion"]
+        tags=(
+            ["ingestion", recipe.get("name", "default")]
+            if isinstance(recipe, dict)
+            else ["ingestion"]
+        ),
     )
     out = await graph.ainvoke(input_state, config={"callbacks": callbacks})
     if isinstance(out, dict):
@@ -295,15 +304,22 @@ async def stream_ingestion(
 
     # Add langfuse callbacks for ingestion tracing (if available)
     from contextrouter.modules.observability import get_langfuse_callbacks
+
     callbacks = get_langfuse_callbacks(
         session_id=f"ingestion_{recipe.get('name', 'default') if isinstance(recipe, dict) else 'default'}",
         user_id=user_ctx.get("user_id") if user_ctx else None,
         platform="ingestion",
-        tags=["ingestion", recipe.get("name", "default")] if isinstance(recipe, dict) else ["ingestion"]
+        tags=(
+            ["ingestion", recipe.get("name", "default")]
+            if isinstance(recipe, dict)
+            else ["ingestion"]
+        ),
     )
 
     try:
-        async for event in graph.astream_events(input_state, config={"callbacks": callbacks}, version="v2"):
+        async for event in graph.astream_events(
+            input_state, config={"callbacks": callbacks}, version="v2"
+        ):
             if not isinstance(event, dict):
                 continue
 

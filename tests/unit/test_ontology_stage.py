@@ -2,9 +2,8 @@ import json
 
 
 def test_build_ontology_from_taxonomy_writes_file(tmp_path):
-    from contextrouter.modules.transformers.ontology import build_ontology_from_taxonomy
-
     from contextrouter.modules.ingestion.rag.settings import RagIngestionConfig
+    from contextrouter.modules.transformers.ontology import build_ontology_from_taxonomy
 
     assets = tmp_path
     (assets / "output" / "_processing").mkdir(parents=True, exist_ok=True)

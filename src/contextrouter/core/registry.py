@@ -37,10 +37,12 @@ except ImportError:
     def register_embeddings(*args: Any, **kwargs: Any) -> None:
         pass
 
+
 # ---- Graph Registry -------------------------------------------------
 
 # Graph registry defined later in file, forward reference for now
 graph_registry: "Registry"
+
 
 def register_graph(name: str) -> Callable[[Callable[[], object]], Callable[[], object]]:
     """Decorator to register a custom graph builder.
@@ -57,10 +59,13 @@ def register_graph(name: str) -> Callable[[Callable[[], object]], Callable[[], o
             # Custom graph building logic
             return StateGraph(...)
     """
+
     def decorator(func: Callable[[], object]) -> Callable[[], object]:
         graph_registry.register(name, func)
         return func
+
     return decorator
+
 
 # ---- Factory Classes ------------------------------------------------
 
@@ -81,8 +86,14 @@ class ComponentFactory:
 
         # Fallback to built-in providers
         providers = {
-            "vertex": ("contextrouter.modules.providers.storage.vertex", "VertexProvider"),
-            "postgres": ("contextrouter.modules.providers.storage.postgres", "PostgresProvider"),
+            "vertex": (
+                "contextrouter.modules.providers.storage.vertex",
+                "VertexProvider",
+            ),
+            "postgres": (
+                "contextrouter.modules.providers.storage.postgres",
+                "PostgresProvider",
+            ),
             "gcs": ("contextrouter.modules.providers.storage.gcs", "GCSProvider"),
         }
 
@@ -103,7 +114,10 @@ class ComponentFactory:
         # Fallback to built-in connectors
         connectors = {
             "web": ("contextrouter.modules.connectors.web", "WebSearchConnector"),
-            "web_scraper": ("contextrouter.modules.connectors.web", "WebScraperConnector"),
+            "web_scraper": (
+                "contextrouter.modules.connectors.web",
+                "WebScraperConnector",
+            ),
             "file": ("contextrouter.modules.connectors.file", "FileConnector"),
             "rss": ("contextrouter.modules.connectors.rss", "RSSConnector"),
             "api": ("contextrouter.modules.connectors.api", "APIConnector"),
@@ -125,8 +139,14 @@ class ComponentFactory:
 
         # Fallback to built-in transformers
         transformers = {
-            "metadata_mapper": ("contextrouter.modules.transformers.metadata", "MetadataMapper"),
-            "summarizer": ("contextrouter.modules.transformers.summarization", "Summarizer"),
+            "metadata_mapper": (
+                "contextrouter.modules.transformers.metadata",
+                "MetadataMapper",
+            ),
+            "summarizer": (
+                "contextrouter.modules.transformers.summarization",
+                "Summarizer",
+            ),
         }
 
         if name not in transformers:

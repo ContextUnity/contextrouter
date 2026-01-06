@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import json
 import logging
-import pickle
 import threading
 from pathlib import Path
+
+from contextrouter.modules.ingestion.rag.graph.serialization import load_graph_secure
 
 LOGGER = logging.getLogger(__name__)
 
@@ -61,11 +62,12 @@ class GraphService:
         self._taxonomy_enabled = False
         self._ontology_enabled = False
 
-        # Load graph
+        # Load graph securely
         if graph_path and graph_path.exists():
             try:
-                with open(graph_path, "rb") as f:
-                    self.graph = pickle.load(f)
+                # Load graph with integrity verification
+                self.graph = load_graph_secure(graph_path)
+
                 # Build a fast case-insensitive node index for O(1) lookups.
                 self._node_index = {}
                 try:
@@ -85,6 +87,7 @@ class GraphService:
                 LOGGER.warning("Failed to load graph: %s. Graph service disabled.", e)
                 self._graph_enabled = False
                 self._node_index = {}
+                self.graph = None
         else:
             LOGGER.warning("Graph file not found: %s. Graph service disabled.", graph_path)
             self._graph_enabled = False
@@ -118,7 +121,8 @@ class GraphService:
                 self._taxonomy_enabled = False
         else:
             LOGGER.warning(
-                "Taxonomy file not found: %s. Taxonomy features disabled.", taxonomy_path
+                "Taxonomy file not found: %s. Taxonomy features disabled.",
+                taxonomy_path,
             )
             self._taxonomy_enabled = False
 
@@ -136,7 +140,10 @@ class GraphService:
                         str(x).strip() for x in labels if isinstance(x, str) and str(x).strip()
                     }
                 self._ontology_enabled = True
-                LOGGER.info("GraphService loaded ontology: fact_labels=%d", len(self._fact_labels))
+                LOGGER.info(
+                    "GraphService loaded ontology: fact_labels=%d",
+                    len(self._fact_labels),
+                )
             except Exception as e:
                 LOGGER.warning("Failed to load ontology: %s. Ontology features disabled.", e)
                 self._ontology_enabled = False

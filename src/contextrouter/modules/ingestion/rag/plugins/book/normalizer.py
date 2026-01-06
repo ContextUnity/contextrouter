@@ -54,8 +54,6 @@ class ContentNormalizer:
 
     def _is_header_footer(self, line: str) -> bool:
         """Check if line is a header or footer to be removed."""
-        line_lower = line.lower()
-
         # Check header patterns
         for pattern in self._header_patterns:
             if re.match(pattern, line, re.IGNORECASE):
@@ -96,7 +94,6 @@ class ContentNormalizer:
             """: "'",  # smart quotes
             """: "'",
             '"': '"',  # smart double quotes
-            '"': '"',
             "…": "...",  # ellipsis
             "–": "-",  # en dash
             "—": "-",  # em dash

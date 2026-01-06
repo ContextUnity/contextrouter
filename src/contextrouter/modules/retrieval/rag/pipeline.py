@@ -64,7 +64,9 @@ class RetrievalPipeline:
 
     async def execute(self, state: AgentState) -> RetrievalResult:
         cfg = get_rag_retrieval_settings()
-        user_query = (state.get("user_query") or get_last_user_query(state.get("messages", [])) or "").strip()
+        user_query = (
+            state.get("user_query") or get_last_user_query(state.get("messages", [])) or ""
+        ).strip()
         if not user_query:
             return RetrievalResult(retrieved_docs=[], citations=[], graph_facts=[])
 
@@ -166,8 +168,8 @@ class RetrievalPipeline:
         if isinstance(content, dict):
             try:
                 return RetrievedDoc.model_validate(content)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to validate RetrievedDoc from dict: %s", e)
         if isinstance(content, str) and content.strip():
             # Best-effort: unknown source type
             return RetrievedDoc(source_type="unknown", content=content)
@@ -185,7 +187,11 @@ class RetrievalPipeline:
             limit = int(cfg.general_retrieval_initial_count)
             tasks = [
                 self._base.execute(
-                    q, token=token, limit=limit, filters=None, providers=list(cfg.providers)
+                    q,
+                    token=token,
+                    limit=limit,
+                    filters=None,
+                    providers=list(cfg.providers),
                 )
                 for q in retrieval_queries
             ]
@@ -234,7 +240,11 @@ class RetrievalPipeline:
             fallback_limit = max(fallback_limit, int(sum(limits.values()) or 15))
             tasks = [
                 self._base.execute(
-                    q, token=token, limit=fallback_limit, filters=None, providers=list(cfg.providers)
+                    q,
+                    token=token,
+                    limit=fallback_limit,
+                    filters=None,
+                    providers=list(cfg.providers),
                 )
                 for q in retrieval_queries
             ]
@@ -300,7 +310,7 @@ class RetrievalPipeline:
         for d in docs:
             # Use hash for more efficient deduplication if content is large
             raw_key = f"{(d.url or '')}::{(d.snippet or '')}::{(d.content or '')}"
-            key = hashlib.md5(raw_key.encode("utf-8")).hexdigest()
+            key = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
             if key in seen:
                 continue
             seen.add(key)

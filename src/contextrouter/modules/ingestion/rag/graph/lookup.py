@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
-import pickle
 from pathlib import Path
 from typing import Any
 
 import networkx as nx
+
+from contextrouter.modules.ingestion.rag.graph.serialization import load_graph_secure
 
 LOGGER = logging.getLogger(__name__)
 
@@ -34,18 +35,19 @@ class GraphEnricher:
             self._graph_enabled = False
         else:
             try:
-                # Load graph using pickle
-                with open(graph_path, "rb") as f:
-                    self.graph = pickle.load(f)
+                # Load graph with integrity verification
+                self.graph = load_graph_secure(graph_path)
                 LOGGER.info(
-                    "Loaded graph: %d nodes, %d edges",
+                    "Loaded graph securely: %d nodes, %d edges",
                     self.graph.number_of_nodes(),
                     self.graph.number_of_edges(),
                 )
                 self._graph_enabled = True
             except Exception as e:
                 LOGGER.error(
-                    "Failed to load graph from %s: %s. Graph enrichment disabled.", graph_path, e
+                    "Failed to load graph from %s: %s. Graph enrichment disabled.",
+                    graph_path,
+                    e,
                 )
                 self.graph = nx.Graph()
                 self._graph_enabled = False

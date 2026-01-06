@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 from contextrouter.core.types import StructData, StructDataValue
 
 from ..core import RawData, ShadowRecord
+
+LOGGER = logging.getLogger(__name__)
 
 
 def write_raw_data_jsonl(items: list[RawData], path: Path, *, overwrite: bool = True) -> int:
@@ -33,7 +36,8 @@ def read_raw_data_jsonl(path: Path) -> list[RawData]:
             continue
         try:
             obj: StructDataValue = json.loads(line)
-        except Exception:
+        except Exception as e:
+            LOGGER.debug("Failed to parse JSON line: %s", e)
             continue
         if not isinstance(obj, dict):
             continue
@@ -77,7 +81,8 @@ def read_shadow_records_jsonl(path: Path) -> list[ShadowRecord]:
             continue
         try:
             obj: StructDataValue = json.loads(line)
-        except Exception:
+        except Exception as e:
+            LOGGER.debug("Failed to parse JSON line: %s", e)
             continue
         if not isinstance(obj, dict):
             continue
@@ -96,13 +101,17 @@ def read_shadow_records_jsonl(path: Path) -> list[ShadowRecord]:
                 id=rid,
                 input_text=input_text,
                 struct_data=struct_data,
-                citation_label=obj_dict.get("citation_label")
-                if isinstance(obj_dict.get("citation_label"), str)
-                else None,
-                title=obj_dict.get("title") if isinstance(obj_dict.get("title"), str) else None,
-                source_type=obj_dict.get("source_type")
-                if isinstance(obj_dict.get("source_type"), str)
-                else None,
+                citation_label=(
+                    obj_dict.get("citation_label")
+                    if isinstance(obj_dict.get("citation_label"), str)
+                    else None
+                ),
+                title=(obj_dict.get("title") if isinstance(obj_dict.get("title"), str) else None),
+                source_type=(
+                    obj_dict.get("source_type")
+                    if isinstance(obj_dict.get("source_type"), str)
+                    else None
+                ),
             )
         )
     return out

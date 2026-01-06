@@ -41,8 +41,8 @@ def _ensure_initialized() -> None:
             logger.debug("ThreadingInstrumentor enabled for context propagation")
         except ImportError:
             logger.debug("opentelemetry-instrumentation-threading not available")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to instrument threading for tracing: %s", e)
 
         from langfuse import get_client
 
@@ -74,7 +74,10 @@ def get_langfuse_callbacks(
                 CallbackHandler,  # type: ignore[import-not-found]
             )
         except ModuleNotFoundError as exc:
-            logger.info("Langfuse callback handler disabled (optional dependency missing): %s", exc)
+            logger.info(
+                "Langfuse callback handler disabled (optional dependency missing): %s",
+                exc,
+            )
             return []
 
         handler = CallbackHandler()
@@ -200,8 +203,8 @@ def retrieval_span(
             span_initialized = True
             try:
                 span.update(input=input_data or {})  # type: ignore[attr-defined]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to update span with input data: %s", e)
 
             try:
                 yield ctx
@@ -213,8 +216,8 @@ def retrieval_span(
 
             try:
                 span.update(output=ctx.get("output"))  # type: ignore[attr-defined]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to update span with output data: %s", e)
     except GeneratorExit:
         raise
     except Exception as e:

@@ -5,18 +5,19 @@ gcloud = "latest"
 
 [env]
 _.file = { path = ".env", tools = true }
+PYTHON = "$(mise which python)"
 
 [tasks.sync]
 description = "Install all dependencies (dev + vertex + ingestion + observability)"
-run = "uv sync --extra dev --extra vertex --extra ingestion --extra observability"
+run = "uv sync --dev --extra vertex --extra ingestion --extra observability"
 
 [tasks.lint]
 description = "Lint + format-check all code (Ruff)"
-run = "uv run ruff check src/contextrouter tests/ && uv run ruff format --check src/contextrouter tests/"
+run = "uv run ruff check src/contextrouter && uv run ruff format --check src/contextrouter"
 
 [tasks.format]
 description = "Format all code (Ruff)"
-run = "uv run ruff check --fix src/contextrouter tests/ && uv run ruff format src/contextrouter tests/"
+run = "uv run ruff check --fix src/contextrouter && uv run ruff format src/contextrouter"
 
 [tasks.test]
 description = "Run all tests"
@@ -25,6 +26,14 @@ run = "uv run python -m pytest tests/ -v"
 [tasks.test-unit]
 description = "Run unit tests only"
 run = "uv run python -m pytest tests/unit/ -v"
+
+[tasks.security]
+description = "Run security scan (Bandit)"
+run = "uv run bandit -c .bandit -r src/contextrouter"
+
+[tasks.check]
+description = "Run all checks (lint + security + test)"
+run = "mise run lint && mise run security && mise run test-unit"
 
 [tasks.ingest-preprocess]
 description = "Stage 1: Raw -> CleanText"

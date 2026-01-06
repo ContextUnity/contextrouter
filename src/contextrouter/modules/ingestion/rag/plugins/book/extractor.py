@@ -23,7 +23,7 @@ class PDFExtractor:
             return True
         except ImportError:
             try:
-                import pymupdf as fitz
+                import pymupdf as fitz  # noqa: F401 - dynamic import for availability check
 
                 return True
             except ImportError:

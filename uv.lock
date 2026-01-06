@@ -190,6 +190,21 @@ wheels = [
 ]
 
 [[package]]
+name = "bandit"
+version = "1.9.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "stevedore" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/cf/72/f704a97aac430aeb704fa16435dfa24fbeaf087d46724d0965eb1f756a2c/bandit-1.9.2.tar.gz", hash = "sha256:32410415cd93bf9c8b91972159d5cf1e7f063a9146d70345641cd3877de348ce", size = 4241659, upload-time = "2025-11-23T21:36:18.722Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/55/1a/5b0320642cca53a473e79c7d273071b5a9a8578f9e370b74da5daa2768d7/bandit-1.9.2-py3-none-any.whl", hash = "sha256:bda8d68610fc33a6e10b7a8f1d61d92c8f6c004051d5e946406be1fb1b16a868", size = 134377, upload-time = "2025-11-23T21:36:17.39Z" },
+]
+
+[[package]]
 name = "beautifulsoup4"
 version = "4.14.3"
 source = { registry = "https://pypi.org/simple" }
@@ -337,10 +352,11 @@ wheels = [
 
 [[package]]
 name = "contextrouter"
-version = "0.10.0"
+version = "0.10.3"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
+    { name = "joblib" },
     { name = "langchain-community", version = "0.3.31", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
     { name = "langchain-community", version = "0.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
     { name = "langchain-core", version = "0.3.81", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
@@ -365,6 +381,28 @@ all = [
     { name = "langchain-google-community", version = "3.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
     { name = "langchain-google-genai", version = "2.1.12", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
     { name = "langchain-google-genai", version = "4.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
+    { name = "langfuse" },
+    { name = "networkx" },
+    { name = "opentelemetry-instrumentation-threading" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "pymupdf-layout" },
+    { name = "pymupdf4llm" },
+    { name = "python-telegram-bot" },
+    { name = "sqlalchemy" },
+    { name = "trafilatura" },
+]
+all-experimental = [
+    { name = "beautifulsoup4" },
+    { name = "google-api-python-client" },
+    { name = "google-auth" },
+    { name = "google-auth-oauthlib" },
+    { name = "google-cloud-discoveryengine" },
+    { name = "google-cloud-firestore" },
+    { name = "google-cloud-storage" },
+    { name = "langchain-google-community", version = "2.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
+    { name = "langchain-google-community", version = "3.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
+    { name = "langchain-google-genai", version = "2.1.12", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
+    { name = "langchain-google-genai", version = "4.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
     { name = "langchain-litellm" },
     { name = "langfuse" },
     { name = "litellm" },
@@ -378,6 +416,7 @@ all = [
     { name = "trafilatura" },
 ]
 dev = [
+    { name = "joblib" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "ruff" },
@@ -417,17 +456,28 @@ vertex = [
     { name = "langchain-google-genai", version = "4.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "bandit" },
+    { name = "pre-commit" },
+    { name = "pytest" },
+    { name = "ruff" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "beautifulsoup4", marker = "extra == 'ingestion'", specifier = ">=4.12.0" },
     { name = "click", specifier = ">=8.0.0" },
-    { name = "contextrouter", extras = ["vertex", "storage", "integrations", "ingestion", "observability", "models"], marker = "extra == 'all'" },
+    { name = "contextrouter", extras = ["all", "models"], marker = "extra == 'all-experimental'" },
+    { name = "contextrouter", extras = ["vertex", "storage", "integrations", "ingestion", "observability"], marker = "extra == 'all'" },
     { name = "google-api-python-client", marker = "extra == 'integrations'", specifier = ">=2.100.0,<3.0.0" },
     { name = "google-auth", marker = "extra == 'integrations'", specifier = ">=2.25.0,<3.0.0" },
     { name = "google-auth-oauthlib", marker = "extra == 'integrations'", specifier = ">=1.2.0,<2.0.0" },
     { name = "google-cloud-discoveryengine", marker = "extra == 'vertex'", specifier = ">=0.13.0" },
     { name = "google-cloud-firestore", marker = "extra == 'storage'", specifier = ">=2.16.0" },
     { name = "google-cloud-storage", marker = "extra == 'storage'", specifier = ">=3.0.0" },
+    { name = "joblib", specifier = ">=1.5.3" },
+    { name = "joblib", marker = "extra == 'dev'", specifier = ">=1.4.0" },
     { name = "langchain-community", specifier = ">=0.3.0" },
     { name = "langchain-core", specifier = ">=0.3.0" },
     { name = "langchain-google-community", marker = "extra == 'vertex'", specifier = ">=2.0.0" },
@@ -438,20 +488,28 @@ requires-dist = [
     { name = "litellm", marker = "extra == 'models'", specifier = ">=1.80.11" },
     { name = "networkx", marker = "extra == 'ingestion'", specifier = ">=3.0" },
     { name = "opentelemetry-instrumentation-threading", marker = "extra == 'observability'", specifier = ">=0.48b0" },
-    { name = "pre-commit", marker = "extra == 'dev'" },
+    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.0.0" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'storage'", specifier = ">=3.1.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pymupdf-layout", marker = "extra == 'ingestion'", specifier = ">=0.0.0" },
     { name = "pymupdf4llm", marker = "extra == 'ingestion'", specifier = ">=0.0.10" },
-    { name = "pytest", marker = "extra == 'dev'" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "python-telegram-bot", marker = "extra == 'integrations'", specifier = ">=21.0" },
-    { name = "ruff", marker = "extra == 'dev'" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.0" },
     { name = "sqlalchemy", marker = "extra == 'storage'", specifier = ">=2.0.0" },
     { name = "tomli", specifier = ">=2.0.0" },
     { name = "trafilatura", marker = "extra == 'ingestion'", specifier = ">=1.6.0" },
 ]
-provides-extras = ["dev", "vertex", "storage", "integrations", "ingestion", "observability", "models", "all"]
+provides-extras = ["dev", "vertex", "storage", "integrations", "ingestion", "observability", "models", "all", "all-experimental"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "bandit", specifier = ">=1.9.2" },
+    { name = "pre-commit", specifier = ">=4.5.1" },
+    { name = "pytest", specifier = ">=8.0.0" },
+    { name = "ruff", specifier = ">=0.14.0" },
+]
 
 [[package]]
 name = "courlan"
@@ -1426,6 +1484,15 @@ wheels = [
 ]
 
 [[package]]
+name = "joblib"
+version = "1.5.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/41/f2/d34e8b3a08a9cc79a50b2208a93dce981fe615b64d5a4d4abee421d898df/joblib-1.5.3.tar.gz", hash = "sha256:8561a3269e6801106863fd0d6d84bb737be9e7631e33aaed3fb9ce5953688da3", size = 331603, upload-time = "2025-12-15T08:41:46.427Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7b/91/984aca2ec129e2757d1e4e3c81c3fcda9d0f85b74670a094cc443d9ee949/joblib-1.5.3-py3-none-any.whl", hash = "sha256:5fc3c5039fc5ca8c0276333a188bbd59d6b7ab37fe6632daa76bc7f9ec18e713", size = 309071, upload-time = "2025-12-15T08:41:44.973Z" },
+]
+
+[[package]]
 name = "jsonpatch"
 version = "1.33"
 source = { registry = "https://pypi.org/simple" }
@@ -2120,6 +2187,18 @@ wheels = [
 ]
 
 [[package]]
+name = "markdown-it-py"
+version = "4.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "mdurl" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5b/f5/4ec618ed16cc4f8fb3b701563655a69816155e79e24a17b651541804721d/markdown_it_py-4.0.0.tar.gz", hash = "sha256:cb0a2b4aa34f932c007117b194e945bd74e0ec24133ceb5bac59009cda1cb9f3", size = 73070, upload-time = "2025-08-11T12:57:52.854Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/94/54/e7d793b573f298e1c9013b8c4dade17d481164aa517d1d7148619c2cedbf/markdown_it_py-4.0.0-py3-none-any.whl", hash = "sha256:87327c59b172c5011896038353a81343b6754500a08cd7a4973bb48c6d578147", size = 87321, upload-time = "2025-08-11T12:57:51.923Z" },
+]
+
+[[package]]
 name = "markupsafe"
 version = "3.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2203,6 +2282,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ab/5e/5e53d26b42ab75491cda89b871dab9e97c840bf12c63ec58a1919710cd06/marshmallow-3.26.1.tar.gz", hash = "sha256:e6d8affb6cb61d39d26402096dc0aee12d5a26d490a121f118d2e81dc0719dc6", size = 221825, upload-time = "2025-02-03T15:32:25.093Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/34/75/51952c7b2d3873b44a0028b1bd26a25078c18f92f256608e8d1dc61b39fd/marshmallow-3.26.1-py3-none-any.whl", hash = "sha256:3350409f20a70a7e4e11a27661187b77cdcaeb20abca41c1454fe33636bea09c", size = 50878, upload-time = "2025-02-03T15:32:22.295Z" },
+]
+
+[[package]]
+name = "mdurl"
+version = "0.1.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d6/54/cfe61301667036ec958cb99bd3efefba235e65cdeb9c84d24a8293ba1d90/mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba", size = 8729, upload-time = "2022-08-14T12:40:10.846Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8", size = 9979, upload-time = "2022-08-14T12:40:09.779Z" },
 ]
 
 [[package]]
@@ -3411,6 +3499,19 @@ wheels = [
 ]
 
 [[package]]
+name = "rich"
+version = "14.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "markdown-it-py" },
+    { name = "pygments" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fb/d2/8920e102050a0de7bfabeb4c4614a49248cf8d5d7a8d01885fbb24dc767a/rich-14.2.0.tar.gz", hash = "sha256:73ff50c7c0c1c77c8243079283f4edb376f0f6442433aecb8ce7e6d0b92d1fe4", size = 219990, upload-time = "2025-10-09T14:16:53.064Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/25/7a/b0178788f8dc6cafce37a212c99565fa1fe7872c70c6c9c1e1a372d9d88f/rich-14.2.0-py3-none-any.whl", hash = "sha256:76bc51fe2e57d2b1be1f96c524b890b816e334ab4c1e45888799bfaab0021edd", size = 243393, upload-time = "2025-10-09T14:16:51.245Z" },
+]
+
+[[package]]
 name = "rpds-py"
 version = "0.30.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3632,6 +3733,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/42/39/f05f0ed54d451156bbed0e23eb0516bcad7cbb9f18b3bf219c786371b3f0/sqlalchemy-2.0.45-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:cd337d3526ec5298f67d6a30bbbe4ed7e5e68862f0bf6dd21d289f8d37b7d60b", size = 3522029, upload-time = "2025-12-09T22:13:32.09Z" },
     { url = "https://files.pythonhosted.org/packages/54/0f/d15398b98b65c2bce288d5ee3f7d0a81f77ab89d9456994d5c7cc8b2a9db/sqlalchemy-2.0.45-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:9a62b446b7d86a3909abbcd1cd3cc550a832f99c2bc37c5b22e1925438b9367b", size = 3475142, upload-time = "2025-12-09T22:13:33.739Z" },
     { url = "https://files.pythonhosted.org/packages/bf/e1/3ccb13c643399d22289c6a9786c1a91e3dcbb68bce4beb44926ac2c557bf/sqlalchemy-2.0.45-py3-none-any.whl", hash = "sha256:5225a288e4c8cc2308dbdd874edad6e7d0fd38eac1e9e5f23503425c8eee20d0", size = 1936672, upload-time = "2025-12-09T21:54:52.608Z" },
+]
+
+[[package]]
+name = "stevedore"
+version = "5.6.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/96/5b/496f8abebd10c3301129abba7ddafd46c71d799a70c44ab080323987c4c9/stevedore-5.6.0.tar.gz", hash = "sha256:f22d15c6ead40c5bbfa9ca54aa7e7b4a07d59b36ae03ed12ced1a54cf0b51945", size = 516074, upload-time = "2025-11-20T10:06:07.264Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f4/40/8561ce06dc46fd17242c7724ab25b257a2ac1b35f4ebf551b40ce6105cfa/stevedore-5.6.0-py3-none-any.whl", hash = "sha256:4a36dccefd7aeea0c70135526cecb7766c4c84c473b1af68db23d541b6dc1820", size = 54428, upload-time = "2025-11-20T10:06:05.946Z" },
 ]
 
 [[package]]

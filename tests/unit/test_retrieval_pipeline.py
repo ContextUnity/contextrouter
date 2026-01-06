@@ -45,18 +45,18 @@ def test_retrieval_pipeline_calls_vertex_and_builds_citations(monkeypatch) -> No
     )
     monkeypatch.setattr(
         "contextrouter.modules.retrieval.rag.pipeline.build_citations",
-        lambda docs, **_kw: [Citation(source_type=docs[0].source_type, title="t", content="c")]
-        if docs
-        else [],
+        lambda docs, **_kw: (
+            [Citation(source_type=docs[0].source_type, title="t", content="c")] if docs else []
+        ),
     )
 
-    from contextrouter.cortex.state import AgentState
     from contextrouter.core.tokens import BiscuitToken
+    from contextrouter.cortex.state import AgentState
 
     state: AgentState = {
         "user_query": "hello",
         "retrieval_queries": ["hello"],
-        "access_token": BiscuitToken(token_id="test-token", permissions=("RAG_READ",))
+        "access_token": BiscuitToken(token_id="test-token", permissions=("RAG_READ",)),
     }
     res = asyncio.run(RagPipeline().execute(state))
 

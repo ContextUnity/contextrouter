@@ -14,9 +14,7 @@ from __future__ import annotations
 import importlib
 import types
 
-# Import registry components directly to avoid circular imports
-from contextrouter.core import registry as registry_module
-from contextrouter.core.registry import agent_registry, graph_registry
+# Note: registry is imported dynamically via __getattr__ to avoid circular imports
 from contextrouter.core.bisquit import BisquitEnvelope
 from contextrouter.core.config import Config, get_core_config
 from contextrouter.core.flow_manager import FlowManager
@@ -28,6 +26,7 @@ from contextrouter.core.interfaces import (
     IRead,
     IWrite,
 )
+from contextrouter.core.registry import agent_registry, graph_registry
 from contextrouter.core.tokens import AccessManager, BiscuitToken, TokenBuilder
 from contextrouter.core.types import UserCtx
 

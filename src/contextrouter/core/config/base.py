@@ -3,17 +3,13 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Literal
 
-from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field
-
-try:  # Python 3.11+
-    pass  # type: ignore
-except Exception:  # pragma: no cover
-    pass  # type: ignore
+# Try to import tomllib for Python 3.11+ TOML support
+try:
+    import tomllib  # type: ignore[import-untyped]
+except ImportError:
+    # Fallback for older Python versions
+    tomllib = None  # type: ignore[assignment]
 
 
 # ---- Environment access (core-only) -----------------------------------------

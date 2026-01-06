@@ -131,18 +131,12 @@ def resolve_data_store_id(rag_db_name: str | None = None) -> str:
 
     name = raw.lower()
     if name == "blue":
-        resolved = (
-            _get_env_or_none("DATA_STORE_ID_BLUE")
-            or cfg_blue
-        ).strip()
+        resolved = (_get_env_or_none("DATA_STORE_ID_BLUE") or cfg_blue).strip()
         if not resolved:
             raise ValueError("RAG datastore is 'blue' but DATA_STORE_ID_BLUE is not set")
         return resolved
     if name == "green":
-        resolved = (
-            _get_env_or_none("DATA_STORE_ID_GREEN")
-            or cfg_green
-        ).strip()
+        resolved = (_get_env_or_none("DATA_STORE_ID_GREEN") or cfg_green).strip()
         if not resolved:
             raise ValueError("RAG datastore is 'green' but DATA_STORE_ID_GREEN is not set")
         return resolved

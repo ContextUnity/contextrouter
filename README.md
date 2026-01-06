@@ -1,7 +1,7 @@
 # ContextRouter
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE.md)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![LangGraph](https://img.shields.io/badge/orchestration-LangGraph-orange.svg)](https://github.com/langchain-ai/langgraph)
 [![GitHub](https://img.shields.io/badge/GitHub-ContextRouter-black.svg)](https://github.com/ContextRouter/contextrouter)
 [![Docs](https://img.shields.io/badge/docs-contextrouter.org-green.svg)](https://contextrouter.org)
@@ -288,6 +288,105 @@ Comprehensive documentation is available at [contextrouter.org](https://contextr
 - [Configuration Reference](https://contextrouter.org/configuration)
 - [Module Development](https://contextrouter.org/modules)
 - [Roadmap](https://contextrouter.org/roadmap)
+
+## Development Setup
+
+ContextRouter uses modern Python tooling for development. This section covers setting up your development environment.
+
+### Prerequisites
+
+- **mise**: Version manager for Python, Node.js, and other tools
+  ```bash
+  # Install mise (see https://mise.jdx.dev/getting-started.html)
+  curl https://mise.jdx.dev/install.sh | bash
+  ```
+
+- **Python 3.13+**: Required for development
+- **uv**: Fast Python package manager (installed via mise)
+
+### Quick Setup
+
+1. **Clone and enter the project:**
+   ```bash
+   git clone https://github.com/ContextRouter/contextrouter.git
+   cd contextrouter
+   ```
+
+2. **Install tools and dependencies:**
+   ```bash
+   # mise automatically installs Python 3.13 and uv
+   mise install
+
+   # Install all dependencies
+   mise run sync
+   ```
+
+3. **Verify setup:**
+   ```bash
+   # Run all checks (lint + security + tests)
+   mise run check
+   ```
+
+### Development Workflow
+
+ContextRouter provides convenient commands via mise:
+
+```bash
+# Install/update dependencies
+mise run sync
+
+# Code quality checks
+mise run lint          # Lint with Ruff
+mise run format        # Format code
+mise run security      # Security scan with Bandit
+
+# Testing
+mise run test          # Run all tests
+mise run test-unit     # Run unit tests only
+
+# Ingestion pipeline (development)
+mise run ingest-run    # Full pipeline: preprocess → structure → index → deploy
+
+# Cleanup
+mise run clean         # Remove cache files
+```
+
+### Python Version Management
+
+The project uses **Python 3.13** for development:
+
+- **mise** manages Python versions per project
+- **`.python-version`** specifies the required version
+- **`.mise.toml`** configures tools and tasks
+
+All commands automatically use the correct Python version - no manual activation needed!
+
+### Code Quality Tools
+
+- **Ruff**: Fast Python linter and formatter
+- **Bandit**: Security vulnerability scanner for Python
+- **pytest**: Testing framework with coverage reporting
+- **pre-commit**: Git hooks for automated quality checks
+
+### Pre-commit Hooks
+
+Enable pre-commit hooks for automatic code quality checks:
+
+```bash
+# Install git hooks
+mise run pre-commit install
+
+# Or run manually on all files
+mise run pre-commit run --all-files
+```
+
+### CI/CD
+
+GitHub Actions runs automated checks on every push/PR:
+- Python 3.13 environment
+- Full test suite with coverage
+- Security scanning
+- Code quality checks
 
 ## Contributing
 

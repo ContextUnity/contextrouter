@@ -60,7 +60,12 @@ class RetrievalOrchestrator:
                 # Skip unknown providers
                 continue
             if isinstance(inst, IRead):
-                calls.append((key, inst.read(query_text, limit=limit, filters=merged_filters, token=token)))
+                calls.append(
+                    (
+                        key,
+                        inst.read(query_text, limit=limit, filters=merged_filters, token=token),
+                    )
+                )
 
         if not calls:
             return RetrievalResult(envelopes=[])

@@ -175,7 +175,7 @@ def recipe_cache_key(recipe: IngestionRecipe) -> str:
     allow_unsafe = bool(recipe.get("allow_unsafe", False))
     payload = {"stages": list(stages), "allow_unsafe": allow_unsafe}
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()  # noqa: S324
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()  # noqa: S324
 
 
 _compiled_recipe_graphs: dict[str, object] = {}

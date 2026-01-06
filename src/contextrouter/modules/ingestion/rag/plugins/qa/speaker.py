@@ -57,7 +57,8 @@ class SpeakerProcessor:
 
                     if speaker and text_content:
                         interactions.append({"speaker": speaker, "text": text_content})
-            except Exception:
+            except Exception as e:
+                logger.debug("Failed to parse speaker line '%s': %s", line[:50], e)
                 continue
 
         return interactions

@@ -1,6 +1,6 @@
 [project]
 name = "contextrouter"
-version = "0.10.0"
+version = "0.10.3"
 description = "Modular LangGraph-powered agentic brain for multi-source knowledge orchestration and RAG"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -23,13 +23,15 @@ dependencies = [
     "pydantic>=2.0.0",
     "click>=8.0.0",
     "tomli>=2.0.0",
+    "joblib>=1.5.3",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pre-commit",
-    "ruff",
-    "pytest",
+    "pre-commit>=3.0.0",
+    "ruff>=0.14.0",
+    "pytest>=8.0.0",
+    "joblib>=1.4.0",
 ]
 # Core providers (most common)
 vertex = [
@@ -71,7 +73,14 @@ models = [
 ]
 # Everything (for development/testing)
 all = [
-    "contextrouter[vertex,storage,integrations,ingestion,observability,models]"
+    # NOTE: keep this extra resolvable/stable. `models` (litellm) currently conflicts
+    # with some Google stacks via `grpcio` pins, so it is intentionally excluded.
+    "contextrouter[vertex,storage,integrations,ingestion,observability]"
+]
+
+# Experimental / optional bundle (may be unsatisfiable depending on resolver + platform)
+all_experimental = [
+    "contextrouter[all,models]"
 ]
 
 [project.scripts]
@@ -91,3 +100,11 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
 ignore = ["E501"]
+
+[dependency-groups]
+dev = [
+    "bandit>=1.9.2",
+    "pre-commit>=4.5.1",
+    "pytest>=8.0.0",
+    "ruff>=0.14.0",
+]

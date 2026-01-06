@@ -13,7 +13,7 @@ from typing import Any
 
 from contextrouter.core.config import Config, FlowConfig, get_core_config
 from contextrouter.core.interfaces import BaseConnector, BaseProvider, BaseTransformer
-from contextrouter.core.registry import ComponentFactory
+from contextrouter.core.registry import ComponentFactory, Registry
 from contextrouter.core.tokens import AccessManager, BiscuitToken, TokenBuilder
 
 
@@ -92,7 +92,8 @@ class FlowManager:
                 # Core handles it: return content (legacy callers may still read .data).
                 results.append(cur.content)
             else:
-                assert provider is not None
+                if provider is None:
+                    raise ValueError("Provider must be initialized for sink operations")
                 # Enforce write permission + envelope token_id consistency at external sink boundary.
                 self._access.verify_envelope_write(cur, token)
                 results.append(await provider.sink(cur, token=token))

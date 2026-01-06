@@ -6,7 +6,10 @@ import hashlib
 import logging
 import re
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
+
+if TYPE_CHECKING:
+    from .transformer import QATransformer
 
 from contextrouter.core.config import Config
 from contextrouter.core.types import StructData
@@ -194,7 +197,12 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
                 raw.content
             )
 
-            LOGGER.info("  Processing QA session %d/%d: %s", idx, total_items, session_title[:50])
+            LOGGER.info(
+                "  Processing QA session %d/%d: %s",
+                idx,
+                total_items,
+                session_title[:50],
+            )
 
             # Extract session host/interviewer (identified during preprocess)
             # Used for fallback headers: "Speaker Name sharing thoughts on 'topic' with {Host}"
@@ -214,7 +222,10 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
                         text = it.get("text")
                         if isinstance(speaker, str) and isinstance(text, str) and text.strip():
                             interactions.append(
-                                {"speaker": speaker.strip() or "Unknown", "text": text.strip()}
+                                {
+                                    "speaker": speaker.strip() or "Unknown",
+                                    "text": text.strip(),
+                                }
                             )
 
             if interactions:
@@ -482,7 +493,8 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
                             LOGGER.debug("Question validated: %s", question_text[:50])
                         else:
                             LOGGER.debug(
-                                "Question rejected as non-question: %s...", raw_question_text[:50]
+                                "Question rejected as non-question: %s...",
+                                raw_question_text[:50],
                             )
                 except Exception as e:
                     LOGGER.debug("LLM question validation failed: %s", e)
@@ -529,7 +541,7 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
 
         # Generate stable ID
         record_id = (
-            f"qa-{hashlib.md5((session_title + answer_text).encode('utf-8')).hexdigest()[:16]}"
+            f"qa-{hashlib.sha256((session_title + answer_text).encode('utf-8')).hexdigest()[:16]}"
         )
 
         # Clean answer text: replace newlines with spaces for better UI display
@@ -733,9 +745,11 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
                 groups.append(
                     {
                         "combined_text": combined_text,
-                        "primary_speaker": current_speaker or current_group[0]["speaker"]
-                        if current_group
-                        else "Unknown",
+                        "primary_speaker": (
+                            current_speaker or current_group[0]["speaker"]
+                            if current_group
+                            else "Unknown"
+                        ),
                         "interactions": current_group.copy(),
                     }
                 )

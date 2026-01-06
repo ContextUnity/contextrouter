@@ -1,4 +1,4 @@
-import pickle
+from contextrouter.modules.ingestion.rag.graph.serialization import save_graph_secure
 
 
 def test_graph_service_case_insensitive_lookup(tmp_path):
@@ -9,8 +9,7 @@ def test_graph_service_case_insensitive_lookup(tmp_path):
     g = nx.Graph()
     g.add_edge("Alpha", "Beta", relation="CAUSES")
     p = tmp_path / "knowledge_graph.pickle"
-    with open(p, "wb") as f:
-        pickle.dump(g, f, protocol=pickle.HIGHEST_PROTOCOL)
+    save_graph_secure(g, p)
 
     svc = GraphService(graph_path=p, taxonomy_path=None)
     assert "Alpha" in svc.get_context("alpha")
@@ -24,12 +23,14 @@ def test_graph_service_ontology_filters_facts(tmp_path):
     import networkx as nx
 
     from contextrouter.cortex.services.graph import GraphService
+    from contextrouter.modules.ingestion.rag.graph.serialization import (
+        save_graph_secure,
+    )
 
     g = nx.Graph()
     g.add_edge("Alpha", "Beta", relation="RELATED_TO")
     gp = tmp_path / "knowledge_graph.pickle"
-    with open(gp, "wb") as f:
-        pickle.dump(g, f, protocol=pickle.HIGHEST_PROTOCOL)
+    save_graph_secure(g, gp)
 
     onto = {
         "version": "1.0",

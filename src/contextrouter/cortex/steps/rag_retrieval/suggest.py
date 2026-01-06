@@ -87,6 +87,7 @@ async def generate_search_suggestions(state: AgentState) -> dict[str, object]:
     )
 
     context = _build_suggestions_context(state)
+
     # NOTE: Don't use `str.format` here because the prompt templates contain JSON examples
     # with `{ ... }` which would be treated as formatting placeholders and crash.
     def _fill(template: str, *, query: str, ctx: str) -> str:

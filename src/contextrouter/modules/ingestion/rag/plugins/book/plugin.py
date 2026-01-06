@@ -22,7 +22,7 @@ except ImportError:
     # pymupdf_layout is optional; continue without it
     pass
 
-import pymupdf4llm
+# pymupdf4llm will be imported inside functions when needed
 
 # PyMuPDF (fitz) for TOC extraction - pymupdf4llm depends on it
 try:
@@ -35,8 +35,11 @@ except ImportError:
 
 from contextrouter.core.config import Config
 from contextrouter.modules.ingestion.rag.core.plugins import IngestionPlugin
+from contextrouter.modules.ingestion.rag.core.prompts import book_batch_analysis_prompt
 from contextrouter.modules.ingestion.rag.core.registry import register_plugin
 from contextrouter.modules.ingestion.rag.core.types import (
+    BookStructData,
+    GraphEnrichmentResult,
     IngestionMetadata,
     RawData,
     ShadowRecord,
@@ -101,7 +104,9 @@ def clean_book_content(text: str, *, keep_page_markers: bool = False) -> str:
     cleaned = text
 
     # Normalize ambiguous unicode early (smart quotes, dashes, nbsp, etc.)
-    from contextrouter.modules.ingestion.rag.core.utils import normalize_ambiguous_unicode
+    from contextrouter.modules.ingestion.rag.core.utils import (
+        normalize_ambiguous_unicode,
+    )
 
     cleaned = normalize_ambiguous_unicode(cleaned)
 
@@ -338,7 +343,9 @@ class BookPlugin(IngestionPlugin):
         title = title.strip()
 
         # Normalize unicode in title
-        from contextrouter.modules.ingestion.rag.core.utils import normalize_ambiguous_unicode
+        from contextrouter.modules.ingestion.rag.core.utils import (
+            normalize_ambiguous_unicode,
+        )
 
         title = normalize_ambiguous_unicode(title)
 
@@ -455,12 +462,19 @@ class BookPlugin(IngestionPlugin):
 
         Used when TOC is not available or empty.
         """
-        # Convert PDF to Markdown using pymupdf4llm with layout analysis
-        markdown_content = pymupdf4llm.to_markdown(
-            pdf_path,
-            write_images=False,
-            page_separators=True,  # Adds <page: N> markers
-        )
+        try:
+            import pymupdf4llm
+
+            # Convert PDF to Markdown using pymupdf4llm with layout analysis
+            markdown_content = pymupdf4llm.to_markdown(
+                pdf_path,
+                write_images=False,
+                page_separators=True,  # Adds <page: N> markers
+            )
+        except ImportError:
+            LOGGER.warning("pymupdf4llm not available, falling back to basic text extraction")
+            # Fallback to basic text extraction if pymupdf4llm is not available
+            markdown_content = self._extract_text_basic(pdf_path)
 
         # Clean markdown: normalize headers, filter testimonials, normalize unicode
         from contextrouter.modules.ingestion.rag.core.utils import (
@@ -491,7 +505,11 @@ class BookPlugin(IngestionPlugin):
         """
         chapters = []
         lines = markdown.split("\n")
-        current_chapter: dict[str, Any] = {"title": "Introduction", "content": "", "start_page": 1}
+        current_chapter: dict[str, Any] = {
+            "title": "Introduction",
+            "content": "",
+            "start_page": 1,
+        }
         current_page = 1
         highest_header_level = None  # Track the highest-level header we've seen
 
@@ -713,9 +731,9 @@ class BookPlugin(IngestionPlugin):
                     "book_title": book_title,
                     "chapter": clean_chapter,
                     "page_start": chunk_start_page,
-                    "page_end": chunk_end_page
-                    if chunk_end_page != chunk_start_page
-                    else None,  # Only set if different
+                    "page_end": (
+                        chunk_end_page if chunk_end_page != chunk_start_page else None
+                    ),  # Only set if different
                     # optional: small keyword list for UI/debugging
                     "keywords": clean_str_list(keywords, limit=10),
                     "quote": clean_quote,

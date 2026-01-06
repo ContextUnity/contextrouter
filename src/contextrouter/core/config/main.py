@@ -1,15 +1,27 @@
 """Main configuration class that combines all config modules."""
 
 import logging
+import os
 import tomllib
 from pathlib import Path
+from typing import Any
 
-from .base import *
-from .ingestion import *
-from .models import *
-from .paths import *
-from .providers import *
-from .security import *
+from dotenv import load_dotenv
+from pydantic import BaseModel, ConfigDict, Field
+
+from .base import get_bool_env, get_env
+from .ingestion import RAGConfig
+from .models import LLMConfig, ModelsConfig, RouterConfig
+from .paths import ConfigPaths
+from .providers import (
+    GoogleCSEConfig,
+    LangfuseConfig,
+    LiteLLMConfig,
+    OpenAIConfig,
+    PluginsConfig,
+    VertexConfig,
+)
+from .security import SecurityConfig
 
 
 class FlowConfig(BaseModel):
@@ -61,7 +73,7 @@ class Config(BaseModel):
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)
-    rag: RagConfig = Field(default_factory=RagConfig)
+    rag: RAGConfig = Field(default_factory=RAGConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     ingestion: RAGConfig = Field(default_factory=RAGConfig)
@@ -101,6 +113,10 @@ class Config(BaseModel):
         """Load configuration from files and environment."""
         load_dotenv()
 
+        # Optional explicit override for core config path.
+        # This is intentionally separate from ingestion's CONTEXTROUTER_CONFIG_PATH.
+        core_config_path = get_env("CONTEXTROUTER_CORE_CONFIG_PATH")
+
         # Force Vertex AI mode for langchain-google-genai / google-genai SDK.
         # Without this, the SDK may try API-key auth and fail with:
         # "Could not resolve API token from the environment".
@@ -111,17 +127,26 @@ class Config(BaseModel):
         paths = config.paths
 
         # Load from TOML if available
-        toml_path = Path(config_path) if config_path else paths.toml_config
+        toml_path = (
+            Path(config_path)
+            if config_path
+            else (Path(core_config_path).resolve() if core_config_path else paths.toml_config)
+        )
         if toml_path.exists():
             try:
                 with open(toml_path, "rb") as f:
-                    data = tomllib.load(f)
+                    toml_data = tomllib.load(f)
 
-                # Update config with TOML data
-                for key, value in data.items():
-                    if hasattr(config, key):
-                        setattr(config, key, value)
+                # Remove read-only properties (like 'paths')
+                toml_data.pop("paths", None)
 
+                # Merge TOML data with defaults using Pydantic
+                config_dict = config.model_dump()
+                config_dict.update(toml_data)
+                config = cls.model_validate(config_dict)
+
+                # Restore paths_cache to avoid recomputation
+                config.paths_cache = paths
                 config.loaded_from.append(toml_path)
             except Exception as e:
                 logger = logging.getLogger(__name__)

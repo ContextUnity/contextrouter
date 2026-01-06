@@ -39,7 +39,7 @@ def secured(permission: str | None = None) -> Callable:
     def decorator(func: Callable):
         @functools.wraps(func)
         async def wrapper(self, *args, **kwargs):
-            from contextrouter.core.exceptions import ProviderError, SecurityError
+            from contextrouter.core.exceptions import SecurityError
             from contextrouter.core.tokens import AccessManager
 
             token = kwargs.get("token")

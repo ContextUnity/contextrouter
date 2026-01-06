@@ -8,14 +8,20 @@ from typing import Any
 from contextrouter.core import BaseTransformer, BisquitEnvelope, Config
 from contextrouter.modules.ingestion.rag.config import get_assets_paths, load_config
 from contextrouter.modules.ingestion.rag.core.utils import resolve_workers
-from contextrouter.modules.ingestion.rag.processors.taxonomy_builder import build_taxonomy
+from contextrouter.modules.ingestion.rag.processors.taxonomy_builder import (
+    build_taxonomy,
+)
 from contextrouter.modules.ingestion.rag.settings import RagIngestionConfig
 
 LOGGER = logging.getLogger(__name__)
 
 
 def build_taxonomy_from_clean_text(
-    *, config: RagIngestionConfig, core_cfg: Config, force: bool = False, workers: int = 0
+    *,
+    config: RagIngestionConfig,
+    core_cfg: Config,
+    force: bool = False,
+    workers: int = 0,
 ) -> str:
     paths = get_assets_paths(config)
     clean_text_dir = paths["clean_text"]
@@ -98,8 +104,8 @@ class TaxonomyTransformer(BaseTransformer):
         try:
             paths = get_assets_paths(cfg)
             envelope.metadata.setdefault("assets_paths", {k: str(v) for k, v in paths.items()})
-        except Exception:
-            pass
+        except Exception as e:
+            LOGGER.debug("Failed to get assets paths: %s", e)
 
         return envelope
 

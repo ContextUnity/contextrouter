@@ -20,6 +20,7 @@ Make sure Langfuse is configured in your settings.toml:
 """
 
 import asyncio
+
 from langgraph.graph import END, START, StateGraph
 
 from contextrouter.cortex.state import AgentState, InputState, OutputState
@@ -32,8 +33,7 @@ def build_example_custom_graph():
     def analyze_query(state: AgentState) -> AgentState:
         """Analyze user query with detailed tracing."""
         with retrieval_span(
-            name="query_analysis",
-            input_data={"query": state["messages"][-1].content}
+            name="query_analysis", input_data={"query": state["messages"][-1].content}
         ) as span:
             query = state["messages"][-1].content
 
@@ -41,7 +41,7 @@ def build_example_custom_graph():
             analysis = {
                 "intent": "question" if "?" in query else "statement",
                 "topic": "ContextRouter" if "ContextRouter" in query else "general",
-                "complexity": "high" if len(query) > 50 else "low"
+                "complexity": "high" if len(query) > 50 else "low",
             }
 
             span.metadata = analysis
@@ -55,8 +55,8 @@ def build_example_custom_graph():
             name="context_retrieval",
             input_data={
                 "analysis": state.get("query_analysis"),
-                "query_length": len(state["messages"][-1].content)
-            }
+                "query_length": len(state["messages"][-1].content),
+            },
         ) as span:
             # Simulate retrieval from different sources
             analysis = state.get("query_analysis", {})
@@ -67,27 +67,27 @@ def build_example_custom_graph():
                     {
                         "content": "ContextRouter is a modular LangGraph-powered agent framework for RAG applications.",
                         "source": "documentation",
-                        "relevance": 0.95
+                        "relevance": 0.95,
                     },
                     {
                         "content": "Supports custom graphs, plugins, and enterprise integrations.",
                         "source": "features",
-                        "relevance": 0.87
-                    }
+                        "relevance": 0.87,
+                    },
                 ]
             else:
                 docs = [
                     {
                         "content": "General knowledge document about AI frameworks.",
                         "source": "general",
-                        "relevance": 0.65
+                        "relevance": 0.65,
                     }
                 ]
 
             span.metadata = {
                 "docs_found": len(docs),
-                "avg_relevance": sum(d["relevance"] for d in docs) / len(docs) if docs else 0,
-                "sources": list(set(d["source"] for d in docs))
+                "avg_relevance": (sum(d["relevance"] for d in docs) / len(docs) if docs else 0),
+                "sources": list(set(d["source"] for d in docs)),
             }
 
             state["retrieved_docs"] = docs
@@ -99,8 +99,8 @@ def build_example_custom_graph():
             name="response_generation",
             input_data={
                 "docs_count": len(state.get("retrieved_docs", [])),
-                "analysis": state.get("query_analysis")
-            }
+                "analysis": state.get("query_analysis"),
+            },
         ) as span:
             docs = state.get("retrieved_docs", [])
             analysis = state.get("query_analysis", {})
@@ -117,13 +117,14 @@ def build_example_custom_graph():
                 response_text += " This seems like a complex topic that might benefit from more specific details."
 
             from langchain_core.messages import AIMessage
+
             response = AIMessage(content=response_text)
             state["messages"].append(response)
 
             span.metadata = {
                 "response_length": len(response_text),
                 "docs_used": len(docs),
-                "response_type": "contextual" if docs else "fallback"
+                "response_type": "contextual" if docs else "fallback",
             }
 
             return state
@@ -155,20 +156,15 @@ async def run_traced_custom_graph():
         session_id="custom_tracing_example",
         user_id="demo_user",
         platform="custom_graph_example",
-        tags=["custom", "tracing", "example", "comprehensive"]
+        tags=["custom", "tracing", "example", "comprehensive"],
     )
 
     # Prepare input
     input_state = {
-        "messages": [
-            {
-                "role": "user",
-                "content": "What is ContextRouter and how does it work?"
-            }
-        ],
+        "messages": [{"role": "user", "content": "What is ContextRouter and how does it work?"}],
         "session_id": "custom_tracing_example",
         "platform": "custom_graph_example",
-        "citations_output": "raw"
+        "citations_output": "raw",
     }
 
     # Execute with full tracing
@@ -181,7 +177,7 @@ async def run_traced_custom_graph():
 
     # Show the response
     final_message = result["messages"][-1]
-    if hasattr(final_message, 'content'):
+    if hasattr(final_message, "content"):
         print(f"💬 Response: {final_message.content[:200]}...")
 
     return result
@@ -198,20 +194,18 @@ async def run_streaming_example():
         session_id="streaming_tracing_example",
         user_id="demo_user",
         platform="streaming_example",
-        tags=["streaming", "tracing", "example"]
+        tags=["streaming", "tracing", "example"],
     )
 
     input_state = {
         "messages": [{"role": "user", "content": "Explain RAG architecture"}],
         "session_id": "streaming_tracing_example",
-        "platform": "streaming_example"
+        "platform": "streaming_example",
     }
 
     print("📡 Streaming events with tracing...")
     async for event in graph.astream_events(
-        input_state,
-        config={"callbacks": callbacks},
-        version="v2"
+        input_state, config={"callbacks": callbacks}, version="v2"
     ):
         if event["event"] == "on_chain_end" and event.get("name") == "generate":
             print("🎯 Response generation completed!")

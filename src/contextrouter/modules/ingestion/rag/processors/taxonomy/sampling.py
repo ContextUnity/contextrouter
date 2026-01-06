@@ -74,7 +74,8 @@ def collect_clean_text_samples_from_dir(
                         continue
                     try:
                         obj: StructDataValue = json.loads(line)
-                    except Exception:
+                    except Exception as e:
+                        LOGGER.debug("Failed to parse JSON line: %s", e)
                         continue
                     if not isinstance(obj, dict):
                         continue
@@ -110,7 +111,8 @@ def collect_clean_text_samples_from_dir(
                         continue
                     try:
                         obj2: StructDataValue = json.loads(line)
-                    except Exception:
+                    except Exception as e:
+                        LOGGER.debug("Failed to parse JSON line: %s", e)
                         continue
                     if not isinstance(obj2, dict):
                         continue

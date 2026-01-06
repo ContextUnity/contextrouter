@@ -1,6 +1,6 @@
 """Provider configurations for external services."""
 
-from .base import *
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class VertexConfig(BaseModel):

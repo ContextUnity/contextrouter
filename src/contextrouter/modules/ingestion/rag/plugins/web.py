@@ -286,7 +286,12 @@ class WebPlugin(IngestionPlugin):
 
             with ThreadPoolExecutor(max_workers=max(1, concurrency)) as ex:
                 futs = {
-                    ex.submit(self._download_html, u, user_agent=user_agent, timeout_s=timeout_s): (
+                    ex.submit(
+                        self._download_html,
+                        u,
+                        user_agent=user_agent,
+                        timeout_s=timeout_s,
+                    ): (
                         u,
                         d,
                     )
@@ -296,8 +301,9 @@ class WebPlugin(IngestionPlugin):
                     u, d = futs[fut]
                     try:
                         html, final_url = fut.result()
-                    except Exception:
+                    except Exception as e:
                         # Skip this page; continue crawling.
+                        LOGGER.debug("Failed to download %s: %s", u, e)
                         continue
                     if not html.strip():
                         continue
@@ -426,6 +432,13 @@ class WebPlugin(IngestionPlugin):
         Returns:
             Tuple of (html_content, final_url). final_url is the normalized URL after redirects.
         """
+        # Validate URL scheme for security - only allow HTTP/HTTPS
+        parsed_url = urlparse(url)
+        if parsed_url.scheme not in ("http", "https"):
+            raise ValueError(
+                f"Unsupported URL scheme '{parsed_url.scheme}'. Only HTTP and HTTPS are allowed."
+            )
+
         req = Request(
             url,
             headers={

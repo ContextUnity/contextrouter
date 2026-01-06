@@ -1,6 +1,8 @@
 """Security configuration for ContextRouter."""
 
-from .base import *
+from pydantic import BaseModel, ConfigDict, Field
+
+from .base import DEFAULT_READ_PERMISSION, DEFAULT_WRITE_PERMISSION
 
 
 class SecurityPoliciesConfig(BaseModel):
