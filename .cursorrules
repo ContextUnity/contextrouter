@@ -72,3 +72,16 @@ as the return type for the formatter in `modules/retrieval/formatting/`.
 - **No Direct Imports**: `packages/contextrouter` must NOT import from external apps. It must remain a standalone kernel.
 - **Documentation**: Keep `AGENTS.md` files laconic and directive.
 
+## Agent Behavior Rules
+
+### ⚠️ **CRITICAL: NEVER make automatic commits without explicit user permission**
+- **NEVER** execute `git commit` commands on behalf of the user
+- **ONLY** suggest changes and provide commands for the user to run manually
+- **ALWAYS** ask for confirmation before making any commits
+- **RESPECT** user's codebase ownership - commits are their decision, not yours
+
+### Git Workflow
+- **STAGE** files with `git add` only when requested
+- **SUGGEST** commit messages but let user execute the commit
+- **PROVIDE** commands but don't execute them automatically
+- **WAIT** for explicit user approval before any git operations
