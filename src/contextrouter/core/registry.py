@@ -15,29 +15,6 @@ import logging
 from pathlib import Path
 from typing import Any, Callable
 
-# Import model registry functions for compatibility
-try:
-    from contextrouter.modules.models.registry import (
-        get_embeddings,
-        get_llm,
-        register_embeddings,
-        register_llm,
-    )
-except ImportError:
-    # Fallback if models registry is not available
-    def get_llm(*args: Any, **kwargs: Any) -> None:
-        raise NotImplementedError("Model registry not available")
-
-    def get_embeddings(*args: Any, **kwargs: Any) -> None:
-        raise NotImplementedError("Model registry not available")
-
-    def register_llm(*args: Any, **kwargs: Any) -> None:
-        pass
-
-    def register_embeddings(*args: Any, **kwargs: Any) -> None:
-        pass
-
-
 # ---- Graph Registry -------------------------------------------------
 
 # Graph registry defined later in file, forward reference for now
@@ -158,32 +135,6 @@ class ComponentFactory:
         return cls(**kwargs)
 
 
-# ---- Backward Compatibility Support ----
-
-# Keep minimal registry support for agent_registry since it's used by cortex
-BUILTIN_AGENTS: dict[str, str] = {
-    "extract_query": "contextrouter.cortex.nodes.rag_retrieval.extract.ExtractQueryAgent",
-    "detect_intent": "contextrouter.cortex.nodes.rag_retrieval.intent.DetectIntentAgent",
-    "retrieve": "contextrouter.cortex.nodes.rag_retrieval.retrieve.RetrieveAgent",
-    "suggest": "contextrouter.cortex.nodes.rag_retrieval.suggest.SuggestAgent",
-    "generate": "contextrouter.cortex.nodes.rag_retrieval.generate.GenerateAgent",
-    "routing": "contextrouter.cortex.nodes.rag_retrieval.routing.RoutingAgent",
-}
-
-BUILTIN_LLMS: dict[str, str] = {
-    "vertex/gemini-2.5-flash-lite": "contextrouter.modules.models.llm.vertex.VertexLLM",
-    "vertex/gemini-2.5-flash": "contextrouter.modules.models.llm.vertex.VertexLLM",
-    "vertex/gemini-2.5-pro": "contextrouter.modules.models.llm.vertex.VertexLLM",
-    "openai/gpt": "contextrouter.modules.models.llm.openai.OpenAILLM",
-    "hf/transformers": "contextrouter.modules.models.llm.huggingface.HuggingFaceLLM",
-}
-
-BUILTIN_EMBEDDINGS: dict[str, str] = {
-    "vertex/text-embedding": "contextrouter.modules.models.embeddings.vertex.VertexEmbeddings",
-    "hf/sentence-transformers": "contextrouter.modules.models.embeddings.huggingface.HuggingFaceEmbeddings",
-}
-
-
 def _lazy_import_object(path: str) -> object:
     """Import an object by dotted path."""
     raw = (path or "").strip()
@@ -201,7 +152,7 @@ def _lazy_import_object(path: str) -> object:
 
 
 class Registry:
-    """Minimal registry for backward compatibility."""
+    """Minimal registry for dynamic component registration."""
 
     def __init__(self, *, name: str, builtin_map: dict[str, str] | None = None) -> None:
         self._name = name
@@ -288,24 +239,6 @@ def register_transformer(name: str) -> Any:
     return decorator
 
 
-def register_formatter(name: str) -> Any:
-    """Register a formatter function (no-op)."""
-
-    def decorator(func: Any) -> Any:
-        return func
-
-    return decorator
-
-
-def register_tool(name: str) -> Any:
-    """Register a tool class (no-op)."""
-
-    def decorator(cls: Any) -> Any:
-        return cls
-
-    return decorator
-
-
 # ---- Dynamic Selection Functions ----
 
 
@@ -328,9 +261,6 @@ def select_transformer(name: str, **kwargs: Any) -> Any:
     if name in _transformer_registry:
         return _transformer_registry[name](**kwargs)
     return ComponentFactory.create_transformer(name, **kwargs)
-
-
-# Simplified registries - only keep essential ones
 
 
 # ---- Agent Registry ----

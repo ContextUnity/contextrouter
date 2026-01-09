@@ -1,6 +1,6 @@
 [project]
 name = "contextrouter"
-version = "0.10.4"
+version = "0.10.5"
 description = "Modular LangGraph-powered agentic brain for multi-source knowledge orchestration and RAG"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -32,12 +32,16 @@ dev = [
     "ruff>=0.14.0",
     "pytest>=8.0.0",
     "joblib>=1.4.0",
+    "twine>=5.0.0",
+    "build>=1.0.0",
 ]
 # Core providers (most common)
 vertex = [
     "langchain-google-genai>=2.0.0",
     "langchain-google-community>=2.0.0",
     "google-cloud-discoveryengine>=0.13.0",
+    "google-cloud-aiplatform>=1.0.0",  # For Vertex AI Search
+    "google-genai>=1.0.0",  # Modern SDK for native grounding (replaces deprecated vertexai.generative_models)
 ]
 # Extended providers
 storage = [

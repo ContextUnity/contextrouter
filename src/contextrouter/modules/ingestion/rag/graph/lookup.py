@@ -9,7 +9,7 @@ from typing import Any
 
 import networkx as nx
 
-from contextrouter.modules.ingestion.rag.graph.serialization import load_graph_secure
+from .serialization import load_graph_secure
 
 LOGGER = logging.getLogger(__name__)
 

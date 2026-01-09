@@ -2,6 +2,7 @@
 
 from .extract import ExtractQueryAgent
 from .generate import GenerateAgent
+from .grounding import GroundingAgent
 from .intent import DetectIntentAgent
 from .retrieve import RetrieveAgent
 from .routing import RoutingAgent
@@ -13,5 +14,6 @@ __all__ = [
     "RetrieveAgent",
     "SuggestAgent",
     "GenerateAgent",
+    "GroundingAgent",
     "RoutingAgent",
 ]

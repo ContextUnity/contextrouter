@@ -1,6 +1,6 @@
 # RAG Ingestion Pipeline
 
-Single canonical flow (persisted stage artifacts under `packages/contextrouter/assets/ingestion/`):
+Single canonical flow (persisted stage artifacts under `assets/ingestion/`):
 
 ```mermaid
 flowchart TD
@@ -64,7 +64,7 @@ All commands are under `contextrouter ingest ...`.
 
 ## Directory layout
 
-Under `packages/contextrouter/assets/ingestion/`:
+Under `assets/ingestion/`:
 
 - `source/<type>/...`: raw inputs
   - `source/video/`: Video transcript files (`.txt`, `.srt`, or `.vtt`)
@@ -197,4 +197,3 @@ The RAG ingestion engine (`modules/ingestion/rag/`) contains:
 - Shadow record enrichment
 
 All data flows through `BisquitEnvelope` for provenance tracking and security.
-

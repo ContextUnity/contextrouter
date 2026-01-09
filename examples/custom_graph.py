@@ -6,6 +6,7 @@ Place this file in a directory listed in your settings.toml [plugins].paths
 
 from __future__ import annotations
 
+from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
 
 from contextrouter.core.registry import register_graph
@@ -23,6 +24,7 @@ def build_simple_echo_graph():
         response_content = f"Echo: {last_message.content}"
 
         from langchain_core.messages import AIMessage
+
         response = AIMessage(content=response_content)
         state["messages"].append(response)
         return state
@@ -42,22 +44,21 @@ def build_custom_rag_graph():
     def custom_retrieve(state: AgentState) -> AgentState:
         """Custom retrieval logic with tracing."""
         with retrieval_span(
-            name="custom_retrieve",
-            input_data={"query": state["messages"][-1].content[:100]}
-        ) as span:
+            name="custom_retrieve", input_data={"query": state["messages"][-1].content[:100]}
+        ) as span_ctx:
             # Your custom retrieval implementation
             state["retrieved_docs"] = [
                 {"content": "Custom retrieved content", "title": "Custom Doc"}
             ]
-            span.metadata = {"docs_found": len(state["retrieved_docs"])}
+            span_ctx["metadata"] = {"docs_found": len(state["retrieved_docs"])}
+            span_ctx["output"] = {"docs": state["retrieved_docs"]}
             return state
 
     def custom_generate(state: AgentState) -> AgentState:
         """Custom generation logic with tracing."""
         with retrieval_span(
-            name="custom_generate",
-            input_data={"docs_count": len(state.get("retrieved_docs", []))}
-        ) as span:
+            name="custom_generate", input_data={"docs_count": len(state.get("retrieved_docs", []))}
+        ) as span_ctx:
             from langchain_core.messages import AIMessage
 
             # Simple generation based on retrieved docs
@@ -70,7 +71,8 @@ def build_custom_rag_graph():
             ai_message = AIMessage(content=response)
             state["messages"].append(ai_message)
 
-            span.metadata = {"response_length": len(response), "docs_used": len(docs)}
+            span_ctx["metadata"] = {"response_length": len(response), "docs_used": len(docs)}
+            span_ctx["output"] = {"response": response}
             return state
 
     workflow = StateGraph(AgentState, input=InputState, output=OutputState)
@@ -99,16 +101,14 @@ def run_custom_graph_with_tracing():
         session_id="custom_graph_example",
         user_id="example_user",
         platform="custom_plugin",
-        tags=["custom", "example", "tracing"]
+        tags=["custom", "example", "tracing"],
     )
 
     # Prepare input state
     input_state = {
-        "messages": [
-            {"role": "user", "content": "What is ContextRouter?"}
-        ],
+        "messages": [HumanMessage(content="What is ContextRouter?")],
         "session_id": "custom_graph_example",
-        "platform": "custom_plugin"
+        "platform": "custom_plugin",
     }
 
     # Execute with full tracing
@@ -125,21 +125,21 @@ def build_traced_custom_graph():
     def traced_retrieve_node(state: AgentState) -> AgentState:
         """Retrieval node with detailed tracing."""
         with retrieval_span(
-            name="traced_retrieve",
-            input_data={"query": state["messages"][-1].content[:100]}
-        ) as span:
+            name="traced_retrieve", input_data={"query": state["messages"][-1].content[:100]}
+        ) as span_ctx:
             # Your custom retrieval logic here
             state["retrieved_docs"] = [
                 {"content": "ContextRouter is a modular RAG framework", "title": "About"},
                 {"content": "Built with LangGraph for orchestration", "title": "Architecture"},
-                {"content": "Supports custom graphs and plugins", "title": "Extensibility"}
+                {"content": "Supports custom graphs and plugins", "title": "Extensibility"},
             ]
 
-            span.metadata = {
+            span_ctx["metadata"] = {
                 "retrieved_docs": len(state["retrieved_docs"]),
                 "search_time_ms": 150,
-                "sources": ["documentation", "features"]
+                "sources": ["documentation", "features"],
             }
+            span_ctx["output"] = {"docs": state["retrieved_docs"]}
             return state
 
     def traced_generate_node(state: AgentState) -> AgentState:
@@ -148,22 +148,26 @@ def build_traced_custom_graph():
             name="traced_generate",
             input_data={
                 "docs_count": len(state.get("retrieved_docs", [])),
-                "query": state["messages"][-1].content[:50]
-            }
-        ) as span:
+                "query": state["messages"][-1].content[:50],
+            },
+        ) as span_ctx:
             # Your custom generation logic here
             docs = state.get("retrieved_docs", [])
-            response_text = f"Based on {len(docs)} documents: ContextRouter is a powerful RAG framework!"
+            response_text = (
+                f"Based on {len(docs)} documents: ContextRouter is a powerful RAG framework!"
+            )
 
             from langchain_core.messages import AIMessage
+
             response = AIMessage(content=response_text)
             state["messages"].append(response)
 
-            span.metadata = {
+            span_ctx["metadata"] = {
                 "response_length": len(response_text),
                 "docs_used": len(docs),
-                "generation_time_ms": 200
+                "generation_time_ms": 200,
             }
+            span_ctx["output"] = {"response_text": response_text}
             return state
 
     workflow = StateGraph(AgentState, input=InputState, output=OutputState)

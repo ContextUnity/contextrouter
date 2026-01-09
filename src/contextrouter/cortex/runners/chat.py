@@ -125,6 +125,7 @@ async def invoke_agent(
     style_prompt: str = "",
     no_results_prompt: str = "",
     rag_system_prompt_override: str = "",
+    rag_filter: str = "",
     runtime_settings: RuntimeRagSettings | None = None,
     enable_suggestions: bool = True,
 ) -> dict[str, object]:
@@ -150,6 +151,7 @@ async def invoke_agent(
         "style_prompt": style_prompt,
         "no_results_prompt": no_results_prompt,
         "rag_system_prompt_override": rag_system_prompt_override,
+        "rag_filter": rag_filter,
         "enable_suggestions": enable_suggestions,
     }
 
@@ -205,6 +207,7 @@ async def stream_agent(
     no_results_prompt: str = "",
     rag_system_prompt_override: str = "",
     search_suggestions_prompt_override: str = "",
+    rag_filter: str = "",
     enable_suggestions: bool = True,
     suggestions_model: str = "",
     enable_web_search: bool = True,
@@ -249,6 +252,7 @@ async def stream_agent(
         "no_results_prompt": no_results_prompt,
         "rag_system_prompt_override": rag_system_prompt_override,
         "search_suggestions_prompt_override": search_suggestions_prompt_override,
+        "rag_filter": rag_filter,
     }
     if core_cfg.security.enabled:
         builder = TokenBuilder(enabled=True, private_key_path=core_cfg.security.private_key_path)

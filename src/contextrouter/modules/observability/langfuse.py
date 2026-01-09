@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 from contextlib import contextmanager
 from typing import Generator
@@ -11,11 +12,28 @@ from contextrouter.core.config import get_core_config
 logger = logging.getLogger(__name__)
 
 _initialized = False
+_warned_missing_langfuse = False
 
 
 def _enabled() -> bool:
     cfg = get_core_config()
-    return bool(cfg.langfuse.public_key and cfg.langfuse.secret_key)
+    enabled_by_keys = bool(cfg.langfuse.public_key and cfg.langfuse.secret_key)
+    if not enabled_by_keys:
+        return False
+
+    # Langfuse is an optional dependency (installed via `contextrouter[observability]`).
+    # If users set keys but didn't install the extra, degrade gracefully.
+    if importlib.util.find_spec("langfuse") is None:
+        global _warned_missing_langfuse
+        if not _warned_missing_langfuse:
+            _warned_missing_langfuse = True
+            logger.warning(
+                "Langfuse keys are set but the `langfuse` package is not installed. "
+                "Install with `pip install contextrouter[observability]` to enable tracing."
+            )
+        return False
+
+    return True
 
 
 def _get_environment() -> str:
@@ -44,7 +62,7 @@ def _ensure_initialized() -> None:
         except Exception as e:
             logger.warning("Failed to instrument threading for tracing: %s", e)
 
-        from langfuse import get_client
+        from langfuse import get_client  # type: ignore[import-not-found]
 
         lf = get_client()
         if not lf.auth_check():
@@ -70,7 +88,7 @@ def get_langfuse_callbacks(
     try:
         _ensure_initialized()
         try:
-            from langfuse.langchain import (
+            from langfuse.langchain import (  # type: ignore[import-not-found]
                 CallbackHandler,  # type: ignore[import-not-found]
             )
         except ModuleNotFoundError as exc:
@@ -127,7 +145,7 @@ def trace_context(
 
     try:
         _ensure_initialized()
-        from langfuse import get_client, propagate_attributes
+        from langfuse import get_client, propagate_attributes  # type: ignore[import-not-found]
 
         lf = get_client()
     except Exception as e:
@@ -188,7 +206,10 @@ def retrieval_span(
 
     Callers may mutate the yielded dict (commonly `ctx["output"] = {...}`).
     """
-    ctx: dict[str, object] = {"output": None}
+    # Callers may set:
+    # - ctx["output"]: JSON-serializable span output
+    # - ctx["metadata"]: JSON-serializable span metadata
+    ctx: dict[str, object] = {"output": None, "metadata": None}
     if not _enabled():
         yield ctx
         return
@@ -196,7 +217,7 @@ def retrieval_span(
     span_initialized = False
     try:
         _ensure_initialized()
-        from langfuse import get_client
+        from langfuse import get_client  # type: ignore[import-not-found]
 
         lf = get_client()
         with lf.start_as_current_observation(as_type="span", name=name) as span:
@@ -218,6 +239,11 @@ def retrieval_span(
                 span.update(output=ctx.get("output"))  # type: ignore[attr-defined]
             except Exception as e:
                 logger.debug("Failed to update span with output data: %s", e)
+            try:
+                if ctx.get("metadata") is not None:
+                    span.update(metadata=ctx.get("metadata"))  # type: ignore[attr-defined]
+            except Exception as e:
+                logger.debug("Failed to update span with metadata: %s", e)
     except GeneratorExit:
         raise
     except Exception as e:
@@ -232,7 +258,7 @@ def flush() -> None:
     if not _enabled():
         return
     try:
-        from langfuse import get_client
+        from langfuse import get_client  # type: ignore[import-not-found]
 
         get_client().flush()
     except Exception:

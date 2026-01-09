@@ -61,6 +61,9 @@ class InputState(TypedDict, total=False):
     rag_system_prompt_override: str
     search_suggestions_prompt_override: str
 
+    # Grounding filter (hard filter for VertexAISearch, e.g., "source_type: ANY('book', 'video')")
+    rag_filter: str
+
     # Output shaping
     citations_output: str
     citations_allowed_types: list[str]
@@ -110,6 +113,10 @@ class AgentState(InputState, total=False):
     taxonomy_categories: list[str]
     taxonomy_concepts: list[str]
     graph_facts: list[str]
+
+    # Grounding fields (for vertex_grounding provider)
+    grounding_response: str
+    grounding_citations: list[Citation]
 
     no_results_prompt: str
     style_prompt: str

@@ -66,7 +66,7 @@ def llm_generate_tsv(
     """
     import time
 
-    from contextrouter.modules.ingestion.rag.utils.llm import llm_generate
+    from ..utils.llm import llm_generate
 
     for attempt in range(retries):
         try:

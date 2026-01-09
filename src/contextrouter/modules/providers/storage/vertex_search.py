@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import cast
 
 from contextrouter.core.config import get_core_config
 from contextrouter.core.exceptions import ProviderError
@@ -21,46 +20,27 @@ from contextrouter.modules.retrieval.rag.settings import get_effective_data_stor
 
 logger = logging.getLogger(__name__)
 
-_async_client = None
+_async_clients: dict[str, object] = {}
 
 
-def _get_async_client():
-    global _async_client
-    if _async_client is None:
-        from google.cloud import discoveryengine_v1 as discoveryengine
+def _endpoint_for_location(location: str) -> str:
+    """Resolve Discovery Engine API endpoint for a given location.
 
-        _async_client = discoveryengine.SearchServiceAsyncClient()
-        logger.debug("Created singleton async SearchServiceAsyncClient")
-    return _async_client
-
-
-def _build_search_request(
-    query: str,
-    max_results: int,
-    source_type_filter: str | None,
-    serving_config: str,
-):
-    from google.cloud import discoveryengine_v1 as discoveryengine
-
-    filter_expr = f'source_type: ANY("{source_type_filter}")' if source_type_filter else ""
-    return discoveryengine.SearchRequest(
-        serving_config=serving_config,
-        query=query,
-        page_size=max_results,
-        filter=filter_expr,
-        content_search_spec=discoveryengine.SearchRequest.ContentSearchSpec(
-            snippet_spec=discoveryengine.SearchRequest.ContentSearchSpec.SnippetSpec(
-                return_snippet=True,
-            ),
-            extractive_content_spec=discoveryengine.SearchRequest.ContentSearchSpec.ExtractiveContentSpec(
-                max_extractive_answer_count=3,
-                max_extractive_segment_count=3,
-            ),
-        ),
-    )
+    Discovery Engine requires regional endpoints for regional resources:
+    - location="us"  -> "us-discoveryengine.googleapis.com"
+    - location="eu"  -> "eu-discoveryengine.googleapis.com"
+    - location="global" -> "discoveryengine.googleapis.com"
+    """
+    loc = (location or "").strip().lower()
+    if not loc or loc == "global":
+        return "discoveryengine.googleapis.com"
+    return f"{loc}-discoveryengine.googleapis.com"
 
 
 def _proto_to_dict(proto_obj: object) -> object:
+    """Convert protobuf object to dict."""
+    from typing import cast
+
     from google.protobuf.json_format import (
         MessageToDict,  # type: ignore[import-not-found]
     )
@@ -71,7 +51,6 @@ def _proto_to_dict(proto_obj: object) -> object:
         try:
             return MessageToDict(proto_obj, preserving_proto_field_name=True)
         except Exception as e:
-            # Fallback for proto conversion issues
             logger.debug("MessageToDict failed, trying fallback conversion: %s", e)
     if hasattr(proto_obj, "items"):
         try:
@@ -89,6 +68,7 @@ def _proto_to_dict(proto_obj: object) -> object:
 
 
 def _parse_search_result(result: object) -> RetrievedDoc | None:
+    """Parse Discovery Engine search result to RetrievedDoc."""
     try:
         doc = getattr(result, "document", None)
         if doc is None:
@@ -179,6 +159,46 @@ def _parse_search_result(result: object) -> RetrievedDoc | None:
         return None
 
 
+def _get_async_client(*, api_endpoint: str):
+    """Get or create async Discovery Engine client."""
+    global _async_clients
+    ep = (api_endpoint or "").strip() or "discoveryengine.googleapis.com"
+    if ep not in _async_clients:
+        from google.cloud import discoveryengine_v1 as discoveryengine
+
+        _async_clients[ep] = discoveryengine.SearchServiceAsyncClient(
+            client_options={"api_endpoint": ep}
+        )
+        logger.debug("Created async SearchServiceAsyncClient (endpoint=%s)", ep)
+    return _async_clients[ep]
+
+
+def _build_search_request(
+    query: str,
+    max_results: int,
+    source_type_filter: str | None,
+    serving_config: str,
+):
+    from google.cloud import discoveryengine_v1 as discoveryengine
+
+    filter_expr = f'source_type: ANY("{source_type_filter}")' if source_type_filter else ""
+    return discoveryengine.SearchRequest(
+        serving_config=serving_config,
+        query=query,
+        page_size=max_results,
+        filter=filter_expr,
+        content_search_spec=discoveryengine.SearchRequest.ContentSearchSpec(
+            snippet_spec=discoveryengine.SearchRequest.ContentSearchSpec.SnippetSpec(
+                return_snippet=True,
+            ),
+            extractive_content_spec=discoveryengine.SearchRequest.ContentSearchSpec.ExtractiveContentSpec(
+                max_extractive_answer_count=1,  # Reduced from 3 for lower latency
+                max_extractive_segment_count=1,  # Reduced from 3 for lower latency
+            ),
+        ),
+    )
+
+
 async def search_vertex_ai_async(
     *,
     query: str,
@@ -211,6 +231,17 @@ async def search_vertex_ai_async(
         f"/collections/default_collection"
         f"/dataStores/{data_store_id}/servingConfigs/default_search"
     )
+    api_endpoint = _endpoint_for_location(location)
+
+    logger.info(
+        "Vertex AI Search START: query=%r datastore=%s location=%s endpoint=%s max_results=%d source_type=%s",
+        query[:80],
+        data_store_id,
+        location,
+        api_endpoint,
+        max_results,
+        source_type_filter or "all",
+    )
 
     with retrieval_span(
         name="vertex_search",
@@ -218,11 +249,14 @@ async def search_vertex_ai_async(
             "query": query,
             "source_type": source_type_filter,
             "max_results": max_results,
+            "location": location,
+            "api_endpoint": api_endpoint,
+            "data_store_id": data_store_id,
         },
     ) as span_ctx:
         try:
             t0 = time.perf_counter()
-            client = _get_async_client()
+            client = _get_async_client(api_endpoint=api_endpoint)
             request = _build_search_request(query, max_results, source_type_filter, serving_config)
 
             response = await client.search(request)
@@ -234,6 +268,26 @@ async def search_vertex_ai_async(
                     break
 
             elapsed_ms = (time.perf_counter() - t0) * 1000
+            # Calculate relevance stats
+            relevance_scores = [d.relevance for d in results if hasattr(d, "relevance")]
+            avg_relevance = (
+                sum(relevance_scores) / len(relevance_scores) if relevance_scores else 0.0
+            )
+            max_relevance = max(relevance_scores) if relevance_scores else 0.0
+            non_zero_count = sum(1 for r in relevance_scores if r > 0.0)
+
+            logger.debug(
+                "Vertex AI Search COMPLETE: query=%r datastore=%s results=%d elapsed_ms=%.1f "
+                "avg_relevance=%.3f max_relevance=%.3f non_zero_relevance=%d/%d",
+                query[:80],
+                data_store_id,
+                len(results),
+                elapsed_ms,
+                avg_relevance,
+                max_relevance,
+                non_zero_count,
+                len(relevance_scores),
+            )
             span_ctx["output"] = {"count": len(results), "elapsed_ms": elapsed_ms}
             return results
         except Exception as e:

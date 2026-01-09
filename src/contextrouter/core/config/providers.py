@@ -14,7 +14,7 @@ class VertexConfig(BaseModel):
     # Preferred names:
     # - discovery_engine_location: location for Discovery Engine (Vertex AI Search)
     # - data_store_location: alias for orgs that think in datastore terms
-    discovery_engine_location: str = "global"
+    discovery_engine_location: str = "global"  # Default, can be overridden by env
     data_store_location: str = ""  # optional override
     # Credentials can be loaded from:
     # 1. GOOGLE_APPLICATION_CREDENTIALS env var (ADC)
@@ -30,10 +30,21 @@ class OpenAIConfig(BaseModel):
 
 
 class GoogleCSEConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    # Support `cx` key in TOML (`google_cse.cx`) while keeping a more descriptive field name internally.
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
+    enabled: bool = False
     api_key: str = ""
-    search_engine_id: str = ""
+    search_engine_id: str = Field(default="", alias="cx")
+
+    @property
+    def cx(self) -> str:
+        """Compatibility alias for Google CSE search engine id (cx)."""
+        return self.search_engine_id
+
+    @cx.setter
+    def cx(self, v: str) -> None:
+        self.search_engine_id = v
 
 
 class LangfuseConfig(BaseModel):

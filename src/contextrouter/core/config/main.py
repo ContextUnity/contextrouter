@@ -1,7 +1,6 @@
 """Main configuration class that combines all config modules."""
 
 import logging
-import os
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -9,7 +8,7 @@ from typing import Any
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
 
-from .base import get_bool_env, get_env
+from .base import get_bool_env, get_env, set_env_default
 from .ingestion import RAGConfig
 from .models import LLMConfig, ModelsConfig, RouterConfig
 from .paths import ConfigPaths
@@ -119,7 +118,7 @@ class Config(BaseModel):
         # Without this, the SDK may try API-key auth and fail with:
         # "Could not resolve API token from the environment".
         # Must be set before any ChatGoogleGenerativeAI instance is created.
-        os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "true")
+        set_env_default("GOOGLE_GENAI_USE_VERTEXAI", "true")
 
         config = cls()
         paths = config.paths
@@ -170,9 +169,9 @@ class Config(BaseModel):
             self.models.no_results_llm = no_results_val
 
         # Vertex configuration
-        if project_id := get_env("CONTEXTROUTER_VERTEX_PROJECT_ID") or get_env("PROJECT_ID"):
+        if project_id := get_env("CONTEXTROUTER_VERTEX_PROJECT_ID"):
             self.vertex.project_id = project_id
-        if location := get_env("CONTEXTROUTER_VERTEX_LOCATION") or get_env("LOCATION"):
+        if location := get_env("CONTEXTROUTER_VERTEX_LOCATION"):
             self.vertex.location = location
         # Vertex AI Search / Discovery Engine location (separate from Vertex LLM region).
         if v := get_env("CONTEXTROUTER_VERTEX_DISCOVERY_ENGINE_LOCATION"):

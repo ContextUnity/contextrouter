@@ -17,6 +17,7 @@ from contextrouter.core import (
     BisquitEnvelope,
     get_core_config,
 )
+from contextrouter.core.config import get_bool_env
 from contextrouter.modules.observability import retrieval_span
 from contextrouter.modules.retrieval.rag.models import RetrievedDoc
 
@@ -141,9 +142,26 @@ class WebSearchConnector(BaseConnector):
         ) as _span:
             t0 = time.perf_counter()
             raw = _run_all_domains(self._query, english_hint=False)
+            debug_web = bool(get_bool_env("DEBUG_WEB_SEARCH"))
+            if debug_web and raw:
+                preview = []
+                for r in raw[: min(5, len(raw))]:
+                    if not isinstance(r, dict):
+                        continue
+                    link = _normalize_http_url(r.get("link"), r.get("url") or r.get("formattedUrl"))
+                    preview.append(
+                        {
+                            "title": _safe_preview(r.get("title"), 120),
+                            "url": _safe_preview(link, 160),
+                            "snippet": _safe_preview(r.get("snippet") or r.get("content"), 120),
+                        }
+                    )
+                logger.info("DEBUG_WEB_SEARCH: raw CSE preview=%s", preview)
 
             def _extract_docs(raw_results: list[dict[str, object]]) -> list[RetrievedDoc]:
                 docs: list[RetrievedDoc] = []
+                invalid_links: list[object] = []
+                rejected: list[tuple[str, str]] = []
                 for r in raw_results or []:
                     if not isinstance(r, dict):
                         continue
@@ -151,9 +169,11 @@ class WebSearchConnector(BaseConnector):
                         continue
                     link = _normalize_http_url(r.get("link"), r.get("url") or r.get("formattedUrl"))
                     if not link:
+                        invalid_links.append(r.get("link") or r.get("url") or r.get("formattedUrl"))
                         continue
                     host = _host_for_url(link)
                     if not _is_allowed_domain(host, self._allowed_domains):
+                        rejected.append((host, link))
                         continue
                     title = r.get("title")
                     snippet = r.get("snippet") or r.get("content") or ""
@@ -164,6 +184,16 @@ class WebSearchConnector(BaseConnector):
                             url=link,
                             content=str(snippet),
                         )
+                    )
+                # Filter-to-zero diagnostics (always on).
+                if raw_results and not docs:
+                    logger.warning(
+                        "CSE returned results but all were filtered out (invalid_links=%d rejected_domains=%d). "
+                        "sample_invalid=%s sample_rejected=%s",
+                        len(invalid_links),
+                        len(rejected),
+                        [_safe_preview(x, 140) for x in invalid_links[:3]],
+                        [{"host": h, "url": u} for (h, u) in rejected[:3]],
                     )
                 return docs
 

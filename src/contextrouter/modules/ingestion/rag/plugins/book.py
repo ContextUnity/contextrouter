@@ -34,17 +34,18 @@ except ImportError:
         fitz = None  # Fallback to markdown parsing if not available
 
 from contextrouter.core.config import Config
-from contextrouter.modules.ingestion.rag.core.plugins import IngestionPlugin
-from contextrouter.modules.ingestion.rag.core.prompts import book_batch_analysis_prompt
-from contextrouter.modules.ingestion.rag.core.registry import register_plugin
-from contextrouter.modules.ingestion.rag.core.types import (
+
+from ..core.plugins import IngestionPlugin
+from ..core.prompts import book_batch_analysis_prompt
+from ..core.registry import register_plugin
+from ..core.types import (
     BookStructData,
     GraphEnrichmentResult,
     IngestionMetadata,
     RawData,
     ShadowRecord,
 )
-from contextrouter.modules.ingestion.rag.core.utils import (
+from ..core.utils import (
     clean_str_list,
     get_graph_enrichment,
     llm_generate_tsv,
@@ -52,7 +53,6 @@ from contextrouter.modules.ingestion.rag.core.utils import (
     normalize_clean_text,
     parse_tsv_line,
 )
-
 from ..settings import RagIngestionConfig
 from ..utils.llm import MODEL_FLASH
 from ..utils.records import generate_id
@@ -629,7 +629,7 @@ class BookPlugin(IngestionPlugin):
 
         # Read LLM topic extraction settings
         if config is None:
-            from contextrouter.modules.ingestion.rag.config import load_config
+            from ..config import load_config
 
             config = load_config()
         llm_topic_extraction_enabled = config.book.llm_topic_extraction_enabled

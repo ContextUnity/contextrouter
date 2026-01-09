@@ -55,6 +55,7 @@ def _build_suggestions_context(state: AgentState, *, max_docs: int = 12) -> str:
 
 async def generate_search_suggestions(state: AgentState) -> dict[str, object]:
     """Generate search suggestions for the next user turn."""
+
     enabled = state.get("enable_suggestions", True)
     if not enabled:
         return {"search_suggestions": []}

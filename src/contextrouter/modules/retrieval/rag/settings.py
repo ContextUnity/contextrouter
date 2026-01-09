@@ -59,6 +59,11 @@ class RagRetrievalSettings(BaseModel):
     providers: list[str] = Field(default_factory=lambda: ["vertex"])
     connectors: list[str] = Field(default_factory=lambda: ["web"])
 
+    # Primary provider selection (overrides providers[0] if set)
+    # Options: "vertex" (explicit RAG)
+    # Note: "vertex_grounding" (native LLM grounding) is available but not exposed via UI/API
+    provider: str | None = Field(default=None, description="Primary retrieval provider")
+
     # Track which keys are locked by env vars (for host UI).
     env_locked: set[str] = Field(default_factory=set)
 
@@ -91,6 +96,7 @@ class RagRetrievalSettings(BaseModel):
             "general_retrieval_final_count",
             "reranking_enabled",
             "ranker_model",
+            "provider",
         ):
             if key in runtime and runtime.get(key) is not None:
                 _set(key, runtime.get(key))

@@ -1,26 +1,21 @@
-"""Example: Custom Graph with Full Langfuse Tracing
+"""Example: Custom graph tracing (Langfuse optional).
 
-This example demonstrates how to add comprehensive observability to custom graphs
+This example demonstrates how to add observability to a custom LangGraph graph
 using ContextRouter's Langfuse integration.
 
-The example shows:
-- Graph-level tracing with session/user tracking
-- Operation-level spans with detailed metadata
-- Streaming execution with tracing
-- Custom span attributes and performance metrics
+Important:
+- Langfuse is an optional dependency. Install with: `pip install contextrouter[observability]`
+- Tracing is enabled only when both keys are set (via `settings.toml` or env vars):
+  - LANGFUSE_PUBLIC_KEY
+  - LANGFUSE_SECRET_KEY
 
-Run this example to see full tracing in action:
+Run:
     python examples/04_custom_graph_tracing.py
-
-Make sure Langfuse is configured in your settings.toml:
-    [langfuse]
-    secret_key = "your_secret_key"
-    public_key = "your_public_key"
-    host = "https://cloud.langfuse.com"
 """
 
 import asyncio
 
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 
 from contextrouter.cortex.state import AgentState, InputState, OutputState
@@ -32,11 +27,8 @@ def build_example_custom_graph():
 
     def analyze_query(state: AgentState) -> AgentState:
         """Analyze user query with detailed tracing."""
-        with retrieval_span(
-            name="query_analysis", input_data={"query": state["messages"][-1].content}
-        ) as span:
-            query = state["messages"][-1].content
-
+        query = state["messages"][-1].content
+        with retrieval_span(name="query_analysis", input_data={"query": query}) as span_ctx:
             # Simulate analysis
             analysis = {
                 "intent": "question" if "?" in query else "statement",
@@ -44,7 +36,8 @@ def build_example_custom_graph():
                 "complexity": "high" if len(query) > 50 else "low",
             }
 
-            span.metadata = analysis
+            span_ctx["metadata"] = analysis
+            span_ctx["output"] = {"analysis": analysis}
             state["query_analysis"] = analysis
 
             return state
@@ -57,7 +50,7 @@ def build_example_custom_graph():
                 "analysis": state.get("query_analysis"),
                 "query_length": len(state["messages"][-1].content),
             },
-        ) as span:
+        ) as span_ctx:
             # Simulate retrieval from different sources
             analysis = state.get("query_analysis", {})
 
@@ -84,11 +77,13 @@ def build_example_custom_graph():
                     }
                 ]
 
-            span.metadata = {
+            metadata = {
                 "docs_found": len(docs),
                 "avg_relevance": (sum(d["relevance"] for d in docs) / len(docs) if docs else 0),
                 "sources": list(set(d["source"] for d in docs)),
             }
+            span_ctx["metadata"] = metadata
+            span_ctx["output"] = {"docs": docs}
 
             state["retrieved_docs"] = docs
             return state
@@ -101,7 +96,7 @@ def build_example_custom_graph():
                 "docs_count": len(state.get("retrieved_docs", [])),
                 "analysis": state.get("query_analysis"),
             },
-        ) as span:
+        ) as span_ctx:
             docs = state.get("retrieved_docs", [])
             analysis = state.get("query_analysis", {})
 
@@ -115,17 +110,16 @@ def build_example_custom_graph():
             # Add analysis insights
             if analysis.get("complexity") == "high":
                 response_text += " This seems like a complex topic that might benefit from more specific details."
-
-            from langchain_core.messages import AIMessage
-
             response = AIMessage(content=response_text)
             state["messages"].append(response)
 
-            span.metadata = {
+            metadata = {
                 "response_length": len(response_text),
                 "docs_used": len(docs),
                 "response_type": "contextual" if docs else "fallback",
             }
+            span_ctx["metadata"] = metadata
+            span_ctx["output"] = {"response_text": response_text}
 
             return state
 
@@ -145,7 +139,7 @@ def build_example_custom_graph():
 
 async def run_traced_custom_graph():
     """Run the custom graph with full Langfuse tracing."""
-    print("🚀 Running custom graph with full Langfuse tracing...")
+    print("Running custom graph with Langfuse tracing (if enabled)...")
 
     # Build and compile the graph
     graph_builder = build_example_custom_graph()
@@ -161,31 +155,31 @@ async def run_traced_custom_graph():
 
     # Prepare input
     input_state = {
-        "messages": [{"role": "user", "content": "What is ContextRouter and how does it work?"}],
+        "messages": [HumanMessage(content="What is ContextRouter and how does it work?")],
         "session_id": "custom_tracing_example",
         "platform": "custom_graph_example",
         "citations_output": "raw",
     }
 
     # Execute with full tracing
-    print("📊 Executing graph with Langfuse tracing...")
+    print("Executing graph...")
     result = await graph.ainvoke(input_state, config={"callbacks": callbacks})
 
-    print("✅ Graph execution completed!")
-    print(f"📝 Final messages count: {len(result['messages'])}")
-    print(f"📄 Retrieved docs: {len(result.get('retrieved_docs', []))}")
+    print("Graph execution completed.")
+    print(f"Final messages count: {len(result['messages'])}")
+    print(f"Retrieved docs: {len(result.get('retrieved_docs', []))}")
 
     # Show the response
     final_message = result["messages"][-1]
     if hasattr(final_message, "content"):
-        print(f"💬 Response: {final_message.content[:200]}...")
+        print(f"Response: {final_message.content[:200]}...")
 
     return result
 
 
 async def run_streaming_example():
     """Example of streaming with tracing."""
-    print("\n🌊 Running streaming example with tracing...")
+    print("\nRunning streaming example with tracing (if enabled)...")
 
     graph_builder = build_example_custom_graph()
     graph = graph_builder.compile()
@@ -198,24 +192,24 @@ async def run_streaming_example():
     )
 
     input_state = {
-        "messages": [{"role": "user", "content": "Explain RAG architecture"}],
+        "messages": [HumanMessage(content="Explain RAG architecture")],
         "session_id": "streaming_tracing_example",
         "platform": "streaming_example",
     }
 
-    print("📡 Streaming events with tracing...")
+    print("Streaming events...")
     async for event in graph.astream_events(
         input_state, config={"callbacks": callbacks}, version="v2"
     ):
         if event["event"] == "on_chain_end" and event.get("name") == "generate":
-            print("🎯 Response generation completed!")
+            print("Response generation completed.")
             break
 
-    print("✅ Streaming example completed!")
+    print("Streaming example completed.")
 
 
 if __name__ == "__main__":
-    print("🔍 ContextRouter Custom Graph Tracing Example")
+    print("ContextRouter Custom Graph Tracing Example")
     print("=" * 50)
 
     # Run the main example
@@ -224,6 +218,7 @@ if __name__ == "__main__":
     # Run streaming example
     asyncio.run(run_streaming_example())
 
-    print("\n📈 Check your Langfuse dashboard to see the complete trace!")
-    print("🔗 You'll see spans for: query_analysis, context_retrieval, response_generation")
-    print("📊 Each span includes metadata about the operation and performance metrics")
+    print("\nIf Langfuse is enabled, check your dashboard for spans:")
+    print("- query_analysis")
+    print("- context_retrieval")
+    print("- response_generation")

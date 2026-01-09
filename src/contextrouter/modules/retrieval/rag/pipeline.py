@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import time
 from dataclasses import dataclass
 from typing import List
 
@@ -63,6 +64,7 @@ class RetrievalPipeline:
         )
 
     async def execute(self, state: AgentState) -> RetrievalResult:
+        pipeline_start = time.perf_counter()
         cfg = get_rag_retrieval_settings()
         user_query = (
             state.get("user_query") or get_last_user_query(state.get("messages", [])) or ""
@@ -71,7 +73,29 @@ class RetrievalPipeline:
             return RetrievalResult(retrieved_docs=[], citations=[], graph_facts=[])
 
         retrieval_queries = self._normalize_queries(state, user_query)
+
+        # Log taxonomy_concepts availability before graph facts lookup
+        taxonomy_concepts = state.get("taxonomy_concepts") or []
+        logger.debug(
+            "RAG Pipeline: taxonomy_concepts in state: count=%d concepts=%s",
+            len(taxonomy_concepts),
+            taxonomy_concepts[:5] if taxonomy_concepts else [],
+        )
+
         graph_facts = self._get_graph_facts(state)
+
+        # Determine active provider
+        active_providers = self._get_active_providers(cfg)
+        provider_name = active_providers[0] if active_providers else "unknown"
+
+        # Log retrieval start with provider info
+        logger.debug(
+            "RAG Retrieval Pipeline START: provider=%s query=%r queries=%d general_mode=%s",
+            provider_name,
+            user_query[:80],
+            len(retrieval_queries),
+            cfg.general_retrieval_enabled,
+        )
 
         try:
             token = self._token_from_state(state)
@@ -85,11 +109,25 @@ class RetrievalPipeline:
         all_docs: list[RetrievedDoc] = []
 
         # 1) Provider retrieval (storage boundary) via generic pipeline
+        provider_start = time.perf_counter()
         try:
             provider_docs = await self._retrieve_from_providers(retrieval_queries, token, cfg)
+            provider_elapsed_ms = (time.perf_counter() - provider_start) * 1000
+            logger.debug(
+                "Provider retrieval COMPLETE: provider=%s docs=%d elapsed_ms=%.1f",
+                provider_name,
+                len(provider_docs),
+                provider_elapsed_ms,
+            )
             all_docs.extend(provider_docs)
         except Exception as e:
-            logger.error("Critical provider retrieval failure: %s", e)
+            provider_elapsed_ms = (time.perf_counter() - provider_start) * 1000
+            logger.error(
+                "Critical provider retrieval failure: provider=%s elapsed_ms=%.1f error=%s",
+                provider_name,
+                provider_elapsed_ms,
+                e,
+            )
 
         # 2) Connector retrieval if enabled
         try:
@@ -138,6 +176,16 @@ class RetrievalPipeline:
             if allowed_types := state.get("citations_allowed_types"):
                 citations = [c for c in citations if c.source_type in allowed_types]
 
+        pipeline_elapsed_ms = (time.perf_counter() - pipeline_start) * 1000
+        logger.debug(
+            "RAG Retrieval Pipeline COMPLETE: provider=%s total_docs=%d citations=%d graph_facts=%d elapsed_ms=%.1f",
+            provider_name,
+            len(ranked_docs),
+            len(citations),
+            len(graph_facts),
+            pipeline_elapsed_ms,
+        )
+
         return RetrievalResult(
             retrieved_docs=ranked_docs, citations=citations, graph_facts=graph_facts
         )
@@ -175,6 +223,12 @@ class RetrievalPipeline:
             return RetrievedDoc(source_type="unknown", content=content)
         return None
 
+    def _get_active_providers(self, cfg: RagRetrievalSettings) -> list[str]:
+        """Get active providers list, preferring cfg.provider if set."""
+        if cfg.provider and cfg.provider.strip():
+            return [cfg.provider.strip()]
+        return list(cfg.providers) if cfg.providers else ["vertex"]
+
     async def _retrieve_from_providers(
         self,
         retrieval_queries: list[str],
@@ -182,6 +236,15 @@ class RetrievalPipeline:
         cfg: RagRetrievalSettings,
     ) -> list[RetrievedDoc]:
         docs: list[RetrievedDoc] = []
+        active_providers = self._get_active_providers(cfg)
+        provider_name = active_providers[0] if active_providers else "unknown"
+
+        logger.info(
+            "Provider retrieval START: provider=%s queries=%d general_mode=%s",
+            provider_name,
+            len(retrieval_queries),
+            cfg.general_retrieval_enabled,
+        )
 
         if cfg.general_retrieval_enabled:
             limit = int(cfg.general_retrieval_initial_count)
@@ -191,7 +254,7 @@ class RetrievalPipeline:
                     token=token,
                     limit=limit,
                     filters=None,
-                    providers=list(cfg.providers),
+                    providers=active_providers,
                 )
                 for q in retrieval_queries
             ]
@@ -216,7 +279,7 @@ class RetrievalPipeline:
                         token=token,
                         limit=int(lim),
                         filters={"source_type": st},
-                        providers=list(cfg.providers),
+                        providers=active_providers,
                     )
                 )
         results = await asyncio.gather(*calls, return_exceptions=True)
@@ -244,7 +307,7 @@ class RetrievalPipeline:
                     token=token,
                     limit=fallback_limit,
                     filters=None,
-                    providers=list(cfg.providers),
+                    providers=active_providers,
                 )
                 for q in retrieval_queries
             ]
@@ -347,12 +410,30 @@ class RetrievalPipeline:
     def _get_graph_facts(self, state: AgentState) -> List[str]:
         concepts = state.get("taxonomy_concepts") or []
         if not concepts:
+            logger.debug(
+                "Graph facts SKIPPED: taxonomy_concepts is empty or missing in state. "
+                "Available state keys: %s",
+                list(state.keys()) if isinstance(state, dict) else "not a dict",
+            )
             return []
+
+        logger.debug(
+            "Graph facts lookup START: concepts=%d concepts_list=%s",
+            len(concepts),
+            concepts[:5] if concepts else [],
+        )
+
         service = get_graph_service()
         try:
-            return service.get_facts(concepts)[:50]
+            facts = service.get_facts(concepts)[:50]
+            logger.debug(
+                "Graph facts lookup COMPLETE: concepts=%d facts=%d",
+                len(concepts),
+                len(facts),
+            )
+            return facts
         except Exception:
-            logger.exception("Graph facts lookup failed")
+            logger.exception("Graph facts lookup failed: concepts=%s", concepts[:5])
             return []
 
     def _should_run_web(self, state: AgentState) -> bool:

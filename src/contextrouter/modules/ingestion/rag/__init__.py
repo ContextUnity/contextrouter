@@ -11,13 +11,13 @@ import importlib
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from contextrouter.modules.ingestion.rag.core import (
+    from .core import (
         IngestionMetadata,
         IngestionPlugin,
         RawData,
         ShadowRecord,
     )
-    from contextrouter.modules.ingestion.rag.settings import RagIngestionConfig
+    from .settings import RagIngestionConfig
 
 __all__ = [
     # Config

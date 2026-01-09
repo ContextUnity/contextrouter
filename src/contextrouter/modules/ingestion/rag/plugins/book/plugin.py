@@ -34,17 +34,18 @@ except ImportError:
         fitz = None  # Fallback to markdown parsing if not available
 
 from contextrouter.core.config import Config
-from contextrouter.modules.ingestion.rag.core.plugins import IngestionPlugin
-from contextrouter.modules.ingestion.rag.core.prompts import book_batch_analysis_prompt
-from contextrouter.modules.ingestion.rag.core.registry import register_plugin
-from contextrouter.modules.ingestion.rag.core.types import (
+
+from ...core.plugins import IngestionPlugin
+from ...core.prompts import book_batch_analysis_prompt
+from ...core.registry import register_plugin
+from ...core.types import (
     BookStructData,
     GraphEnrichmentResult,
     IngestionMetadata,
     RawData,
     ShadowRecord,
 )
-from contextrouter.modules.ingestion.rag.core.utils import (
+from ...core.utils import (
     clean_str_list,
     get_graph_enrichment,
     llm_generate_tsv,
@@ -52,9 +53,9 @@ from contextrouter.modules.ingestion.rag.core.utils import (
     normalize_clean_text,
     parse_tsv_line,
 )
-from contextrouter.modules.ingestion.rag.settings import RagIngestionConfig
-from contextrouter.modules.ingestion.rag.utils.llm import MODEL_FLASH
-from contextrouter.modules.ingestion.rag.utils.records import generate_id
+from ...settings import RagIngestionConfig
+from ...utils.llm import MODEL_FLASH
+from ...utils.records import generate_id
 
 LOGGER = logging.getLogger(__name__)
 
@@ -104,7 +105,7 @@ def clean_book_content(text: str, *, keep_page_markers: bool = False) -> str:
     cleaned = text
 
     # Normalize ambiguous unicode early (smart quotes, dashes, nbsp, etc.)
-    from contextrouter.modules.ingestion.rag.core.utils import (
+    from ...core.utils import (
         normalize_ambiguous_unicode,
     )
 
@@ -343,9 +344,7 @@ class BookPlugin(IngestionPlugin):
         title = title.strip()
 
         # Normalize unicode in title
-        from contextrouter.modules.ingestion.rag.core.utils import (
-            normalize_ambiguous_unicode,
-        )
+        from ...core.utils import normalize_ambiguous_unicode
 
         title = normalize_ambiguous_unicode(title)
 
@@ -477,7 +476,7 @@ class BookPlugin(IngestionPlugin):
             markdown_content = self._extract_text_basic(pdf_path)
 
         # Clean markdown: normalize headers, filter testimonials, normalize unicode
-        from contextrouter.modules.ingestion.rag.core.utils import (
+        from ...core.utils import (
             clean_markdown_headers,
             filter_testimonial_signatures,
             normalize_ambiguous_unicode,
@@ -558,9 +557,7 @@ class BookPlugin(IngestionPlugin):
                         chapters.append(current_chapter.copy())
 
                     # Start new chapter - strip markdown from title
-                    from contextrouter.modules.ingestion.rag.core.utils import (
-                        strip_markdown_from_text,
-                    )
+                    from ...core.utils import strip_markdown_from_text
 
                     clean_title = strip_markdown_from_text(header_title)
                     current_chapter = {
@@ -634,7 +631,7 @@ class BookPlugin(IngestionPlugin):
 
         # Read LLM topic extraction settings
         if config is None:
-            from contextrouter.modules.ingestion.rag.config import load_config
+            from ...config import load_config
 
             config = load_config()
         llm_topic_extraction_enabled = config.book.llm_topic_extraction_enabled

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import logging
 
+from contextrouter.core.config import get_bool_env
+
 logger = logging.getLogger("contextrouter")
 
 
@@ -26,7 +28,8 @@ def safe_preview(val: object, limit: int = 240) -> str:
 
 def pipeline_log(event: str, **fields: object) -> None:
     """Log a structured pipeline event when debug logging is enabled."""
-    if not logger.isEnabledFor(logging.DEBUG):
+    debug_env = bool(get_bool_env("DEBUG_PIPELINE"))
+    if not debug_env and not logger.isEnabledFor(logging.DEBUG):
         return
     safe_fields = {k: safe_preview(v, 220) for k, v in fields.items()}
     logger.info("PIPELINE %s | %s", event, safe_fields)

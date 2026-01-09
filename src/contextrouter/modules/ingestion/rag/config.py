@@ -49,8 +49,8 @@ def _resolve_config_path() -> Path:
     Priority:
     1. CONTEXTROUTER_CONFIG_PATH env var (direct path to config file)
     2. CONTEXTROUTER_ASSETS_PATH env var (derives config as {assets}/settings.toml)
-    3. Package default: packages/contextrouter/assets/ingestion/settings.toml
-    4. Default fallback: packages/contextrouter/assets/settings.toml
+    3. Default: ./assets/ingestion/settings.toml (relative to current working directory)
+    3. Default: ./assets/ingestion/settings.toml (relative to current working directory)
     """
     # 1. Direct config path override
     if env_config := get_env(ENV_CONFIG_PATH):

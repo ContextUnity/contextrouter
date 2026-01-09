@@ -6,44 +6,79 @@
 [![GitHub](https://img.shields.io/badge/GitHub-ContextRouter-black.svg)](https://github.com/ContextRouter/contextrouter)
 [![Docs](https://img.shields.io/badge/docs-contextrouter.org-green.svg)](https://contextrouter.org)
 
-ContextRouter is a modular **"shared brain" framework for AI agents** (LangGraph-based). RAG is a core capability, but the framework is designed for **multi-step orchestration** (routing, extraction, generation, tool execution) and can be embedded into any platform—Web, Telegram, or custom APIs.
+> ⚠️ **Early Version**: This is an early version of ContextRouter. Documentation is actively being developed, and the API may change.
+
+## What is ContextRouter?
+
+ContextRouter is a modular framework for building intelligent AI agents based on LangGraph. It acts as a "shared brain" that can handle complex tasks by combining information retrieval, text generation, and tool execution.
+
+Unlike simple chatbots, ContextRouter can perform multi-step tasks: analyze queries, search for relevant information, apply logic, and provide structured responses.
+
+## What is it for?
+
+ContextRouter is designed for developers and companies who want to:
+
+- **Build complex AI agents** — from simple Q&A systems to sophisticated workflows
+- **Integrate RAG (Retrieval-Augmented Generation)** — search and generate responses based on your data
+- **Create platform-independent solutions** — works with web, Telegram, API, or any other platform
+- **Ensure security and traceability** — every piece of data has a provenance history
+
+### Typical use cases:
+- Corporate chatbots with knowledge bases
+- AI assistants for document analysis
+- Search-based recommendation systems
+- Intelligent agents for business process automation
 
 ## Key Features
 
-- **🧩 Plug-and-Play Architecture**: Easily swap LLMs, vector stores, and data connectors.
-- **🧠 LangGraph Orchestration**: Sophisticated state management and conditional routing.
-- **🛡️ Bisquit Protocol**: Built-in data provenance and security tracing for every piece of information.
-- **📡 Streaming First**: Optimized for real-time SSE (Server-Sent Events) and event-driven UIs.
-- **🌍 Pluggable Retrieval Sources**: Stable Vertex AI Search integration, optional web search connector, and stubs for upcoming backends.
+- **🧩 Fully Modular** — swap any component: LLM models, data stores, connectors, agents, and even entire processing graphs
+- **🧠 Intelligent Orchestration** — sophisticated state management and conditional routing based on LangGraph
+- **🛡️ Security and Tracing** — built-in Bisquit protocol for tracking data provenance
+- **📡 Streaming-Oriented** — optimized for real-time and event-driven interfaces
+- **🌍 Flexible Data Sources** — support for various storage solutions: Vertex AI Search, upcoming Postgres and local models support
+- **🔧 Extensible by Design** — build custom agents, processing graphs, and integrations without touching core code
 
-## Production Deployment
+## Modules Overview
 
-For production deployments requiring advanced security, multi-tenancy, and enterprise integrations, visit [contextrouter.dev](https://contextrouter.dev) to learn about ContextRouter for production use.
+ContextRouter's architecture is built around specialized modules:
 
-Production features include:
-- Advanced security for regulated industries
-- Multi-tenant architecture with isolation
-- Enterprise system integrations (SAP, Oracle, Salesforce)
-- Production monitoring and alerting
-- Deployment automation and scaling
-- Professional support and SLAs
+- **`modules/providers/`** — Data storage implementations (Vertex AI Search, Postgres, GCS)
+- **`modules/connectors/`** — Raw data fetchers (Web search, RSS feeds, APIs, local files)
+- **`modules/ingestion/`** — Data ingestion pipelines (ETL, indexing, RAG processing, deployment)
+- **`modules/retrieval/`** — Search and RAG orchestration (pipelines, reranking, formatting)
+- **`modules/models/`** — LLM and embedding model abstractions (Gemini, GPT, local models)
+- **`modules/protocols/`** — Platform adapters (AG-UI events, A2A/A2UI protocols)
 
-## Status / Support Matrix
+## RAG Capabilities
 
-**Golden path (supported end-to-end):**
-- **Retrieval**: Vertex AI Search (`provider: vertex`)
-- **LLM**: Gemini on Vertex (`vertex/gemini-*`)
+ContextRouter provides a complete RAG (Retrieval-Augmented Generation) pipeline powered by Vertex AI and Gemini:
 
-| Capability | Component | Status | Notes |
-|---|---|---:|---|
-| Provider | Vertex (`modules/providers/storage/vertex.py`) | ✅ Stable (read) / ⚠️ Stub (write) | Retrieval works; ingestion sink write is not implemented |
-| Provider | Postgres (`modules/providers/storage/postgres.py`) | ⚠️ Stub | Planned (see `PLAN/22-postgres-pgvector-knowledge-store.md`) |
-| Provider | GCS (`modules/providers/storage/gcs.py`) | ⚠️ Stub | Write stub |
-| Connector | Web Search (Google CSE) (`modules/connectors/web.py`) | ✅ Optional | Requires Google CSE credentials + allowlist domains |
-| Connector | Web Scraper (`modules/connectors/web.py:web_scraper`) | ⚠️ Stub | Not implemented |
-| Connector | RSS / API (`modules/connectors/rss.py`, `modules/connectors/api.py`) | ⚠️ Stub | Not implemented |
-| Models | Vertex LLM/Embeddings (`modules/models/*/vertex.py`) | ✅ Supported | Driven by core config |
-| Models | OpenAI/HF models | ⚠️ Stub | Placeholders for future community contributions |
+### Ingestion Pipeline
+- **Supported Content Types**: Books, articles, videos, Q&A pairs, web content, and custom structured data
+- **Taxonomy & Ontology**: Automatic categorization and relationship mapping using AI-powered taxonomy builders
+- **Knowledge Graph**: Semantic relationships and entity connections between ingested content
+- **Citation System**: Precise source attribution with page numbers, timestamps, and context preservation
+
+### Retrieval & Generation
+- **Multi-stage Retrieval**: Initial search → reranking → context assembly
+- **Citation Formatting**: Rich citations with source verification and confidence scores
+- **Streaming Responses**: Real-time generation with source citations and reasoning traces
+
+### Vertex AI + Gemini Integration
+The RAG system runs on Google Cloud's Vertex AI Search for scalable vector storage and Gemini models for intelligent processing, ensuring enterprise-grade performance and security.
+
+### Quick RAG Implementation
+Build a production-ready RAG system in hours, not months. For custom integrations, enterprise deployments, or specialized RAG solutions, visit [contextrouter.dev](https://contextrouter.dev) to discuss your requirements.
+
+## Roadmap
+
+We're actively developing ContextRouter with focus on expanding data source support and improving developer experience:
+
+### Near-term priorities:
+- **PostgreSQL Integration** — native support for Postgres with pgvector for knowledge storage
+- **Cognee Memory Integration** — advanced memory and knowledge graph capabilities
+- **Local Model Support** — run AI models locally without cloud dependencies
+- **Plugin System & Library** — comprehensive plugin architecture for extending functionality
 
 ## Quick Start
 
@@ -62,340 +97,43 @@ async for event in stream_agent(
 
 For more examples, see the [`examples/`](./examples/) directory.
 
-## CLI
+## Getting Started
 
-ContextRouter ships with a Click-based CLI:
+1. **Install ContextRouter**:
+   ```bash
+   pip install contextrouter
+   # For full functionality (recommended):
+   pip install contextrouter[vertex,storage,ingestion]
+   # Observability (optional):
+   pip install contextrouter[observability]
+   ```
 
-```bash
-contextrouter --help
-contextrouter help
-```
+2. **Configure your data sources** and LLM models
+3. **Build your first agent** using the examples above
+4. **Deploy** to your preferred platform (web, API, Telegram, etc.)
 
-Common groups:
-- `contextrouter rag ...`: run the golden-path RAG flow (Vertex AI Search + Gemini on Vertex)
-- `contextrouter ingest ...`: ingestion pipeline utilities (separate ingestion config)
+### Notes (Vertex / Gemini)
 
-See [CLI documentation](https://contextrouter.org/cli) for the full reference.
-
-## Configuration (Runtime / Core)
-
-Runtime configuration is loaded via `contextrouter.core.config.get_core_config()` using:
-**defaults < environment variables < `settings.toml`**.
-
-### Minimal `settings.toml` (Golden path: Vertex AI Search + Gemini on Vertex)
-
-Create a `settings.toml` in your working directory (or pass it explicitly via `--config`):
-
-```toml
-[vertex]
-project_id = "my-gcp-project"
-location = "us-central1"
-
-[rag]
-# Option 1: Use blue/green deployment pattern (recommended)
-db_name = "blue"  # or "green"
-data_store_id_blue = "projects/.../locations/.../collections/.../dataStores/..."
-data_store_id_green = "projects/.../locations/.../collections/.../dataStores/..."
-
-# Option 2: Direct datastore ID (skip blue/green)
-# db_name = "projects/.../locations/.../collections/.../dataStores/..."
-
-[models]
-default_llm = "vertex/gemini-2.5-flash"
-default_embeddings = "vertex/text-embedding"
-```
-
-**Note on `data_store_id_blue` / `data_store_id_green`**: These are only needed if you use the blue/green deployment pattern (`db_name = "blue"` or `"green"`). If `db_name` is already a full Vertex datastore ID, these fields are ignored.
-
-### Plugin Configuration
-
-ContextRouter supports dynamic loading of custom components:
-
-```toml
-[plugins]
-paths = [
-    "~/my-contextrouter-plugins",
-    "./custom-components"
-]
-
-[router]
-# Choose which graph to run
-graph = "rag_retrieval"  # or custom registered graph
-# graph = "my_custom_graph"
-```
-
-### Credentials for Golden Path (Vertex AI)
-
-For the golden path (Vertex AI Search + Gemini), you need GCP authentication:
-
-**Option 1: Application Default Credentials (ADC) — Recommended**
-```bash
-# Set up ADC (works with gcloud CLI, Cloud Run, GCE, etc.)
-gcloud auth application-default login
-```
-
-**Option 2: Service Account Key**
-```toml
-[vertex]
-project_id = "my-gcp-project"
-location = "us-central1"
-```
-
-**Authentication Options:**
-
-**Option 1: Application Default Credentials (ADC) - Recommended**
-```bash
-# Set up ADC (works with gcloud CLI, Cloud Run, GCE, etc.)
-gcloud auth application-default login
-```
-
-**Option 2: Service Account Key via Environment Variable**
-```bash
-export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account-key.json"
-```
-
-The framework will automatically use ADC if available, falling back to `GOOGLE_APPLICATION_CREDENTIALS` if provided.
-
-### Running with a config file
-
-```bash
-contextrouter --config ./settings.toml rag query "What is ContextRouter?"
-```
-
-### Passing values via environment variables
-
-You can override TOML/defaults with env vars:
-
-```bash
-export CONTEXTROUTER_VERTEX_PROJECT_ID="my-gcp-project"
-export CONTEXTROUTER_VERTEX_LOCATION="us-central1"
-export RAG_DB_NAME="blue"
-export DATA_STORE_ID_BLUE="projects/.../dataStores/..."
-export DATA_STORE_ID_GREEN="projects/.../dataStores/..."
-```
-
-You can also point to a runtime config file:
-
-```bash
-export CONTEXTROUTER_CORE_CONFIG_PATH="/abs/path/to/settings.toml"
-```
-
-### Using `.env`
-
-If you put environment variables into `.env` in the working directory, the CLI will load it automatically:
-
-```bash
-# .env
-CONTEXTROUTER_VERTEX_PROJECT_ID=my-gcp-project
-CONTEXTROUTER_VERTEX_LOCATION=us-central1
-RAG_DB_NAME=blue
-DATA_STORE_ID_BLUE=projects/.../dataStores/...
-DATA_STORE_ID_GREEN=projects/.../dataStores/...
-
-# For credentials, use ADC or:
-export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
-```
-
-### Programmatic usage (Python)
-
-```python
-from contextrouter.core.config import load_config, set_core_config
-from contextrouter.cortex import stream_agent
-
-set_core_config(load_config(toml_path="settings.toml"))
-
-# Now you can run the brain using the configured providers/models.
-```
-
-## Creating Plugins
-
-ContextRouter supports **dynamic plugin loading** - you can add custom agents, tools, connectors, and graphs without modifying the core code.
-
-### Custom Agent Example
-
-Create `my_agent.py` in your plugin directory:
-
-```python
-from contextrouter.core.registry import register_agent
-
-@register_agent("my_special_agent")
-class MySpecialAgent:
-    def __init__(self):
-        self.name = "My Special Agent"
-
-    def run(self, query: str, **kwargs) -> str:
-        # Your custom logic here
-        return f"Special response to: {query}"
-```
-
-### Custom Graph Example
-
-```python
-from langgraph.graph import END, START, StateGraph
-from contextrouter.core.registry import register_graph
-from contextrouter.cortex.state import AgentState, InputState, OutputState
-
-@register_graph("my_custom_graph")
-def build_my_custom_graph():
-    def my_node(state: AgentState) -> AgentState:
-        # Custom processing
-        return state
-
-    workflow = StateGraph(AgentState, input=InputState, output=OutputState)
-    workflow.add_node("my_node", my_node)
-    workflow.add_edge(START, "my_node")
-    workflow.add_edge("my_node", END)
-
-    return workflow
-```
-
-Then set in your config:
-```toml
-[router]
-graph = "my_custom_graph"
-```
-
-## Architecture Overview
-
-ContextRouter separates the AI "intelligence" from the technical implementation:
-
-- **Cortex**: The orchestration layer. Manages the flow of the conversation, intent detection, and routing.
-- **Modules**: Pluggable capabilities.
-    - **Providers**: Interfaces for storage and databases (Vertex AI Search, Postgres).
-    - **Connectors**: Fetchers for raw data (Web CSE, RSS, Local Files).
-    - **Models**: Abstractions for LLMs (Gemini, GPT) and Embeddings.
-- **Core**: The framework kernel handling configuration, security, and the `Bisquit` transport protocol.
-
-## Directory Structure
-
-```text
-src/contextrouter/
-├── core/                # Kernel: Registry, Config, Bisquit
-├── cortex/              # Orchestration: Graph, State, Nodes, Steps
-├── modules/             # Pluggable Capabilities
-│   ├── providers/       # Storage implementations (Postgres, Vertex)
-│   ├── connectors/      # Raw data fetchers (Web, API)
-│   ├── retrieval/       # Search logic (Orchestration, Reranking)
-│   └── models/          # LLM & Embedding abstractions
-└── protocols/           # Transport mapping (AG-UI, Telegram)
-```
+- **Vertex AI mode**: ContextRouter sets `GOOGLE_GENAI_USE_VERTEXAI=true` by default to avoid the
+  Google GenAI SDK accidentally trying API-key auth. You can override it by exporting
+  `GOOGLE_GENAI_USE_VERTEXAI=false` before importing/starting ContextRouter.
 
 ## Documentation
 
-Comprehensive documentation is available at [contextrouter.org](https://contextrouter.org):
-
-- [Architecture Guide](https://contextrouter.org/architecture)
-- [Configuration Reference](https://contextrouter.org/configuration)
-- [Module Development](https://contextrouter.org/modules)
-- [Roadmap](https://contextrouter.org/roadmap)
-
-## Development Setup
-
-ContextRouter uses modern Python tooling for development. This section covers setting up your development environment.
-
-### Prerequisites
-
-- **mise**: Version manager for Python, Node.js, and other tools
-  ```bash
-  # Install mise (see https://mise.jdx.dev/getting-started.html)
-  curl https://mise.jdx.dev/install.sh | bash
-  ```
-
-- **Python 3.13+**: Required for development
-- **uv**: Fast Python package manager (installed via mise)
-
-### Quick Setup
-
-1. **Clone and enter the project:**
-   ```bash
-   git clone https://github.com/ContextRouter/contextrouter.git
-   cd contextrouter
-   ```
-
-2. **Install tools and dependencies:**
-   ```bash
-   # mise automatically installs Python 3.13 and uv
-   mise install
-
-   # Install all dependencies
-   mise run sync
-   ```
-
-3. **Verify setup:**
-   ```bash
-   # Run all checks (lint + security + tests)
-   mise run check
-   ```
-
-### Development Workflow
-
-ContextRouter provides convenient commands via mise:
-
-```bash
-# Install/update dependencies
-mise run sync
-
-# Code quality checks
-mise run lint          # Lint with Ruff
-mise run format        # Format code
-mise run security      # Security scan with Bandit
-
-# Testing
-mise run test          # Run all tests
-mise run test-unit     # Run unit tests only
-
-# Ingestion pipeline (development)
-mise run ingest-run    # Full pipeline: preprocess → structure → index → deploy
-
-# Cleanup
-mise run clean         # Remove cache files
-```
-
-### Python Version Management
-
-The project uses **Python 3.13** for development:
-
-- **mise** manages Python versions per project
-- **`.python-version`** specifies the required version
-- **`.mise.toml`** configures tools and tasks
-
-All commands automatically use the correct Python version - no manual activation needed!
-
-### Code Quality Tools
-
-- **Ruff**: Fast Python linter and formatter
-- **Bandit**: Security vulnerability scanner for Python
-- **pytest**: Testing framework with coverage reporting
-- **pre-commit**: Git hooks for automated quality checks
-
-### Pre-commit Hooks
-
-Enable pre-commit hooks for automatic code quality checks:
-
-```bash
-# Install git hooks
-mise run pre-commit install
-
-# Or run manually on all files
-mise run pre-commit run --all-files
-```
-
-### CI/CD
-
-GitHub Actions runs automated checks on every push/PR:
-- Python 3.13 environment
-- Full test suite with coverage
-- Security scanning
-- Code quality checks
+- [Full Documentation](https://contextrouter.org) — complete guides and API reference
+- [Examples Directory](./examples/) — working code samples
+- [Contributing Guide](./CONTRIBUTING.md) — how to contribute to the project
 
 ## Contributing
 
-We welcome contributions! Please see our [Roadmap](https://contextrouter.org/roadmap) for current priorities and stubs awaiting implementation.
+We welcome contributions! ContextRouter maintains strict coding standards with emphasis on:
 
-## Configuration Model (Core vs Ingestion)
+- **Security First** — All contributions undergo security review and automated scanning
+- **Code Quality** — Comprehensive linting, type checking, and automated testing
+- **Clean Architecture** — Clear separation between business logic, infrastructure, and data layers
+- **Type Safety** — Strict typing throughout the codebase with mypy validation
 
-- **Runtime (core config)**: Used by the agent at runtime (LLM selection, Vertex/Search settings, security). Loaded via `contextrouter.core.config.get_core_config()` from layered sources (defaults < env < TOML).
-- **Ingestion config**: Separate, ingestion-only TOML used by ingestion CLI/stages (`modules/ingestion/rag/config.py`). This keeps ingestion knobs isolated from runtime.
+See our [Contributing Guide](./CONTRIBUTING.md) for detailed guidelines and current development priorities.
 
 ## License
 

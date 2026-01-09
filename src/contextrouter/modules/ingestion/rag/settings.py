@@ -13,13 +13,10 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-def _package_dir() -> Path:
-    # packages/contextrouter/src/contextrouter/modules/ingestion/rag/settings.py -> packages/contextrouter/
-    return Path(__file__).resolve().parents[5]
-
-
 def _default_assets_folder() -> Path:
-    return _package_dir() / "assets" / "ingestion"
+    # Default to a user-writable folder relative to the current working directory.
+    # This avoids writing into site-packages when the library is installed.
+    return Path.cwd() / "assets" / "ingestion"
 
 
 class IngestionSection(BaseModel):
@@ -199,7 +196,7 @@ class RagIngestionConfig(BaseModel):
     def assets_paths(self) -> dict[str, Path]:
         assets_folder = self.paths.assets_folder
         if not assets_folder.is_absolute():
-            assets_folder = _package_dir() / assets_folder
+            assets_folder = Path.cwd() / assets_folder
 
         upload_dir = assets_folder / self.paths.upload_dir
         jsonl_dir = upload_dir / self.paths.jsonl_dir

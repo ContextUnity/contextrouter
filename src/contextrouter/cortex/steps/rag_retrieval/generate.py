@@ -197,6 +197,7 @@ class TransformStrategy(IntentStrategy):
 
 
 async def generate_response(state: AgentState) -> dict[str, Any]:
+    """Generate response using explicit RAG pipeline."""
     intent = state.get("intent", "rag_and_web")
 
     strategies: dict[str, IntentStrategy] = {

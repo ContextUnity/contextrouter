@@ -1,13 +1,13 @@
 """QA plugin components."""
 
 from contextrouter.core.config import Config
-from contextrouter.modules.ingestion.rag.core.plugins import IngestionPlugin
-from contextrouter.modules.ingestion.rag.core.registry import register_plugin
-from contextrouter.modules.ingestion.rag.core.types import (
+
+from ...core.plugins import IngestionPlugin
+from ...core.registry import register_plugin
+from ...core.types import (
     RawData,
     ShadowRecord,
 )
-
 from .analyzer import QuestionAnalyzer
 from .speaker import SpeakerProcessor
 from .taxonomy_mapper import TaxonomyMapper

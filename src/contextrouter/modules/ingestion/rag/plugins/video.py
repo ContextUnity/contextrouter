@@ -483,7 +483,7 @@ class VideoPlugin(IngestionPlugin):
 
         # Read LLM settings
         if config is None:
-            from contextrouter.modules.ingestion.rag.config import load_config
+            from ..config import load_config
 
             config = load_config()
         llm_summary_enabled = config.video.llm_summary_enabled

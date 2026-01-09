@@ -12,10 +12,6 @@ from typing import Any
 import networkx as nx
 
 from contextrouter.core.config import Config
-from contextrouter.modules.ingestion.rag.graph.serialization import (
-    load_graph_secure,
-    save_graph_secure,
-)
 
 from ..core.types import RawData
 from ..core.utils import (
@@ -24,6 +20,10 @@ from ..core.utils import (
 )
 from ..utils.llm import MODEL_PRO
 from .prompts import format_extraction_prompt
+from .serialization import (
+    load_graph_secure,
+    save_graph_secure,
+)
 from .utils import (
     GENERIC_NODES,
     clean_entity,

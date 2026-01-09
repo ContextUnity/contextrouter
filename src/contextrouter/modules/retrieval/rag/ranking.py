@@ -184,7 +184,7 @@ async def rerank_documents(
             )
 
             elapsed_ms = (time.perf_counter() - t0) * 1000
-            logger.info(
+            logger.debug(
                 "Reranking completed: %d docs -> %d ranked in %.1fms (source_type=%s)",
                 len(records),
                 len(response.records),
