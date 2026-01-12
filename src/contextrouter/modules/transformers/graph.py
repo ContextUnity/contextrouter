@@ -37,7 +37,7 @@ def build_graph_from_clean_text(
     incremental = config.graph.incremental
     if overwrite:
         incremental = False
-    model = config.graph.model.strip() or MODEL_PRO
+    model = config.graph.model.strip() or core_cfg.models.ingestion.graph.model.strip() or MODEL_PRO
     builder_mode = config.graph.builder_mode
 
     all_items: list[Any] = []

@@ -24,9 +24,12 @@ from .models import (
 
 # ConfigPaths is already imported from .main above
 from .providers import (
+    AnthropicConfig,
     GoogleCSEConfig,
     LangfuseConfig,
+    LocalOpenAIConfig,
     OpenAIConfig,
+    OpenRouterConfig,
     PluginsConfig,
     VertexConfig,
 )
@@ -56,6 +59,9 @@ __all__ = [
     # Provider configs
     "VertexConfig",
     "OpenAIConfig",
+    "AnthropicConfig",
+    "OpenRouterConfig",
+    "LocalOpenAIConfig",
     "GoogleCSEConfig",
     "LangfuseConfig",
     "PluginsConfig",

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from .base import BaseEmbeddings, BaseLLM
+from .base import BaseEmbeddings, BaseModel
 from .registry import ModelRegistry, model_registry
 
 __all__ = [
-    "BaseLLM",
+    "BaseModel",
     "BaseEmbeddings",
     "ModelRegistry",
     "model_registry",

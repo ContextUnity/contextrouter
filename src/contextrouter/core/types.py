@@ -15,11 +15,9 @@ from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
 # We intentionally avoid `Any` in most of the codebase. When we deal with data
 # that must be JSON-serializable (e.g., JSONL ingestion artifacts), we use these
 # recursive aliases.
-StructDataPrimitive: TypeAlias = str | int | float | bool | None
-StructDataValue: TypeAlias = (
-    StructDataPrimitive | list["StructDataValue"] | dict[str, "StructDataValue"]
-)
-StructData: TypeAlias = dict[str, StructDataValue]
+type StructDataPrimitive = str | int | float | bool | None
+type StructDataValue = StructDataPrimitive | list["StructDataValue"] | dict[str, "StructDataValue"]
+type StructData = dict[str, StructDataValue]
 
 
 def coerce_struct_data(value: object) -> StructDataValue:

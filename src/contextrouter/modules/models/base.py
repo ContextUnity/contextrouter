@@ -1,38 +1,67 @@
-"""Base interfaces for model providers (LLM + embeddings)."""
+"""Base interfaces for model providers (multimodal LLM + embeddings)."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, AsyncIterator, Sequence
+from typing import AsyncIterator
 
 from contextrouter.core.tokens import BiscuitToken
 
+from .types import (
+    ModelCapabilities,
+    ModelRequest,
+    ModelResponse,
+    ModelStreamEvent,
+)
 
-class BaseLLM(ABC):
-    """Text generation model interface."""
+
+class BaseModel(ABC):
+    """Multimodal model interface.
+
+    Providers must implement:
+    - `capabilities` property
+    - `generate()` async method
+    - `stream()` async generator
+
+    Optionally override:
+    - `get_token_count()` if a real tokenizer is available
+    """
+
+    @property
+    @abstractmethod
+    def capabilities(self) -> ModelCapabilities:
+        """Declare what modalities this model supports."""
+        raise NotImplementedError
 
     @abstractmethod
     async def generate(
         self,
-        prompt: str,
-        tools: Sequence[Any] | None = None,
+        request: ModelRequest,
         *,
         token: BiscuitToken | None = None,
-    ) -> str:
+    ) -> ModelResponse:
+        """Generate a response from the model."""
         raise NotImplementedError
 
     @abstractmethod
-    async def stream(self, prompt: str, *, token: BiscuitToken | None = None) -> AsyncIterator[str]:
+    async def stream(
+        self,
+        request: ModelRequest,
+        *,
+        token: BiscuitToken | None = None,
+    ) -> AsyncIterator[ModelStreamEvent]:
+        """Stream tokens from the model."""
         raise NotImplementedError
 
-    @abstractmethod
     def get_token_count(self, text: str) -> int:
-        raise NotImplementedError
+        """Count tokens in text.
 
-    @abstractmethod
-    def as_chat_model(self) -> Any:
-        """Return underlying chat model object (LangChain), when available."""
-        raise NotImplementedError
+        Default implementation uses word splitting as a rough approximation.
+        Override this method if the provider has access to a real tokenizer.
+        """
+        if not text:
+            return 0
+        return max(1, len(text.split()))
 
 
 class BaseEmbeddings(ABC):
@@ -49,4 +78,4 @@ class BaseEmbeddings(ABC):
         raise NotImplementedError
 
 
-__all__ = ["BaseLLM", "BaseEmbeddings"]
+__all__ = ["BaseModel", "BaseEmbeddings"]

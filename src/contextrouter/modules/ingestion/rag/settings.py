@@ -31,7 +31,8 @@ class TaxonomySection(BaseModel):
     )
     include_types: list[str] = Field(default_factory=lambda: ["video", "book", "qa", "knowledge"])
     max_samples: int = Field(default=100, ge=1)
-    scan_model: str = "vertex/gemini-2.5-flash"
+    # If empty, use core config: `core_cfg.models.ingestion.taxonomy.model`
+    scan_model: str = ""
     hard_cap_samples: int = Field(default=500, ge=1)
     categories: dict[str, str] = Field(default_factory=dict)
 
@@ -39,7 +40,7 @@ class TaxonomySection(BaseModel):
     @classmethod
     def _validate_model_key(cls, v: str) -> str:
         vv = (v or "").strip()
-        if "/" not in vv:
+        if vv and "/" not in vv:
             raise ValueError("taxonomy.scan_model must be a model key: 'provider/name'")
         return vv
 
@@ -48,7 +49,8 @@ class GraphSection(BaseModel):
     model_config = ConfigDict(extra="ignore")
     include_types: list[str] = Field(default_factory=lambda: ["video", "book", "qa", "knowledge"])
     incremental: bool = False
-    model: str = "vertex/gemini-2.5-pro"
+    # If empty, use core config: `core_cfg.models.ingestion.graph.model`
+    model: str = ""
     builder_mode: Literal["llm", "local", "hybrid"] = "llm"
     cognee_enabled: bool = True
 
@@ -56,7 +58,7 @@ class GraphSection(BaseModel):
     @classmethod
     def _validate_model_key(cls, v: str) -> str:
         vv = (v or "").strip()
-        if "/" not in vv:
+        if vv and "/" not in vv:
             raise ValueError("graph.model must be a model key: 'provider/name'")
         return vv
 

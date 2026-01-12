@@ -234,7 +234,7 @@ async def stream_agent(
     core_cfg = get_core_config()
     effective_suggestions_model = (
         (suggestions_model or "").strip()
-        or (core_cfg.models.suggestions_llm or "").strip()
+        or (core_cfg.models.rag.suggestions.model or "").strip()
         or "vertex/gemini-2.5-flash-lite"
     )
 

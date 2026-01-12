@@ -1,8 +1,11 @@
 """Model and LLM configuration."""
 
+from __future__ import annotations
+
+from functools import partial
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RagConfig(BaseModel):
@@ -20,16 +23,70 @@ class RagConfig(BaseModel):
     data_store_id_green: str = ""
 
 
-class ModelsConfig(BaseModel):
+ModelSelectionStrategy = Literal["fallback", "parallel", "cost-priority"]
+
+
+class ModelSelector(BaseModel):
+    """Model selection + fallback for a single RAG component."""
+
     model_config = ConfigDict(extra="ignore")
 
-    default_llm: str = "vertex/gemini-2.5-flash"
+    model: str
+    fallback: list[str] = Field(default_factory=list)
+    strategy: ModelSelectionStrategy = "fallback"
+
+
+def _selector(model: str) -> ModelSelector:
+    # Used only for type inference/documentation; do not call directly as a default_factory.
+    return ModelSelector(model=model)
+
+
+def _selector_factory(model: str):
+    # `default_factory` must be a zero-arg callable; `partial` is perfect for this.
+    return partial(ModelSelector, model=model)
+
+
+class _ModelsGroup(BaseModel):
+    """Shared base for model-group configs (RAG, ingestion, etc.)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class RagModelsConfig(_ModelsGroup):
+    """Per-RAG-component model configuration (canonical)."""
+
+    intent: ModelSelector = Field(default_factory=_selector_factory("vertex/gemini-2.5-flash-lite"))
+    suggestions: ModelSelector = Field(
+        default_factory=_selector_factory("vertex/gemini-2.5-flash-lite")
+    )
+    generation: ModelSelector = Field(default_factory=_selector_factory("vertex/gemini-2.5-flash"))
+    no_results: ModelSelector = Field(
+        default_factory=_selector_factory("vertex/gemini-2.5-flash-lite")
+    )
+
+
+class IngestionModelsConfig(_ModelsGroup):
+    """Per-ingestion-stage model configuration (canonical).
+
+    Keep ingestion model choices in core config so ingestion TOML stays about ingestion behavior
+    (paths/workers/filters), not model selection.
+    """
+
+    taxonomy: ModelSelector = Field(default_factory=_selector_factory("vertex/gemini-2.5-flash"))
+    graph: ModelSelector = Field(default_factory=_selector_factory("vertex/gemini-2.5-pro"))
+    persona: ModelSelector = Field(default_factory=_selector_factory("vertex/gemini-2.5-flash"))
+
+
+class ModelsConfig(BaseModel):
+    # Accept both `default_llm` and canonical `default` from TOML/env.
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    default_llm: str = Field(default="vertex/gemini-2.5-flash", alias="default")
     default_embeddings: str = "vertex/text-embedding"
-    # Optional per-component overrides (keys are model registry keys).
-    intent_llm: str = "vertex/gemini-2.5-flash-lite"
-    suggestions_llm: str = "vertex/gemini-2.5-flash-lite"
-    generation_llm: str = "vertex/gemini-2.5-flash"
-    no_results_llm: str = "vertex/gemini-2.5-flash-lite"
+
+    # Canonical per-component configuration:
+    rag: RagModelsConfig = Field(default_factory=RagModelsConfig)
+    ingestion: IngestionModelsConfig = Field(default_factory=IngestionModelsConfig)
 
 
 class LLMConfig(BaseModel):

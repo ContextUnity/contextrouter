@@ -71,7 +71,27 @@ observability = [
     "opentelemetry-instrumentation-threading>=0.48b0",
 ]
 # Alternative LLM providers
+models-openai = [
+    "langchain-openai>=0.1.0",
+]
+models-anthropic = [
+    "langchain-anthropic>=0.1.0",
+]
+models-hf-hub = [
+    "huggingface-hub>=0.20.0",
+]
+# Convenience bundle (all non-Vertex LLM providers we ship today)
 models = [
+    "contextrouter[models-openai,models-anthropic,models-hf-hub]",
+]
+# CPU-only local inference (heavy dependencies, development only)
+hf-transformers = [
+    "transformers>=4.30.0",
+    "torch>=2.0.0",
+]
+# Local embeddings via sentence-transformers
+hf-embeddings = [
+    "sentence-transformers>=3.0.0",
 ]
 # Everything (for development/testing)
 all = [

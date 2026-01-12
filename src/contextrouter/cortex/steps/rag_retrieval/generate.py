@@ -78,18 +78,47 @@ class RAGStrategy(IntentStrategy):
             graph_facts=state.get("graph_facts", []) or [],
         )
 
+        from contextrouter.modules.models.types import ModelRequest, TextPart
+
         core_cfg = get_core_config()
-        model_key = (
-            core_cfg.models.generation_llm
-            if isinstance(core_cfg.models.generation_llm, str)
-            and core_cfg.models.generation_llm.strip()
-            else core_cfg.models.default_llm
+
+        generation_cfg = core_cfg.models.rag.generation
+        generation_model_key = generation_cfg.model or core_cfg.models.default_llm
+        fallback_keys = list(generation_cfg.fallback or [])
+        strategy = generation_cfg.strategy or "fallback"
+
+        model = model_registry.get_llm_with_fallback(
+            key=generation_model_key,
+            fallback_keys=fallback_keys,
+            strategy=strategy,
+            config=core_cfg,
         )
-        llm = model_registry.create_llm(model_key).as_chat_model()
+
+        # Direct model usage with new multimodal interface
+        llm = model
+
+        # Convert LangChain messages to text prompt
+        prompt_parts = []
+        for msg in prompt_messages:
+            if hasattr(msg, "content"):
+                content = msg.content
+                if isinstance(content, str):
+                    prompt_parts.append(content)
+                else:
+                    prompt_parts.append(str(content))
+
+        full_prompt = "\n\n".join(prompt_parts)
+
+        request = ModelRequest(
+            parts=[TextPart(text=full_prompt)],
+        )
+
         full_content = ""
-        async for chunk in llm.astream(prompt_messages):
-            if chunk and hasattr(chunk, "content"):
-                full_content += str(chunk.content)
+        async for event in llm.stream(request):
+            if getattr(event, "event_type", None) == "text_delta":
+                full_content += event.delta
+            elif getattr(event, "event_type", None) == "final_text":
+                full_content = event.text
 
         if not full_content.strip():
             full_content = "We apologize, but we encountered an issue generating a response. Please try again later."
@@ -122,18 +151,47 @@ class IdentityStrategy(IntentStrategy):
         system_content = IDENTITY_PROMPT.format(style_context=style_context, query=intent_text)
         prompt_messages = [SystemMessage(content=system_content), HumanMessage(content=intent_text)]
 
+        from contextrouter.modules.models.types import ModelRequest, TextPart
+
         core_cfg = get_core_config()
-        model_key = (
-            core_cfg.models.generation_llm
-            if isinstance(core_cfg.models.generation_llm, str)
-            and core_cfg.models.generation_llm.strip()
-            else core_cfg.models.default_llm
+
+        generation_cfg = core_cfg.models.rag.generation
+        generation_model_key = generation_cfg.model or core_cfg.models.default_llm
+        fallback_keys = list(generation_cfg.fallback or [])
+        strategy = generation_cfg.strategy or "fallback"
+
+        model = model_registry.get_llm_with_fallback(
+            key=generation_model_key,
+            fallback_keys=fallback_keys,
+            strategy=strategy,
+            config=core_cfg,
         )
-        llm = model_registry.create_llm(model_key).as_chat_model()
+
+        # Direct model usage with new multimodal interface
+        llm = model
+
+        # Convert LangChain messages to text prompt
+        prompt_parts = []
+        for msg in prompt_messages:
+            if hasattr(msg, "content"):
+                content = msg.content
+                if isinstance(content, str):
+                    prompt_parts.append(content)
+                else:
+                    prompt_parts.append(str(content))
+
+        full_prompt = "\n\n".join(prompt_parts)
+
+        request = ModelRequest(
+            parts=[TextPart(text=full_prompt)],
+        )
+
         full_content = ""
-        async for chunk in llm.astream(prompt_messages):
-            if chunk and hasattr(chunk, "content"):
-                full_content += str(chunk.content)
+        async for event in llm.stream(request):
+            if getattr(event, "event_type", None) == "text_delta":
+                full_content += event.delta
+            elif getattr(event, "event_type", None) == "final_text":
+                full_content = event.text
 
         # Suggestions for identity are handled by suggest node; keep empty here.
         return {
@@ -175,18 +233,47 @@ class TransformStrategy(IntentStrategy):
             ),
         ]
 
+        from contextrouter.modules.models.types import ModelRequest, TextPart
+
         core_cfg = get_core_config()
-        model_key = (
-            core_cfg.models.generation_llm
-            if isinstance(core_cfg.models.generation_llm, str)
-            and core_cfg.models.generation_llm.strip()
-            else core_cfg.models.default_llm
+
+        generation_cfg = core_cfg.models.rag.generation
+        generation_model_key = generation_cfg.model or core_cfg.models.default_llm
+        fallback_keys = list(generation_cfg.fallback or [])
+        strategy = generation_cfg.strategy or "fallback"
+
+        model = model_registry.get_llm_with_fallback(
+            key=generation_model_key,
+            fallback_keys=fallback_keys,
+            strategy=strategy,
+            config=core_cfg,
         )
-        llm = model_registry.create_llm(model_key).as_chat_model()
+
+        # Direct model usage with new multimodal interface
+        llm = model
+
+        # Convert LangChain messages to text prompt
+        prompt_parts = []
+        for msg in prompt_messages:
+            if hasattr(msg, "content"):
+                content = msg.content
+                if isinstance(content, str):
+                    prompt_parts.append(content)
+                else:
+                    prompt_parts.append(str(content))
+
+        full_prompt = "\n\n".join(prompt_parts)
+
+        request = ModelRequest(
+            parts=[TextPart(text=full_prompt)],
+        )
+
         full_content = ""
-        async for chunk in llm.astream(prompt_messages):
-            if chunk and hasattr(chunk, "content"):
-                full_content += str(chunk.content)
+        async for event in llm.stream(request):
+            if getattr(event, "event_type", None) == "text_delta":
+                full_content += event.delta
+            elif getattr(event, "event_type", None) == "final_text":
+                full_content = event.text
 
         return {
             "messages": [AIMessage(content=full_content)],

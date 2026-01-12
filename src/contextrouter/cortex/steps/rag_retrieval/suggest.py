@@ -65,22 +65,27 @@ async def generate_search_suggestions(state: AgentState) -> dict[str, object]:
         return {"search_suggestions": []}
 
     from contextrouter.core import get_core_config
+    from contextrouter.modules.models import model_registry
+    from contextrouter.modules.models.types import ModelRequest, TextPart
 
     core_cfg = get_core_config()
-    model = (
-        core_cfg.models.suggestions_llm
-        if isinstance(core_cfg.models.suggestions_llm, str)
-        and core_cfg.models.suggestions_llm.strip()
-        else core_cfg.models.default_llm
+
+    # Get suggestions model with fallback support
+    # TODO: Update to use new config structure once breaking changes are applied
+    suggestions_cfg = core_cfg.models.rag.suggestions
+    suggestions_model_key = suggestions_cfg.model or core_cfg.models.default_llm
+    fallback_keys = list(suggestions_cfg.fallback or [])
+    strategy = suggestions_cfg.strategy or "fallback"
+
+    model = model_registry.get_llm_with_fallback(
+        key=suggestions_model_key,
+        fallback_keys=fallback_keys,
+        strategy=strategy,
+        config=core_cfg,
     )
 
-    from contextrouter.modules.models import model_registry
-
-    llm = model_registry.create_llm(
-        model, temperature=0.2, max_output_tokens=256, streaming=False
-    ).as_chat_model()
-
-    from langchain_core.messages import HumanMessage, SystemMessage
+    # Direct model usage with new multimodal interface
+    llm = model
 
     from contextrouter.cortex.prompting import (
         SEARCH_SUGGESTIONS_PROMPT,
@@ -106,11 +111,18 @@ async def generate_search_suggestions(state: AgentState) -> dict[str, object]:
     system_prompt = _fill(base_prompt, query=str(user_query), ctx=str(context or ""))
 
     with retrieval_span(name="suggest", input_data={"query": user_query[:200]}):
-        resp = await llm.ainvoke(
-            [SystemMessage(content=system_prompt), HumanMessage(content=user_query)]
+        # Build prompt from system and user messages
+        full_prompt = f"{system_prompt}\n\n{user_query}"
+
+        request = ModelRequest(
+            parts=[TextPart(text=full_prompt)],
+            temperature=0.2,
+            max_output_tokens=256,
         )
 
-    text = resp.content if hasattr(resp, "content") else str(resp)
+        resp = await llm.generate(request)
+
+    text = resp.text
     raw = strip_json_fence(text)
     pipeline_log("suggest.raw", text=raw[:200])
 

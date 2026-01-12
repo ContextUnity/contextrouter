@@ -29,6 +29,50 @@ class OpenAIConfig(BaseModel):
     organization: str | None = None
 
 
+class AnthropicConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    api_key: str = ""
+
+
+class OpenRouterConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    api_key: str = ""
+    base_url: str = "https://openrouter.ai/api/v1"
+
+
+class LocalOpenAIConfig(BaseModel):
+    """Base URLs for local OpenAI-compatible servers."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    ollama_base_url: str = "http://localhost:11434/v1"
+    vllm_base_url: str = "http://localhost:8000/v1"
+
+
+class GroqConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    api_key: str = ""
+    base_url: str = "https://api.groq.com/openai/v1"
+
+
+class RunPodConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    api_key: str = ""
+    # Usually: https://api.runpod.ai/v2/<endpoint_id>/openai/v1
+    base_url: str = ""
+
+
+class HuggingFaceHubConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    api_key: str = ""  # HF_TOKEN
+    base_url: str = "https://api-inference.huggingface.co/v1"
+
+
 class GoogleCSEConfig(BaseModel):
     # Support `cx` key in TOML (`google_cse.cx`) while keeping a more descriptive field name internally.
     model_config = ConfigDict(extra="ignore", populate_by_name=True)

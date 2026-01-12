@@ -10,8 +10,6 @@ import logging
 import re
 import time
 
-from langchain_core.messages import HumanMessage, SystemMessage
-
 from contextrouter.cortex import AgentState, get_graph_service, get_last_user_query
 from contextrouter.modules.observability import retrieval_span
 
@@ -76,7 +74,7 @@ def _extract_taxonomy_concepts(
     return list(categories)[:5], list(concepts)[:10]
 
 
-def detect_intent(state: AgentState) -> dict[str, object]:
+async def detect_intent(state: AgentState) -> dict[str, object]:
     """Detect intent and derive retrieval queries for the current user message."""
     user_query = (
         get_last_user_query(state.get("messages") or [])
@@ -100,19 +98,25 @@ def detect_intent(state: AgentState) -> dict[str, object]:
     ignore_history_hint = user_query.lower().startswith("new topic")
 
     from contextrouter.core import get_core_config
+    from contextrouter.modules.models import model_registry
+    from contextrouter.modules.models.types import ModelRequest, TextPart
 
     core_cfg = get_core_config()
-    intent_model = (
-        core_cfg.models.intent_llm
-        if isinstance(core_cfg.models.intent_llm, str) and core_cfg.models.intent_llm.strip()
-        else "vertex/gemini-2.5-flash-lite"
+
+    intent_cfg = core_cfg.models.rag.intent
+    intent_model_key = intent_cfg.model or "vertex/gemini-2.5-flash-lite"
+    fallback_keys = list(intent_cfg.fallback or [])
+    strategy = intent_cfg.strategy or "fallback"
+
+    model = model_registry.get_llm_with_fallback(
+        key=intent_model_key,
+        fallback_keys=fallback_keys,
+        strategy=strategy,
+        config=core_cfg,
     )
 
-    from contextrouter.modules.models import model_registry
-
-    llm = model_registry.create_llm(
-        intent_model, temperature=0.0, max_output_tokens=256, streaming=False
-    ).as_chat_model()
+    # Direct model usage with new multimodal interface
+    llm = model
 
     from contextrouter.cortex.prompting import INTENT_DETECTION_PROMPT
 
@@ -125,12 +129,26 @@ def detect_intent(state: AgentState) -> dict[str, object]:
 
     with retrieval_span(name="detect_intent", input_data={"query": user_query[:200]}) as span_ctx:
         t0 = time.perf_counter()
-        resp = llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=user_query)])
+
+        # Build prompt from system and user messages
+        prompt_parts = []
+        if system_prompt:
+            prompt_parts.append(system_prompt)
+        prompt_parts.append(user_query)
+        full_prompt = "\n\n".join(prompt_parts)
+
+        request = ModelRequest(
+            parts=[TextPart(text=full_prompt)],
+            temperature=0.0,
+            max_output_tokens=256,
+        )
+
+        resp = await llm.generate(request)
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
         pipeline_log("detect_intent.llm", duration_ms=elapsed_ms)
         span_ctx["output"] = {"elapsed_ms": elapsed_ms}
 
-    text = resp.content if hasattr(resp, "content") else str(resp)
+    text = resp.text
     raw = strip_json_fence(text)
     pipeline_log("detect_intent.raw", text=raw[:200])
 

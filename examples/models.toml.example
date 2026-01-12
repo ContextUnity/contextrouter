@@ -1,0 +1,35 @@
+# ContextRouter Models Configuration Example (snippet for `settings.toml`)
+#
+# Copy the relevant sections into your `settings.toml` (loaded by `Config.load()`).
+#
+# IMPORTANT: API keys are NEVER stored in config files. Use environment variables:
+# - OPENAI_API_KEY=...
+# - ANTHROPIC_API_KEY=...
+
+[models]
+default = "vertex/gemini-2.5-flash"
+default_embeddings = "vertex/text-embedding"
+
+[models.rag.intent]
+model = "vertex/gemini-2.5-flash-lite"
+fallback = ["anthropic/claude-haiku-4.5"]
+strategy = "fallback"
+
+[models.rag.generation]
+model = "vertex/gemini-2.5-flash"
+fallback = ["openai/gpt-5.1", "anthropic/claude-sonnet-4.5"]
+strategy = "fallback"
+
+[models.rag.no_results]
+model = "vertex/gemini-2.5-flash-lite"
+fallback = ["anthropic/claude-haiku-4.5"]
+strategy = "fallback"
+
+[vertex]
+# Vertex AI uses GCP credentials (ADC), not API keys.
+project_id = "my-gcp-project"
+location = "us-central1"
+
+# Notes:
+# - OpenAI/OpenRouter/local providers require `contextrouter[models]`.
+# - HuggingFace local models are available via `hf/<model_id>`.

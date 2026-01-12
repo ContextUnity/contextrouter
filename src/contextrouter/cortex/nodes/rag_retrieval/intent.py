@@ -16,7 +16,7 @@ class DetectIntentAgent(BaseAgent):
     """Class wrapper for detect_intent node (strict: nodes are classes)."""
 
     async def process(self, state: AgentState) -> dict[str, object]:
-        return _detect_intent(state)
+        return await _detect_intent(state)
 
 
 __all__ = ["DetectIntentAgent"]

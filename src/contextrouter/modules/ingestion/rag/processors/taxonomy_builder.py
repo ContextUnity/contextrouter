@@ -61,7 +61,11 @@ def build_taxonomy(
 
     focus = config.taxonomy.philosophy_focus.strip()
     max_samples = config.taxonomy.max_samples
-    scan_model = config.taxonomy.scan_model.strip() or MODEL_FLASH
+    scan_model = (
+        config.taxonomy.scan_model.strip()
+        or core_cfg.models.ingestion.taxonomy.model.strip()
+        or MODEL_FLASH
+    )
 
     # Load predefined categories from config
     predefined_cats = _load_predefined_categories(config.taxonomy.categories)

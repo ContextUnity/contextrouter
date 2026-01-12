@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import re
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage
 
 from contextrouter.core.config import get_core_config
 from contextrouter.modules.observability.langfuse import retrieval_span
@@ -50,20 +50,24 @@ async def no_results_response(
         try:
             core_cfg = get_core_config()
             from contextrouter.modules.models.registry import model_registry
+            from contextrouter.modules.models.types import ModelRequest, TextPart
 
-            # Use configured model key directly (no parsing / provider-specific hacks).
-            model_key = (
-                core_cfg.models.no_results_llm
-                if isinstance(getattr(core_cfg.models, "no_results_llm", None), str)
-                and core_cfg.models.no_results_llm.strip()
-                else core_cfg.models.default_llm
+            # Get no_results model with fallback support
+            # TODO: Update to use new config structure once breaking changes are applied
+            no_results_cfg = core_cfg.models.rag.no_results
+            no_results_model_key = no_results_cfg.model or core_cfg.models.default_llm
+            fallback_keys = list(no_results_cfg.fallback or [])
+            strategy = no_results_cfg.strategy or "fallback"
+
+            model = model_registry.get_llm_with_fallback(
+                key=no_results_model_key,
+                fallback_keys=fallback_keys,
+                strategy=strategy,
+                config=core_cfg,
             )
-            llm = model_registry.create_llm(
-                model_key,
-                temperature=core_cfg.llm.temperature,
-                max_output_tokens=512,
-                streaming=True,
-            ).as_chat_model()
+
+            # Direct model usage with new multimodal interface
+            llm = model
 
             from contextrouter.cortex.prompting import NO_RESULTS_PROMPT
 
@@ -73,15 +77,21 @@ async def no_results_response(
                 conversation_history=conversation_history,
             )
 
+            # Build prompt from system and user messages
+            full_prompt = f"{system_prompt}\n\n{user_query}"
+
+            request = ModelRequest(
+                parts=[TextPart(text=full_prompt)],
+                temperature=core_cfg.llm.temperature,
+                max_output_tokens=512,
+            )
+
             full_content = ""
-            async for chunk in llm.astream(
-                [
-                    SystemMessage(content=system_prompt),
-                    HumanMessage(content=user_query),
-                ]
-            ):
-                if chunk and hasattr(chunk, "content"):
-                    full_content += str(chunk.content)
+            async for event in llm.stream(request):
+                if getattr(event, "event_type", None) == "text_delta":
+                    full_content += event.delta
+                elif getattr(event, "event_type", None) == "final_text":
+                    full_content = event.text
 
             out = _strip_leading_translation_json(full_content)
             span_ctx["output"] = {"response_len": len(out)}

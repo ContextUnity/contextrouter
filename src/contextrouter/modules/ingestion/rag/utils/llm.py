@@ -16,8 +16,6 @@ import logging
 import time
 from typing import Any
 
-from langchain_core.messages import SystemMessage
-
 from contextrouter.core.config import Config
 from contextrouter.modules.models.registry import model_registry
 
@@ -45,17 +43,21 @@ def llm_generate(
 
     for attempt in range(max_retries):
         try:
-            llm = model_registry.create_llm(
-                model,
+            # Get model with fallback support
+            model_instance = model_registry.get_llm_with_fallback(
+                key=model,
                 config=core_cfg,
+            )
+
+            from contextrouter.modules.models.types import ModelRequest, TextPart
+
+            request = ModelRequest(
+                parts=[TextPart(text=prompt)],
                 temperature=temperature,
                 max_output_tokens=max_tokens,
-                streaming=False,
             )
-            chat = llm.as_chat_model()
-            resp = chat.invoke([SystemMessage(content=prompt)])
-            text = getattr(resp, "content", "")
-            text = text if isinstance(text, str) else str(text)
+            resp = await model_instance.generate(request)
+            text = resp.text
             text = text.strip()
             if not text:
                 LOGGER.warning("Empty text in response, attempt %d/%d", attempt + 1, max_retries)

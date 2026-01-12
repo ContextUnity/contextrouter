@@ -13,10 +13,16 @@ from .ingestion import RAGConfig
 from .models import LLMConfig, ModelsConfig, RouterConfig
 from .paths import ConfigPaths
 from .providers import (
+    AnthropicConfig,
     GoogleCSEConfig,
+    GroqConfig,
+    HuggingFaceHubConfig,
     LangfuseConfig,
+    LocalOpenAIConfig,
     OpenAIConfig,
+    OpenRouterConfig,
     PluginsConfig,
+    RunPodConfig,
     VertexConfig,
 )
 from .security import SecurityConfig
@@ -79,6 +85,12 @@ class Config(BaseModel):
     # Provider configurations
     vertex: VertexConfig = Field(default_factory=VertexConfig)
     openai: OpenAIConfig = Field(default_factory=OpenAIConfig)
+    anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
+    openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)
+    groq: GroqConfig = Field(default_factory=GroqConfig)
+    runpod: RunPodConfig = Field(default_factory=RunPodConfig)
+    hf_hub: HuggingFaceHubConfig = Field(default_factory=HuggingFaceHubConfig)
+    local: LocalOpenAIConfig = Field(default_factory=LocalOpenAIConfig)
     google_cse: GoogleCSEConfig = Field(default_factory=GoogleCSEConfig)
     langfuse: LangfuseConfig = Field(default_factory=LangfuseConfig)
 
@@ -160,13 +172,13 @@ class Config(BaseModel):
         if llm_val := get_env("CONTEXTROUTER_DEFAULT_LLM"):
             self.models.default_llm = llm_val
         if intent_val := get_env("CONTEXTROUTER_INTENT_LLM"):
-            self.models.intent_llm = intent_val
+            self.models.rag.intent.model = intent_val
         if suggestions_val := get_env("CONTEXTROUTER_SUGGESTIONS_LLM"):
-            self.models.suggestions_llm = suggestions_val
+            self.models.rag.suggestions.model = suggestions_val
         if generation_val := get_env("CONTEXTROUTER_GENERATION_LLM"):
-            self.models.generation_llm = generation_val
+            self.models.rag.generation.model = generation_val
         if no_results_val := get_env("CONTEXTROUTER_NO_RESULTS_LLM"):
-            self.models.no_results_llm = no_results_val
+            self.models.rag.no_results.model = no_results_val
 
         # Vertex configuration
         if project_id := get_env("CONTEXTROUTER_VERTEX_PROJECT_ID"):
@@ -186,6 +198,40 @@ class Config(BaseModel):
             self.openai.api_key = openai_key
         if openai_org := get_env("OPENAI_ORGANIZATION"):
             self.openai.organization = openai_org
+
+        # Anthropic configuration
+        if anthropic_key := get_env("ANTHROPIC_API_KEY"):
+            self.anthropic.api_key = anthropic_key
+
+        # OpenRouter configuration
+        if openrouter_key := get_env("OPENROUTER_API_KEY"):
+            self.openrouter.api_key = openrouter_key
+        if openrouter_base_url := get_env("OPENROUTER_BASE_URL"):
+            self.openrouter.base_url = openrouter_base_url
+
+        # Groq configuration
+        if groq_key := get_env("GROQ_API_KEY"):
+            self.groq.api_key = groq_key
+        if groq_base_url := get_env("GROQ_BASE_URL"):
+            self.groq.base_url = groq_base_url
+
+        # RunPod configuration
+        if runpod_key := get_env("RUNPOD_API_KEY"):
+            self.runpod.api_key = runpod_key
+        if runpod_base_url := get_env("RUNPOD_BASE_URL"):
+            self.runpod.base_url = runpod_base_url
+
+        # HuggingFace Hub configuration
+        if hf_key := get_env("HF_TOKEN"):
+            self.hf_hub.api_key = hf_key
+        if hf_base_url := get_env("HF_BASE_URL"):
+            self.hf_hub.base_url = hf_base_url
+
+        # Local OpenAI-compatible servers (vLLM/Ollama)
+        if v := get_env("LOCAL_OLLAMA_BASE_URL"):
+            self.local.ollama_base_url = v
+        if v := get_env("LOCAL_VLLM_BASE_URL"):
+            self.local.vllm_base_url = v
 
         # Google CSE configuration
         if cse_enabled := get_bool_env("GOOGLE_CSE_ENABLED"):

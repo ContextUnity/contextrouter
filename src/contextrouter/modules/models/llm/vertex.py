@@ -3,15 +3,28 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, AsyncIterator, Sequence
+from typing import AsyncIterator
 
 from langchain_core.messages import SystemMessage
 
 from contextrouter.core.config import Config
 from contextrouter.core.tokens import BiscuitToken
 
-from ..base import BaseLLM
+from ..base import BaseModel
 from ..registry import model_registry
+from ..types import (
+    AudioPart,
+    FinalTextEvent,
+    ImagePart,
+    ModelCapabilities,
+    ModelRequest,
+    ModelResponse,
+    ModelStreamEvent,
+    ProviderInfo,
+    TextDeltaEvent,
+    TextPart,
+    VideoPart,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +32,10 @@ logger = logging.getLogger(__name__)
 @model_registry.register_llm("vertex", "gemini-2.5-flash-lite")
 @model_registry.register_llm("vertex", "gemini-2.5-flash")
 @model_registry.register_llm("vertex", "gemini-2.5-pro")
-class VertexLLM(BaseLLM):
+class VertexLLM(BaseModel):
     """Vertex Gemini via langchain-google-genai.
+
+    Supports multimodal inputs (text, image, audio) where available.
 
     IMPORTANT: This class MUST NOT access `os.environ` directly. All configuration
     must come from `Config` (which may be layered from env/TOML by the host).
@@ -34,7 +49,7 @@ class VertexLLM(BaseLLM):
         temperature: float | None = None,
         max_output_tokens: int | None = None,
         streaming: bool = True,
-        **_: Any,
+        **_: object,
     ) -> None:
         self._cfg = config
         self._credentials = None
@@ -66,6 +81,9 @@ class VertexLLM(BaseLLM):
         if not project_id or not location:
             # Keep error explicit and early (enterprise-friendly).
             raise ValueError("VertexLLM requires vertex.project_id and vertex.location in Config")
+
+        # Determine capabilities based on model
+        self._capabilities = self._get_capabilities(chosen_model)
 
         # Prefer the Vertex-native LangChain integration when available.
         # This avoids ctor-arg drift in langchain-google-genai and keeps auth on ADC.
@@ -105,25 +123,168 @@ class VertexLLM(BaseLLM):
                 max_retries=config.llm.max_retries,
             )
 
+    @property
+    def capabilities(self) -> ModelCapabilities:
+        return self._capabilities
+
+    def _get_capabilities(self, model_name: str) -> ModelCapabilities:
+        """Determine capabilities based on model name."""
+        # Gemini 1.5 and 2.5 models support multimodal (text, image, audio, video)
+        if "gemini-1.5" in model_name or "gemini-2.5" in model_name:
+            return ModelCapabilities(
+                supports_text=True, supports_image=True, supports_audio=True, supports_video=True
+            )
+        # Fallback to text-only for older models
+        return ModelCapabilities(
+            supports_text=True,
+            supports_image=False,
+            supports_audio=False,
+            supports_video=False,
+        )
+
     async def generate(
         self,
-        prompt: str,
-        tools: Sequence[Any] | None = None,
+        request: ModelRequest,
         *,
         token: BiscuitToken | None = None,
-    ) -> str:
-        # Tools/function calling is a future enhancement for this abstraction.
-        _ = tools, token
-        msg = await self._model.ainvoke([SystemMessage(content=prompt)])
-        content = getattr(msg, "content", "")
-        return content if isinstance(content, str) else str(content)
-
-    async def stream(self, prompt: str, *, token: BiscuitToken | None = None) -> AsyncIterator[str]:
+    ) -> ModelResponse:
         _ = token
-        async for chunk in self._model.astream([SystemMessage(content=prompt)]):
+        if not request.parts:
+            raise ValueError("Request must contain at least one part")
+
+        # Build multimodal messages
+        messages = self._build_messages(request)
+
+        model = self._model.bind(
+            temperature=request.temperature,
+            max_output_tokens=request.max_output_tokens,
+            timeout=request.timeout_sec,
+            max_retries=request.max_retries,
+        )
+        msg = await model.ainvoke(messages)
+        content = getattr(msg, "content", "")
+        text_result = content if isinstance(content, str) else str(content)
+
+        return ModelResponse(
+            text=text_result,
+            raw_provider=ProviderInfo(
+                provider="vertex",
+                model_name=(
+                    self._model.model_name if hasattr(self._model, "model_name") else "unknown"
+                ),
+                model_key=(
+                    f"vertex/{self._model.model_name}"
+                    if hasattr(self._model, "model_name")
+                    else "vertex/unknown"
+                ),
+            ),
+        )
+
+    async def stream(
+        self,
+        request: ModelRequest,
+        *,
+        token: BiscuitToken | None = None,
+    ) -> AsyncIterator[ModelStreamEvent]:
+        _ = token
+        if not request.parts:
+            raise ValueError("Request must contain at least one part")
+
+        # Build multimodal messages
+        messages = self._build_messages(request)
+
+        model = self._model.bind(
+            temperature=request.temperature,
+            max_output_tokens=request.max_output_tokens,
+            timeout=request.timeout_sec,
+            max_retries=request.max_retries,
+        )
+
+        full = ""
+        async for chunk in model.astream(messages):
             c = getattr(chunk, "content", "")
             if isinstance(c, str) and c:
-                yield c
+                full += c
+                yield TextDeltaEvent(delta=c)
+        yield FinalTextEvent(text=full)
+
+    def _build_messages(self, request: ModelRequest) -> list[object]:
+        """Build Gemini-compatible messages with multimodal support."""
+        from langchain_core.messages import HumanMessage
+
+        messages: list[object] = []
+        if request.system:
+            messages.append(SystemMessage(content=request.system))
+
+        # Check for multimodal parts
+        has_multimodal = any(
+            isinstance(p, (ImagePart, AudioPart, VideoPart)) for p in request.parts
+        )
+
+        if has_multimodal:
+            # Build multimodal content for Gemini
+            # Gemini uses a content array with different part types
+            content: list[dict[str, object]] = []
+            for part in request.parts:
+                if isinstance(part, TextPart):
+                    content.append({"type": "text", "text": part.text})
+                elif isinstance(part, ImagePart):
+                    if part.data_b64:
+                        content.append(
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{part.mime};base64,{part.data_b64}"},
+                            }
+                        )
+                    elif part.uri:
+                        content.append(
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": part.uri},
+                            }
+                        )
+                elif isinstance(part, AudioPart):
+                    # Gemini accepts audio via data URL or GCS URI
+                    if part.data_b64:
+                        content.append(
+                            {
+                                "type": "media",
+                                "media": {"url": f"data:{part.mime};base64,{part.data_b64}"},
+                            }
+                        )
+                    elif part.uri:
+                        content.append(
+                            {
+                                "type": "media",
+                                "media": {"url": part.uri},
+                            }
+                        )
+                elif isinstance(part, VideoPart):
+                    # Gemini accepts video via GCS URI primarily
+                    if part.data_b64:
+                        content.append(
+                            {
+                                "type": "media",
+                                "media": {"url": f"data:{part.mime};base64,{part.data_b64}"},
+                            }
+                        )
+                    elif part.uri:
+                        content.append(
+                            {
+                                "type": "media",
+                                "media": {"url": part.uri},
+                            }
+                        )
+            messages.append(HumanMessage(content=content))
+        else:
+            # Text-only: simple string content
+            text_parts = [p.text for p in request.parts if isinstance(p, TextPart)]
+            if not text_parts:
+                raise ValueError("Request must contain at least one text part")
+            prompt = "".join(text_parts)
+            messages.append(HumanMessage(content=prompt))
+
+        return messages
 
     def get_token_count(self, text: str) -> int:
         """Count tokens using the underlying model's tokenizer."""
@@ -134,9 +295,6 @@ class VertexLLM(BaseLLM):
         except (AttributeError, TypeError, ValueError):
             # Fallback to a rough estimate (approx 4 chars per token)
             return max(1, len(text) // 4)
-
-    def as_chat_model(self) -> Any:
-        return self._model
 
 
 __all__ = ["VertexLLM"]
