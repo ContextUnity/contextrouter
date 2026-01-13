@@ -16,12 +16,12 @@ from ..processors.style import (
 from ..settings import RagIngestionConfig
 from .store import read_raw_data_jsonl
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def build_persona(*, config: RagIngestionConfig, core_cfg: Config) -> Path | None:
     if not config.persona.enabled:
-        LOGGER.info("persona: disabled")
+        logger.info("persona: disabled")
         return None
 
     paths = get_assets_paths(config)
@@ -38,7 +38,7 @@ def build_persona(*, config: RagIngestionConfig, core_cfg: Config) -> Path | Non
 
     tone_items = _load_rawdata_from_globs(assets_folder, _coerce_str_list(tone_globs))
     if not tone_items:
-        LOGGER.warning("persona: no tone samples found (globs=%s)", tone_globs)
+        logger.warning("persona: no tone samples found (globs=%s)", tone_globs)
 
     bio_items = _load_rawdata_from_globs(assets_folder, _coerce_str_list(bio_globs))
     bio_text = ""
@@ -52,7 +52,7 @@ def build_persona(*, config: RagIngestionConfig, core_cfg: Config) -> Path | Non
                 [x.content[:2000] for x in bio_items if isinstance(x.content, str)]
             )
 
-    LOGGER.info(
+    logger.info(
         "persona: generating (persona_name=%s tone_items=%d bio_items=%d)",
         persona_name,
         len(tone_items),
@@ -91,7 +91,7 @@ def _iter_glob_paths(root: Path, patterns: Iterable[str]) -> list[Path]:
         try:
             out.extend(list(root.glob(pat)))
         except Exception as e:
-            LOGGER.debug("Failed to glob pattern '%s': %s", pat, e)
+            logger.debug("Failed to glob pattern '%s': %s", pat, e)
             continue
     # Dedup, keep stable order
     seen: set[Path] = set()

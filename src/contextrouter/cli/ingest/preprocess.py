@@ -16,7 +16,7 @@ from contextrouter.cli.ingest.common import (
     suppress_noisy_loggers,
 )
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 @click.command("preprocess")
@@ -61,7 +61,7 @@ def cmd_preprocess(
     try:
         build_ingestion_report(config=cfg, types=types)
     except Exception:
-        LOGGER.debug("report: failed after preprocess", exc_info=True)
+        logger.debug("report: failed after preprocess", exc_info=True)
 
 
 __all__ = ["cmd_preprocess"]

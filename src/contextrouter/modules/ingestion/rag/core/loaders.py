@@ -47,7 +47,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # Files to skip (temp files, system files)
 SKIP_PREFIXES = ("~$", ".", "__")
@@ -127,7 +127,7 @@ def read_text_file(
         except UnicodeDecodeError:
             continue
         except Exception as e:
-            LOGGER.warning("Failed to read %s with %s: %s", path.name, encoding, e)
+            logger.warning("Failed to read %s with %s: %s", path.name, encoding, e)
             return None
 
     # Final attempt with error handling
@@ -135,7 +135,7 @@ def read_text_file(
         content = path.read_text(encoding=encodings[0], errors=errors)
         return LoadedFile(path=path, content=content, encoding=f"{encodings[0]}+{errors}")
     except Exception as e:
-        LOGGER.warning("Failed to read %s: %s", path.name, e)
+        logger.warning("Failed to read %s: %s", path.name, e)
         return None
 
 
@@ -156,7 +156,7 @@ def load_text_files(
         List of loaded content (or transformed results)
     """
     if not directory.exists():
-        LOGGER.warning("Directory does not exist: %s", directory)
+        logger.warning("Directory does not exist: %s", directory)
         return []
 
     results = []
@@ -183,7 +183,7 @@ def find_alternative_dir(base_path: Path, alternatives: tuple[str, ...]) -> Path
     for alt_name in alternatives:
         alt_path = parent / alt_name
         if alt_path.exists():
-            LOGGER.info("Using alternative directory: %s", alt_path)
+            logger.info("Using alternative directory: %s", alt_path)
             return alt_path
     return None
 
@@ -218,7 +218,7 @@ class FileLoaderMixin:
         if alternatives and (alt := find_alternative_dir(source_dir, alternatives)):
             return alt
 
-        LOGGER.warning("Source directory does not exist: %s", assets_path)
+        logger.warning("Source directory does not exist: %s", assets_path)
         return None
 
     def _load_text_files(

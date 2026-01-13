@@ -34,7 +34,7 @@ from .utils import (
     normalize_article,
 )
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # Default allowed relation labels (can be overridden by ontology)
 DEFAULT_ALLOWED_LABELS = {
@@ -98,7 +98,7 @@ class GraphBuilder:
 
                 self._cognee_builder = CogneeGraphBuilder()
             except ImportError:
-                LOGGER.warning("Cognee not available, falling back to LLM mode")
+                logger.warning("Cognee not available, falling back to LLM mode")
                 if self.mode == "local":
                     self.mode = "llm"
 
@@ -114,21 +114,21 @@ class GraphBuilder:
             with open(path, encoding="utf-8") as f:
                 self.taxonomy = json.load(f)
             self.canonical_map = self.taxonomy.get("canonical_map", {})
-            LOGGER.info("Loaded taxonomy with %d canonical mappings", len(self.canonical_map))
+            logger.info("Loaded taxonomy with %d canonical mappings", len(self.canonical_map))
         except Exception as e:
-            LOGGER.warning("Failed to load taxonomy: %s", e)
+            logger.warning("Failed to load taxonomy: %s", e)
 
     def _load_ontology(self, path: Path | None) -> None:
         """Load ontology for relation label validation."""
         if not path:
-            LOGGER.info(
+            logger.info(
                 "No ontology specified, using default allowed_labels (%d)",
                 len(self.allowed_relation_labels),
             )
             return
 
         if not path.exists():
-            LOGGER.warning("Ontology path specified but file not found: %s", path)
+            logger.warning("Ontology path specified but file not found: %s", path)
             return
 
         try:
@@ -142,7 +142,7 @@ class GraphBuilder:
                 if parsed:
                     self.allowed_relation_labels = parsed
                     sample = ", ".join(sorted(parsed)[:5])
-                    LOGGER.info(
+                    logger.info(
                         "Loaded ontology from %s: %d allowed_labels (%s%s)",
                         path,
                         len(parsed),
@@ -150,11 +150,11 @@ class GraphBuilder:
                         "..." if len(parsed) > 5 else "",
                     )
                 else:
-                    LOGGER.warning("Ontology file has empty allowed_labels, using defaults")
+                    logger.warning("Ontology file has empty allowed_labels, using defaults")
             else:
-                LOGGER.warning("Ontology file missing 'relations.allowed_labels', using defaults")
+                logger.warning("Ontology file missing 'relations.allowed_labels', using defaults")
         except Exception as e:
-            LOGGER.warning("Failed to load ontology from %s: %s", path, e)
+            logger.warning("Failed to load ontology from %s: %s", path, e)
 
     def _normalize_entity(self, entity: str) -> str:
         """Normalize entity using taxonomy canonical map + fuzzy matching."""
@@ -273,7 +273,7 @@ class GraphBuilder:
         content = raw_data.content
 
         if len(content) < 200:
-            LOGGER.debug("Skipping graph extraction for short content (%d chars)", len(content))
+            logger.debug("Skipping graph extraction for short content (%d chars)", len(content))
             return ([], [])
 
         # Truncate large content
@@ -289,13 +289,13 @@ class GraphBuilder:
                 and self._cognee_builder.is_available()
             ):
                 try:
-                    LOGGER.debug("Attempting local graph extraction with cognee")
+                    logger.debug("Attempting local graph extraction with cognee")
                     entities, relations = self._cognee_builder.build_graph(content)
-                    LOGGER.info(
+                    logger.info(
                         f"Local extraction successful: {len(entities)} entities, {len(relations)} relations"
                     )
                 except Exception as e:
-                    LOGGER.warning(
+                    logger.warning(
                         f"Local extraction failed ({e}), falling back to LLM"
                         if self.mode == "hybrid"
                         else f"Local extraction failed: {e}"
@@ -308,7 +308,7 @@ class GraphBuilder:
                 # Use LLM extraction (default or when cognee unavailable)
                 entities, relations = self._extract_with_llm(content)
         except Exception as e:
-            LOGGER.error(f"Graph extraction failed: {e}")
+            logger.error(f"Graph extraction failed: {e}")
             raise
 
     def _extract_with_llm(self, content: str) -> tuple[list[str], list[dict]]:
@@ -347,7 +347,7 @@ class GraphBuilder:
 
             return (normalized_entities, normalized_relations)
         except Exception as e:
-            LOGGER.warning("Failed to extract graph data from content: %s", e)
+            logger.warning("Failed to extract graph data from content: %s", e)
             # Don't raise here - allow pipeline to continue with empty results
             return ([], [])
 
@@ -390,9 +390,9 @@ class GraphBuilder:
                 ),
                 encoding="utf-8",
             )
-            LOGGER.warning("graph debug bundle written: %s", path)
+            logger.warning("graph debug bundle written: %s", path)
         except Exception as e:
-            LOGGER.debug("graph debug bundle write failed: %s", e)
+            logger.debug("graph debug bundle write failed: %s", e)
 
     def _merge_duplicate_nodes(self) -> dict[str, int]:
         """Merge duplicate nodes (case, article, name variations)."""
@@ -527,7 +527,7 @@ class GraphBuilder:
             if cleaned := clean_entity(node_str):
                 if cleaned != node_str:
                     node_renames[node_str] = cleaned
-                    LOGGER.warning("Found unclean node: %r -> %r", node_str, cleaned)
+                    logger.warning("Found unclean node: %r -> %r", node_str, cleaned)
 
         # Apply renames
         for old_name, new_name in node_renames.items():
@@ -580,7 +580,7 @@ class GraphBuilder:
             try:
                 self.graph.remove_edge(u, v)
             except Exception as e:
-                LOGGER.warning("Failed to remove edge (%s, %s): %s", u, v, e)
+                logger.warning("Failed to remove edge (%s, %s): %s", u, v, e)
         stats["label_edges_removed"] = len(set(bad_edges))
 
         # Remove newly isolated nodes
@@ -604,20 +604,20 @@ class GraphBuilder:
             try:
                 # Load graph with integrity verification
                 self.graph = load_graph_secure(output_path)
-                LOGGER.info(
+                logger.info(
                     "Existing graph loaded securely with %d nodes and %d edges",
                     self.graph.number_of_nodes(),
                     self.graph.number_of_edges(),
                 )
             except Exception as e:
-                LOGGER.warning("Failed to load existing graph, starting fresh: %s", e)
+                logger.warning("Failed to load existing graph, starting fresh: %s", e)
                 self.graph = nx.Graph()
         else:
             if output_path.exists() and not incremental:
-                LOGGER.info("Rebuilding graph from scratch (ignoring existing %s)", output_path)
+                logger.info("Rebuilding graph from scratch (ignoring existing %s)", output_path)
             self.graph = nx.Graph()
 
-        LOGGER.info(
+        logger.info(
             "Building knowledge graph from %d raw data items (workers=%d model=%s incremental=%s)",
             len(raw_data_list),
             self.max_workers,
@@ -637,7 +637,7 @@ class GraphBuilder:
 
             for future in as_completed(futures):
                 completed = sum(1 for f in futures if f.done())
-                LOGGER.info(
+                logger.info(
                     "Processing graph: %d/%d (%.1f%%)",
                     completed,
                     len(raw_data_list),
@@ -650,9 +650,9 @@ class GraphBuilder:
                     all_entities.update(e for e in entities if isinstance(e, str) and e.strip())
                     all_relations.extend(relations)
                 except Exception as e:
-                    LOGGER.warning("Failed to process item: %s", e)
+                    logger.warning("Failed to process item: %s", e)
 
-        LOGGER.info(
+        logger.info(
             "Extracted %d unique entities and %d relations",
             len(all_entities),
             len(all_relations),
@@ -702,7 +702,7 @@ class GraphBuilder:
                 continue
             cleaned_relations.append((source, target, label))
 
-        LOGGER.info(
+        logger.info(
             "Filtered relations: %d -> %d (dropped %d)",
             len(all_relations),
             len(cleaned_relations),
@@ -734,7 +734,7 @@ class GraphBuilder:
             try:
                 self.graph.remove_edge(u, v)
             except Exception as e:
-                LOGGER.warning("Failed to remove invalid edge (%s, %s): %s", u, v, e)
+                logger.warning("Failed to remove invalid edge (%s, %s): %s", u, v, e)
 
         # Cleanup
         cleanup_stats = self._cleanup_graph()
@@ -745,7 +745,7 @@ class GraphBuilder:
         new_nodes = self.graph.number_of_nodes() - initial_nodes
         new_edges = self.graph.number_of_edges() - initial_edges
 
-        LOGGER.info(
+        logger.info(
             "Graph updated: %d nodes (+%d new), %d edges (+%d new). Saved to %s",
             self.graph.number_of_nodes(),
             new_nodes,
@@ -755,7 +755,7 @@ class GraphBuilder:
         )
 
         if conflicts:
-            LOGGER.info(
+            logger.info(
                 "Graph label conflicts resolved deterministically on %d edges",
                 conflicts,
             )
@@ -767,7 +767,7 @@ class GraphBuilder:
         )
         if label_counts:
             top = ", ".join(f"{k}:{v}" for k, v in label_counts.most_common(12))
-            LOGGER.info("Graph relation labels (top): %s", top)
+            logger.info("Graph relation labels (top): %s", top)
 
         if cleanup_stats:
             parts = []
@@ -784,4 +784,4 @@ class GraphBuilder:
             if label_edges := cleanup_stats.get("label_edges_removed", 0):
                 parts.append(f"removed {label_edges} bad edges")
             if parts:
-                LOGGER.info("Graph cleanup: %s", ", ".join(parts))
+                logger.info("Graph cleanup: %s", ", ".join(parts))

@@ -57,7 +57,7 @@ from ..settings import RagIngestionConfig
 from ..utils.llm import MODEL_FLASH
 from ..utils.records import generate_id
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # NOTE: pymupdf4llm does NOT reliably emit <page: N> markers. In practice it emits
 # separators like: "--- end of page=12 ---". Some parts of the pipeline still
@@ -155,14 +155,14 @@ class BookPlugin(IngestionPlugin):
         """Load PDF files using PyMuPDF TOC for chapter extraction and pymupdf4llm for content."""
         source_dir = Path(assets_path)
         if not source_dir.exists():
-            LOGGER.warning("Book source directory does not exist: %s", assets_path)
+            logger.warning("Book source directory does not exist: %s", assets_path)
             return []
 
         raw_data: list[RawData] = []
 
         for pdf_file in source_dir.glob("*.pdf"):
             try:
-                LOGGER.info("Processing PDF: %s", pdf_file.name)
+                logger.info("Processing PDF: %s", pdf_file.name)
 
                 # Extract book title from filename
                 # Normalize separators and collapse repeated whitespace
@@ -174,7 +174,7 @@ class BookPlugin(IngestionPlugin):
                 if fitz is not None:
                     chapters = self._extract_chapters_from_toc(str(pdf_file), book_title)
                 else:
-                    LOGGER.warning("PyMuPDF (fitz) not available, falling back to markdown parsing")
+                    logger.warning("PyMuPDF (fitz) not available, falling back to markdown parsing")
                     chapters = self._extract_chapters_from_markdown(str(pdf_file), book_title)
 
                 for chapter_info in chapters:
@@ -193,7 +193,7 @@ class BookPlugin(IngestionPlugin):
                     )
 
             except Exception as e:
-                LOGGER.error("Failed to process PDF %s: %s", pdf_file, e, exc_info=True)
+                logger.error("Failed to process PDF %s: %s", pdf_file, e, exc_info=True)
                 continue
 
         return raw_data
@@ -222,30 +222,30 @@ class BookPlugin(IngestionPlugin):
         doc.close()
 
         if not toc:
-            LOGGER.warning("No TOC found in PDF %s, falling back to markdown parsing", pdf_path)
+            logger.warning("No TOC found in PDF %s, falling back to markdown parsing", pdf_path)
             return self._extract_chapters_from_markdown(pdf_path, book_title)
 
-        LOGGER.info("Found %d TOC entries in PDF", len(toc))
+        logger.info("Found %d TOC entries in PDF", len(toc))
 
         # Filter TOC for real chapters (numbered, level 1-2, exclude front/back matter)
         chapter_toc = self._filter_chapter_toc(toc)
 
         if not chapter_toc:
-            LOGGER.warning("No valid chapters found in TOC, falling back to markdown parsing")
+            logger.warning("No valid chapters found in TOC, falling back to markdown parsing")
             return self._extract_chapters_from_markdown(pdf_path, book_title)
 
-        LOGGER.info("Extracted %d chapters from TOC", len(chapter_toc))
+        logger.info("Extracted %d chapters from TOC", len(chapter_toc))
 
         # Log what was included/excluded for debugging
         excluded_count = len(toc) - len(chapter_toc)
         if excluded_count > 0:
-            LOGGER.info("Excluded %d TOC entries (cover, title, backcover)", excluded_count)
+            logger.info("Excluded %d TOC entries (cover, title, backcover)", excluded_count)
 
         # Log all chapter titles for verification
         if chapter_toc:
-            LOGGER.info("Extracted chapters:")
+            logger.info("Extracted chapters:")
             for i, (level, title, page) in enumerate(chapter_toc, 1):
-                LOGGER.info("  %d. [Level %d] %s (page %d)", i, level, title, page)
+                logger.info("  %d. [Level %d] %s (page %d)", i, level, title, page)
 
         # Group TOC entries by page to merge subchapters
         # Format: "Chapter Title [Subchapter Title]" when both exist on same page
@@ -253,7 +253,7 @@ class BookPlugin(IngestionPlugin):
 
         # Extract content directly from PDF pages (robust, does not depend on markers)
         if fitz is None:
-            LOGGER.warning(
+            logger.warning(
                 "PyMuPDF (fitz) not available for page extraction; falling back to markdown parsing"
             )
             return self._extract_chapters_from_markdown(pdf_path, book_title)
@@ -273,7 +273,7 @@ class BookPlugin(IngestionPlugin):
                 clean_title = self._clean_chapter_title(merged_title)
 
                 if not content:
-                    LOGGER.warning(
+                    logger.warning(
                         "Empty content for chapter '%s' (TOC pages %d-%s).",
                         clean_title,
                         start_page,
@@ -288,7 +288,7 @@ class BookPlugin(IngestionPlugin):
                     }
                 )
 
-                LOGGER.debug(
+                logger.debug(
                     "Extracted chapter: %s (pages %d-%s, content length: %d)",
                     clean_title,
                     start_page,
@@ -469,7 +469,7 @@ class BookPlugin(IngestionPlugin):
                 page_separators=True,  # Adds <page: N> markers
             )
         except ImportError:
-            LOGGER.warning("pymupdf4llm not available, falling back to basic text extraction")
+            logger.warning("pymupdf4llm not available, falling back to basic text extraction")
             # Fallback to basic text extraction if pymupdf4llm is not available
             markdown_content = self._extract_text_basic(pdf_path)
 
@@ -574,7 +574,7 @@ class BookPlugin(IngestionPlugin):
         if current_chapter["content"].strip():
             chapters.append(current_chapter)
 
-        LOGGER.info("Extracted %d chapters from markdown", len(chapters))
+        logger.info("Extracted %d chapters from markdown", len(chapters))
         return chapters
 
     @staticmethod
@@ -668,7 +668,7 @@ class BookPlugin(IngestionPlugin):
             # Batch LLM topic extraction if enabled
             chunk_topics: dict[int, dict[str, str]] = {}
             if llm_topic_extraction_enabled and chunks:
-                LOGGER.info(
+                logger.info(
                     "book: analyzing %d chunks from %s - %s with LLM...",
                     len(chunks),
                     book_title,
@@ -886,7 +886,7 @@ class BookPlugin(IngestionPlugin):
             return analyses
 
         except Exception as e:
-            LOGGER.warning("LLM batch analysis failed: %s, skipping topic extraction", e)
+            logger.warning("LLM batch analysis failed: %s, skipping topic extraction", e)
             return {}
 
     def _extract_taxonomy_terms(

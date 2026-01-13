@@ -24,7 +24,7 @@ from contextrouter.modules.ingestion.rag import (
     resolve_workers,
 )
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 @click.command("index")
@@ -82,7 +82,7 @@ def cmd_index(
     try:
         build_ingestion_report(config=cfg, types=types)
     except Exception:
-        LOGGER.debug("report: failed after index", exc_info=True)
+        logger.debug("report: failed after index", exc_info=True)
 
 
 __all__ = ["cmd_index"]

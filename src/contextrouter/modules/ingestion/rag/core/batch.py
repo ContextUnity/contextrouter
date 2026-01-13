@@ -58,7 +58,7 @@ from contextrouter.core.config import Config
 
 from ..utils.llm import MODEL_LIGHT, llm_generate
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -135,7 +135,7 @@ def batch_validate(
                 valid_indices.update(i for i, _ in batch)
 
         except Exception as e:
-            LOGGER.warning(
+            logger.warning(
                 "Batch validation failed for %s at %d: %s (%s all)", label, batch_start, e, on_error
             )
             if on_error == "keep":
@@ -143,7 +143,7 @@ def batch_validate(
 
     dropped = total - len(valid_indices)
     if dropped:
-        LOGGER.info(
+        logger.info(
             "Validated %s: %d/%d passed (%d filtered)", label, len(valid_indices), total, dropped
         )
 
@@ -240,10 +240,10 @@ def batch_transform(
                         results[idx] = result
 
         except Exception as e:
-            LOGGER.warning("Batch transform failed for %s at %d: %s", label, batch_start, e)
+            logger.warning("Batch transform failed for %s at %d: %s", label, batch_start, e)
 
     success_rate = len(results) / total if total else 0
-    LOGGER.debug("Transformed %s: %d/%d (%.0f%%)", label, len(results), total, success_rate * 100)
+    logger.debug("Transformed %s: %d/%d (%.0f%%)", label, len(results), total, success_rate * 100)
 
     return results
 

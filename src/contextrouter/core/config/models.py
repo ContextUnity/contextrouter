@@ -102,6 +102,7 @@ class LLMConfig(BaseModel):
     max_output_tokens: int = 1024
     timeout_sec: float = 60.0
     max_retries: int = 2
+    merge_system_prompt: bool = False
 
 
 class RouterConfig(BaseModel):

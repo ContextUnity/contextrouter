@@ -14,7 +14,7 @@ from contextrouter.modules.ingestion.rag.settings import RagIngestionConfig
 from contextrouter.modules.ingestion.rag.stages.store import read_raw_data_jsonl
 from contextrouter.modules.ingestion.rag.utils.llm import MODEL_PRO
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def build_graph_from_clean_text(
@@ -47,7 +47,7 @@ def build_graph_from_clean_text(
         p = clean_text_dir / f"{t}.jsonl"
         all_items.extend(read_raw_data_jsonl(p))
 
-    LOGGER.info(
+    logger.info(
         "graph: source=%s include_types=%s items=%d output=%s workers=%d overwrite=%s incremental=%s model=%s",
         clean_text_dir,
         include_types,
@@ -61,11 +61,11 @@ def build_graph_from_clean_text(
 
     if ontology_path and isinstance(ontology_path, Path):
         if ontology_path.exists():
-            LOGGER.info("graph: using ontology from %s", ontology_path)
+            logger.info("graph: using ontology from %s", ontology_path)
         else:
-            LOGGER.warning("graph: ontology path specified but file not found: %s", ontology_path)
+            logger.warning("graph: ontology path specified but file not found: %s", ontology_path)
     else:
-        LOGGER.info("graph: no ontology specified, using default allowed_labels")
+        logger.info("graph: no ontology specified, using default allowed_labels")
 
     w = resolve_workers(config=config, workers=workers)
     builder = GraphBuilder(

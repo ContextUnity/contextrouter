@@ -16,7 +16,7 @@ from ..core.utils import parallel_map, resolve_workers
 from ..settings import RagIngestionConfig
 from .store import read_shadow_records_jsonl
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def export_jsonl_per_type(
@@ -39,7 +39,7 @@ def export_jsonl_per_type(
         shadow_path = paths["shadow"] / f"{t}.jsonl"
         records = read_shadow_records_jsonl(shadow_path)
         if not records:
-            LOGGER.warning("export: no shadow records for type=%s at %s", t, shadow_path)
+            logger.warning("export: no shadow records for type=%s at %s", t, shadow_path)
             return (t, "")
 
         type_dir = paths["jsonl"] / t
@@ -57,7 +57,7 @@ def export_jsonl_per_type(
             for r in records:
                 f.write(json.dumps(_to_vertex_record(r), ensure_ascii=False) + "\n")
 
-        LOGGER.warning(
+        logger.warning(
             "export: wrote %d records for type=%s -> %s (%.1fs)",
             len(records),
             t,

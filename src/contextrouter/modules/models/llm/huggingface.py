@@ -177,7 +177,7 @@ class HuggingFaceLLM(BaseModel):
         self, request: ModelRequest, *, token: BiscuitToken | None
     ) -> ModelResponse:
         _ = token
-        prompt = request.to_text_prompt()
+        prompt = request.to_text_prompt(include_system=True)
         if not prompt:
             raise ValueError("text-classification requires at least one TextPart")
 

@@ -20,7 +20,7 @@ from ..config import get_assets_paths
 from ..graph.serialization import load_graph_secure
 from ..settings import RagIngestionConfig
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def _count_jsonl_lines(path: Path, *, hard_cap: int = 2_000_000) -> int:
@@ -44,7 +44,7 @@ def _safe_json_load(path: Path) -> dict[str, Any] | None:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:
-        LOGGER.warning("report: failed to load json %s: %s", path, e)
+        logger.warning("report: failed to load json %s: %s", path, e)
         return None
 
 
@@ -100,7 +100,7 @@ def _graph_stats(graph_path: Path) -> dict[str, Any]:
         # Load graph with integrity verification
         g = load_graph_secure(graph_path)
     except Exception as e:
-        LOGGER.warning("report: failed to load graph %s: %s", graph_path, e)
+        logger.warning("report: failed to load graph %s: %s", graph_path, e)
         return {
             "path": str(graph_path),
             "exists": True,
@@ -199,5 +199,5 @@ def build_ingestion_report(
 
     out_path = processing / "ingestion_report.json"
     out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    LOGGER.info("report: wrote %s", out_path)
+    logger.info("report: wrote %s", out_path)
     return out_path

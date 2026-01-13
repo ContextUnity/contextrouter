@@ -33,7 +33,7 @@ from ..settings import RagIngestionConfig
 from ..utils.llm import MODEL_LIGHT, llm_generate
 from ..utils.records import generate_id
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def _normalize_text(s: str) -> str:
@@ -64,7 +64,7 @@ class WebPlugin(IngestionPlugin):
         """
         source_dir = Path(assets_path)
         if not source_dir.exists():
-            LOGGER.warning("Web source directory does not exist: %s", assets_path)
+            logger.warning("Web source directory does not exist: %s", assets_path)
             return []
 
         raw_data: list[RawData] = []
@@ -105,9 +105,9 @@ class WebPlugin(IngestionPlugin):
                         sources = toml_data
                     else:
                         sources = []
-                LOGGER.info("Loaded %d web sources from %s", len(sources), url_file)
+                logger.info("Loaded %d web sources from %s", len(sources), url_file)
             except Exception as e:
-                LOGGER.warning("Failed to load %s: %s", url_file, e)
+                logger.warning("Failed to load %s: %s", url_file, e)
                 sources = []
 
         # Also supported: sources.json (explicitly documented)
@@ -122,9 +122,9 @@ class WebPlugin(IngestionPlugin):
                         sources = payload
                     else:
                         sources = []
-                    LOGGER.info("Loaded %d web sources from %s", len(sources), sources_json)
+                    logger.info("Loaded %d web sources from %s", len(sources), sources_json)
                 except Exception as e:
-                    LOGGER.warning("Failed to load %s: %s", sources_json, e)
+                    logger.warning("Failed to load %s: %s", sources_json, e)
                     sources = []
 
         # Fallback: URL files
@@ -179,7 +179,7 @@ class WebPlugin(IngestionPlugin):
                     # Normalize final URL for deduplication
                     normalized_final_url = self._normalize_url(final_url)
                     if normalized_final_url in seen_urls:
-                        LOGGER.debug(
+                        logger.debug(
                             "Skipping duplicate URL after redirect: %s -> %s",
                             page_url,
                             normalized_final_url,
@@ -213,7 +213,7 @@ class WebPlugin(IngestionPlugin):
                     )
 
             except Exception as e:
-                LOGGER.error("Failed to fetch web content from %s: %s", url, e)
+                logger.error("Failed to fetch web content from %s: %s", url, e)
                 continue
 
         return raw_data
@@ -256,7 +256,7 @@ class WebPlugin(IngestionPlugin):
         out: list[str] = []
         q: deque[tuple[str, int]] = deque([(seed, 0)])
 
-        LOGGER.info(
+        logger.info(
             "web crawl: seed=%s depth<=%d max_pages=%d concurrency=%d",
             seed_host,
             max_depth,
@@ -303,7 +303,7 @@ class WebPlugin(IngestionPlugin):
                         html, final_url = fut.result()
                     except Exception as e:
                         # Skip this page; continue crawling.
-                        LOGGER.debug("Failed to download %s: %s", u, e)
+                        logger.debug("Failed to download %s: %s", u, e)
                         continue
                     if not html.strip():
                         continue
@@ -497,7 +497,7 @@ class WebPlugin(IngestionPlugin):
             html, final_url = self._download_html(url, user_agent=user_agent, timeout_s=timeout_s)
         except Exception as e:
             # Treat as a normal skip (timeouts/blocked pages are common during crawling).
-            LOGGER.warning("HTTP fetch skipped for %s: %s", url, e)
+            logger.warning("HTTP fetch skipped for %s: %s", url, e)
             return "", "", "", url
 
         title, summary = self._extract_basic_metadata(html, final_url)
@@ -515,7 +515,7 @@ class WebPlugin(IngestionPlugin):
                     final_url,
                 )
         except Exception as e:
-            LOGGER.warning("trafilatura extract failed for %s: %s", final_url, e)
+            logger.warning("trafilatura extract failed for %s: %s", final_url, e)
 
         # Fallback: BeautifulSoup text extraction
         try:
@@ -532,7 +532,7 @@ class WebPlugin(IngestionPlugin):
                 final_url,
             )
         except Exception as e:
-            LOGGER.error("HTML text extraction failed for %s: %s", final_url, e)
+            logger.error("HTML text extraction failed for %s: %s", final_url, e)
             return "", "", "", final_url
 
     def transform(
@@ -735,7 +735,7 @@ class WebPlugin(IngestionPlugin):
             return ""
 
         except Exception as e:
-            LOGGER.debug("Summary generation failed: %s", e)
+            logger.debug("Summary generation failed: %s", e)
             return ""
 
     def _build_input_text(

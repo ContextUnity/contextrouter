@@ -13,7 +13,7 @@ from contextrouter.modules.ingestion.rag.processors.taxonomy_builder import (
 )
 from contextrouter.modules.ingestion.rag.settings import RagIngestionConfig
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def build_taxonomy_from_clean_text(
@@ -28,7 +28,7 @@ def build_taxonomy_from_clean_text(
     taxonomy_path = paths["taxonomy"]
 
     w = resolve_workers(config=config, workers=workers)
-    LOGGER.info(
+    logger.info(
         "taxonomy: source=%s output=%s force=%s workers=%d",
         clean_text_dir,
         taxonomy_path,
@@ -105,7 +105,7 @@ class TaxonomyTransformer(BaseTransformer):
             paths = get_assets_paths(cfg)
             envelope.metadata.setdefault("assets_paths", {k: str(v) for k, v in paths.items()})
         except Exception as e:
-            LOGGER.debug("Failed to get assets paths: %s", e)
+            logger.debug("Failed to get assets paths: %s", e)
 
         return envelope
 

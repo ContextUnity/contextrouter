@@ -29,7 +29,7 @@ from .taxonomy.sampling import (
     collect_clean_text_samples_from_dir,
 )
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 _META_TERM_RE = re.compile(
     r"\b(public domain|original text|author'?s|preface|foreword|appendix|"
@@ -57,7 +57,7 @@ def build_taxonomy(
         try:
             existing = json.loads(output_path.read_text(encoding="utf-8"))
         except Exception as e:
-            LOGGER.warning("Failed to load existing taxonomy: %s", e)
+            logger.warning("Failed to load existing taxonomy: %s", e)
 
     focus = config.taxonomy.philosophy_focus.strip()
     max_samples = config.taxonomy.max_samples
@@ -73,7 +73,7 @@ def build_taxonomy(
     samples = collect_clean_text_samples_from_dir(
         clean_text_dir=source_root, config=config, max_samples=max_samples
     )
-    LOGGER.info(
+    logger.info(
         "taxonomy: samples=%d scan_model=%s predefined_categories=%d",
         len(samples),
         scan_model,
@@ -92,7 +92,7 @@ def build_taxonomy(
         workers=workers,
     )
     if not terms:
-        LOGGER.warning("taxonomy: no terms extracted")
+        logger.warning("taxonomy: no terms extracted")
         return existing or _empty_taxonomy(focus)
 
     # Assign terms to categories
@@ -156,7 +156,7 @@ Return TSV: term<TAB>synonyms<TAB>description
 """
         prompts.append(prompt)
 
-    LOGGER.info("taxonomy: extracting terms from %d batches", len(prompts))
+    logger.info("taxonomy: extracting terms from %d batches", len(prompts))
 
     # temperature=0 for deterministic output
     if workers <= 1:
@@ -188,7 +188,7 @@ Return TSV: term<TAB>synonyms<TAB>description
         for raw in raws:
             terms.extend(_parse_terms_tsv(str(raw or "")))
 
-    LOGGER.info("taxonomy: extracted %d terms", len(terms))
+    logger.info("taxonomy: extracted %d terms", len(terms))
     return terms
 
 
@@ -273,7 +273,7 @@ def _assign_terms_to_categories(
     term_list = [t["term"] for t in terms]
     term_map = {t["term"].lower(): t for t in terms}
 
-    LOGGER.info("taxonomy: assigning %d terms to %d categories", len(terms), len(categories))
+    logger.info("taxonomy: assigning %d terms to %d categories", len(terms), len(categories))
 
     for start in range(0, len(term_list), batch_size):
         batch = term_list[start : start + batch_size]

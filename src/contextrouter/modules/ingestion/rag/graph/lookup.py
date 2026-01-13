@@ -11,7 +11,7 @@ import networkx as nx
 
 from .serialization import load_graph_secure
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class GraphEnricher:
@@ -30,21 +30,21 @@ class GraphEnricher:
         """
         # Load graph
         if not graph_path.exists():
-            LOGGER.warning("Graph file not found: %s. Graph enrichment disabled.", graph_path)
+            logger.warning("Graph file not found: %s. Graph enrichment disabled.", graph_path)
             self.graph = nx.Graph()
             self._graph_enabled = False
         else:
             try:
                 # Load graph with integrity verification
                 self.graph = load_graph_secure(graph_path)
-                LOGGER.info(
+                logger.info(
                     "Loaded graph securely: %d nodes, %d edges",
                     self.graph.number_of_nodes(),
                     self.graph.number_of_edges(),
                 )
                 self._graph_enabled = True
             except Exception as e:
-                LOGGER.error(
+                logger.error(
                     "Failed to load graph from %s: %s. Graph enrichment disabled.",
                     graph_path,
                     e,
@@ -64,12 +64,12 @@ class GraphEnricher:
                 for cat_name, cat_data in self.taxonomy.get("categories", {}).items():
                     for keyword in cat_data.get("keywords", []):
                         self._keyword_to_category[keyword.lower()] = cat_name
-                LOGGER.info(
+                logger.info(
                     "Loaded taxonomy with %d keyword->category mappings",
                     len(self._keyword_to_category),
                 )
             except Exception as e:
-                LOGGER.warning("Failed to load taxonomy: %s", e)
+                logger.warning("Failed to load taxonomy: %s", e)
 
     def _get_category_for_entity(self, entity: str) -> str | None:
         """Get parent category for an entity from taxonomy.

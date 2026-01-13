@@ -1,25 +1,16 @@
-"""LLM utilities for ingestion (no env access, no side effects).
-
-This module is library code. It must not:
-- call `load_env()` at import time
-- read `os.environ` directly
-- instantiate provider SDK clients from ambient environment
-
-Instead, the caller must pass a validated `contextrouter.core.config.Config` and an explicit
-model registry key (`provider/name`, e.g. `vertex/gemini-2.5-pro`).
-"""
+"""LLM utilities for ingestion (no env access, no side effects)."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-import time
-from typing import Any
 
 from contextrouter.core.config import Config
 from contextrouter.modules.models.registry import model_registry
+from contextrouter.modules.models.types import ModelRequest, TextPart
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 MODEL_PRO = "vertex/gemini-2.5-pro"
 MODEL_FLASH = "vertex/gemini-2.5-flash"
@@ -35,54 +26,100 @@ def llm_generate(
     temperature: float = 0.1,
     max_retries: int = 5,
     parse_json: bool = True,
-) -> dict[str, Any] | list[Any] | str:
-    """Generate using a chat model created from the model registry.
+) -> dict[str, object] | list[object] | str:
+    """Generate using a chat model (synchronous wrapper)."""
 
-    `model` is a registry key: `provider/name`. There is no implicit fallback.
-    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(
+            _llm_generate_impl(
+                core_cfg=core_cfg,
+                prompt=prompt,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                max_retries=max_retries,
+                parse_json=parse_json,
+            )
+        )
 
+    # Running loop exists. This function is intentionally synchronous; do not nest event loops.
+    raise RuntimeError(
+        "llm_generate() is synchronous and cannot run inside an active asyncio loop. "
+        "Call `await llm_generate_async(...)` instead."
+    )
+
+
+async def llm_generate_async(
+    *,
+    core_cfg: Config,
+    prompt: str,
+    model: str = MODEL_PRO,
+    max_tokens: int = 16384,
+    temperature: float = 0.1,
+    max_retries: int = 5,
+    parse_json: bool = True,
+) -> dict[str, object] | list[object] | str:
+    """Async version of llm_generate(). Safe to call from within an event loop."""
+    return await _llm_generate_impl(
+        core_cfg=core_cfg,
+        prompt=prompt,
+        model=model,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        max_retries=max_retries,
+        parse_json=parse_json,
+    )
+
+
+async def _llm_generate_impl(
+    *,
+    core_cfg: Config,
+    prompt: str,
+    model: str,
+    max_tokens: int,
+    temperature: float,
+    max_retries: int,
+    parse_json: bool,
+) -> dict[str, object] | list[object] | str:
     for attempt in range(max_retries):
         try:
-            # Get model with fallback support
             model_instance = model_registry.get_llm_with_fallback(
                 key=model,
                 config=core_cfg,
             )
 
-            from contextrouter.modules.models.types import ModelRequest, TextPart
-
             request = ModelRequest(
+                system="You are a helpful assistant specialized in structured data processing."
+                if parse_json
+                else None,
                 parts=[TextPart(text=prompt)],
                 temperature=temperature,
                 max_output_tokens=max_tokens,
             )
             resp = await model_instance.generate(request)
-            text = resp.text
-            text = text.strip()
+            text = resp.text.strip()
             if not text:
-                LOGGER.warning("Empty text in response, attempt %d/%d", attempt + 1, max_retries)
                 if attempt < max_retries - 1:
-                    time.sleep(3)
+                    logger.warning("Empty text, retrying...")
+                    await asyncio.sleep(3)
                     continue
                 raise ValueError("LLM returned empty text")
 
-            if text.startswith("```"):
-                parts = text.split("```")
-                if len(parts) >= 2:
-                    text = parts[1]
-                    if text.startswith("json"):
-                        text = text[4:]
-                    text = text.strip()
-
-            if parse_json and not text.startswith("{") and not text.startswith("["):
-                import re
-
-                json_match = re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", text)
-                if json_match:
-                    text = json_match.group(1)
-
             if not parse_json:
                 return text
+
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0].strip()
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0].strip()
+
+            if not (text.startswith("{") or text.startswith("[")):
+                import re
+
+                if match := re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", text):
+                    text = match.group(1)
 
             try:
                 result = json.loads(text)
@@ -90,23 +127,24 @@ def llm_generate(
                     raise ValueError(f"Expected dict or list, got {type(result)}")
                 return result
             except json.JSONDecodeError as e:
-                LOGGER.warning("JSON parse failed (attempt %d/%d): %s", attempt + 1, max_retries, e)
                 if attempt < max_retries - 1:
-                    time.sleep(2)
+                    logger.warning("JSON parse failed, retrying...")
+                    await asyncio.sleep(2)
                     continue
-                raise ValueError(
-                    f"Failed to parse LLM JSON response after {max_retries} attempts: {e}"
-                )
+                raise ValueError(f"Failed to parse LLM JSON after {max_retries} attempts: {e}")
 
         except Exception as e:
             error_str = str(e)
             if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
                 wait_time = 2**attempt * 10
-                LOGGER.warning("Rate limited, waiting %d seconds...", wait_time)
-                time.sleep(wait_time)
+                logger.warning("Rate limited, waiting %d seconds...", wait_time)
+                await asyncio.sleep(wait_time)
                 if attempt == max_retries - 1:
                     raise
             else:
                 raise
 
     raise ValueError("LLM generation failed after all retries")
+
+
+__all__ = ["llm_generate", "llm_generate_async", "MODEL_PRO", "MODEL_FLASH", "MODEL_LIGHT"]

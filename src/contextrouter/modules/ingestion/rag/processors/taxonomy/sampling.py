@@ -15,7 +15,7 @@ from .common import (
     windowed_snippets,
 )
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def collect_clean_text_samples_from_dir(
@@ -75,7 +75,7 @@ def collect_clean_text_samples_from_dir(
                     try:
                         obj: StructDataValue = json.loads(line)
                     except Exception as e:
-                        LOGGER.debug("Failed to parse JSON line: %s", e)
+                        logger.debug("Failed to parse JSON line: %s", e)
                         continue
                     if not isinstance(obj, dict):
                         continue
@@ -95,7 +95,7 @@ def collect_clean_text_samples_from_dir(
                         first[dk] = content
                     last[dk] = content
         except Exception as e:
-            LOGGER.warning("taxonomy: failed to read %s: %s", p, e)
+            logger.warning("taxonomy: failed to read %s: %s", p, e)
             continue
 
         if not counts:
@@ -112,7 +112,7 @@ def collect_clean_text_samples_from_dir(
                     try:
                         obj2: StructDataValue = json.loads(line)
                     except Exception as e:
-                        LOGGER.debug("Failed to parse JSON line: %s", e)
+                        logger.debug("Failed to parse JSON line: %s", e)
                         continue
                     if not isinstance(obj2, dict):
                         continue

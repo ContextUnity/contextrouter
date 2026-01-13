@@ -20,7 +20,7 @@ from contextrouter.modules.ingestion.rag import (
     load_config,
 )
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 @click.command("ontology")
@@ -38,7 +38,7 @@ def cmd_ontology(config_path: Path | None, overwrite: bool) -> None:
     try:
         build_ingestion_report(config=cfg, types=list(ALL_TYPES))
     except Exception:
-        LOGGER.debug("report: failed after ontology", exc_info=True)
+        logger.debug("report: failed after ontology", exc_info=True)
 
 
 __all__ = ["cmd_ontology"]

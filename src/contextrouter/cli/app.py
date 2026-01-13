@@ -14,7 +14,7 @@ from contextrouter.core.config import get_core_config, set_core_config
 from contextrouter.core.config.main import Config
 from contextrouter.core.registry import scan
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 @click.group()

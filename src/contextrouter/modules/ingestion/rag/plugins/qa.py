@@ -43,7 +43,7 @@ from ..utils.llm import (
     llm_generate,
 )
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # Minimum words for a speaker turn to be considered a standalone segment
 # Shorter turns (like "Right", "Yeah") are merged with the previous segment
@@ -96,7 +96,7 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
 
                 content = content.strip()
                 if not content:
-                    LOGGER.warning("Empty file, skipping: %s", text_file.name)
+                    logger.warning("Empty file, skipping: %s", text_file.name)
                     continue
 
                 # Derive base title from filename (deterministic).
@@ -117,7 +117,7 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
                 )
 
             except Exception as e:
-                LOGGER.error("Failed to load QA file %s: %s", text_file, e)
+                logger.error("Failed to load QA file %s: %s", text_file, e)
                 # Continue processing other files
                 continue
 
@@ -197,7 +197,7 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
                 raw.content
             )
 
-            LOGGER.info(
+            logger.info(
                 "  Processing QA session %d/%d: %s",
                 idx,
                 total_items,
@@ -229,14 +229,14 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
                             )
 
             if interactions:
-                LOGGER.info("    Using precomputed speaker turns from CleanText metadata")
+                logger.info("    Using precomputed speaker turns from CleanText metadata")
             else:
-                LOGGER.info("    Detecting speakers with LLM...")  # qa: llm speaker detect
+                logger.info("    Detecting speakers with LLM...")  # qa: llm speaker detect
                 interactions = self.split_by_speakers_llm(raw.content)
-                LOGGER.info("    ✓ Speaker detection completed")
+                logger.info("    ✓ Speaker detection completed")
 
             if not interactions:
-                LOGGER.warning("No speaker interactions found in %s", session_title)
+                logger.warning("No speaker interactions found in %s", session_title)
                 # Final fallback: create single chunk from entire content
                 interactions = [{"speaker": "Unknown", "text": raw.content}]
 
@@ -247,7 +247,7 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
             grouped_chunks = self._group_interactions(interactions, min_chars=400, max_chars=1500)
 
             if not grouped_chunks:
-                LOGGER.warning("No valid chunks created from %s", session_title)
+                logger.warning("No valid chunks created from %s", session_title)
                 continue
 
             # 4. Batch LLM processing for topic and primary speaker identification
@@ -309,7 +309,7 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
                 # Do not inject speaker tags for short interruptions; it causes tone/persona
                 # drift and makes the resulting chunk harder to read.
                 prev["text"] = f"{prev['text']} {text}"
-                LOGGER.debug(
+                logger.debug(
                     "Merged short interruption (%d words) from %s",
                     word_count,
                     inter["speaker"],
@@ -440,10 +440,10 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
                     temperature=0.0,
                 )
                 if isinstance(validated, str) and "NOT_VALUABLE" in validated.strip().upper():
-                    LOGGER.debug("Answer rejected as not valuable: %s...", answer_text[:50])
+                    logger.debug("Answer rejected as not valuable: %s...", answer_text[:50])
                     return None
             except Exception as e:
-                LOGGER.debug("LLM answer validation failed: %s (keeping answer)", e)
+                logger.debug("LLM answer validation failed: %s (keeping answer)", e)
 
         # Build question text from question speaker's interactions
         # Extract question text from question speaker's turns
@@ -490,14 +490,14 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
                         # Check if LLM rejected the question
                         if validated.upper() != "NOT_A_QUESTION" and len(validated) > 10:
                             question_text = validated[:300] if len(validated) > 300 else validated
-                            LOGGER.debug("Question validated: %s", question_text[:50])
+                            logger.debug("Question validated: %s", question_text[:50])
                         else:
-                            LOGGER.debug(
+                            logger.debug(
                                 "Question rejected as non-question: %s...",
                                 raw_question_text[:50],
                             )
                 except Exception as e:
-                    LOGGER.debug("LLM question validation failed: %s", e)
+                    logger.debug("LLM question validation failed: %s", e)
                     # Fallback: use raw text truncated
                     question_text = (
                         raw_question_text[:297].rstrip() + "..."
@@ -649,7 +649,7 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
                 return self._split_by_speakers_llm_chunk(content, is_full=True)
 
             # For very long transcripts, process in chunks with overlap
-            LOGGER.info("Processing long transcript in chunks (%d chars)", len(content))
+            logger.info("Processing long transcript in chunks (%d chars)", len(content))
             all_interactions = []
             overlap_size = 500  # Overlap to avoid breaking mid-conversation
 
@@ -665,7 +665,7 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
             return all_interactions
 
         except Exception as e:
-            LOGGER.error("LLM speaker detection failed: %s", e, exc_info=True)
+            logger.error("LLM speaker detection failed: %s", e, exc_info=True)
             return []
 
     def _split_by_speakers_llm_chunk(
@@ -702,13 +702,13 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
                 interactions.append({"speaker": speaker, "text": spoken_text})
 
         if interactions:
-            LOGGER.info(
+            logger.info(
                 "LLM detected %d speaker segments%s",
                 len(interactions),
                 " (full transcript)" if is_full else "",
             )
         else:
-            LOGGER.warning("LLM speaker detection returned empty list")
+            logger.warning("LLM speaker detection returned empty list")
         return interactions
 
     def _group_interactions(
@@ -830,7 +830,7 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
             return {}
 
         total_chunks = len(chunks)
-        LOGGER.info("    Analyzing %d chunks with LLM...", total_chunks)
+        logger.info("    Analyzing %d chunks with LLM...", total_chunks)
 
         # Prepare batch prompt
         batch_items = []
@@ -855,7 +855,7 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
                 taxonomy_categories=taxonomy_categories,
             )
 
-            LOGGER.info("    Calling LLM for batch analysis...")
+            logger.info("    Calling LLM for batch analysis...")
             text = llm_generate_tsv(
                 core_cfg=self._require_core_cfg(),
                 prompt=prompt,
@@ -864,7 +864,7 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
                 temperature=0.1,
                 retries=3,
             )
-            LOGGER.info("    ✓ LLM analysis completed")
+            logger.info("    ✓ LLM analysis completed")
 
             # Parse TSV: index<TAB>topic<TAB>primary_speaker<TAB>category
             analyses: dict[int, dict[str, str]] = {}
@@ -899,7 +899,7 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
             return analyses
 
         except Exception as e:
-            LOGGER.warning("LLM batch analysis failed: %s, using fallback", e)
+            logger.warning("LLM batch analysis failed: %s, using fallback", e)
             return self._fallback_analysis(chunks)
 
     def _fallback_analysis(self, chunks: list[dict[str, Any]]) -> dict[int, dict[str, str]]:

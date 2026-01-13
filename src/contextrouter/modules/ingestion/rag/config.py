@@ -22,7 +22,7 @@ from contextrouter.core.config import get_env
 
 from .settings import RagIngestionConfig
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # Environment variable names
 ENV_CONFIG_PATH = "CONTEXTROUTER_CONFIG_PATH"
@@ -75,7 +75,7 @@ def _log_config_not_found(config_path: Path, example_path: Path) -> None:
         "",
         "Using default configuration.",
     ]
-    LOGGER.warning("\n".join(msg_lines))
+    logger.warning("\n".join(msg_lines))
 
 
 def load_config(config_path: Path | None = None, *, force: bool = False) -> RagIngestionConfig:
@@ -120,7 +120,7 @@ def load_config(config_path: Path | None = None, *, force: bool = False) -> RagI
         try:
             import tomli as tomllib  # type: ignore[import-not-found]
         except ImportError:
-            LOGGER.warning(
+            logger.warning(
                 "Neither tomllib (Python 3.11+) nor tomli available. Using default configuration."
             )
             cfg = RagIngestionConfig()
@@ -138,10 +138,10 @@ def load_config(config_path: Path | None = None, *, force: bool = False) -> RagI
             cfg.paths.assets_folder = Path(env_assets).resolve()
         _cached_config = cfg
         _cached_config_path = config_path
-        LOGGER.info("Loaded config from %s", config_path)
+        logger.info("Loaded config from %s", config_path)
         return cfg
     except Exception as e:
-        LOGGER.warning("Failed to load config from %s: %s. Using defaults.", config_path, e)
+        logger.warning("Failed to load config from %s: %s. Using defaults.", config_path, e)
         cfg = RagIngestionConfig()
         if env_assets := get_env(ENV_ASSETS_PATH):
             cfg.paths.assets_folder = Path(env_assets).resolve()
@@ -211,4 +211,4 @@ def ensure_directories_exist(paths: dict[str, Path] | None = None) -> None:
         path = paths.get(key)
         if path and not path.exists():
             path.mkdir(parents=True, exist_ok=True)
-            LOGGER.info("Created directory: %s", path)
+            logger.info("Created directory: %s", path)

@@ -10,7 +10,7 @@ from contextrouter.core.types import StructData, StructDataValue
 
 from ..core import RawData, ShadowRecord
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def write_raw_data_jsonl(items: list[RawData], path: Path, *, overwrite: bool = True) -> int:
@@ -37,7 +37,7 @@ def read_raw_data_jsonl(path: Path) -> list[RawData]:
         try:
             obj: StructDataValue = json.loads(line)
         except Exception as e:
-            LOGGER.debug("Failed to parse JSON line: %s", e)
+            logger.debug("Failed to parse JSON line: %s", e)
             continue
         if not isinstance(obj, dict):
             continue
@@ -82,7 +82,7 @@ def read_shadow_records_jsonl(path: Path) -> list[ShadowRecord]:
         try:
             obj: StructDataValue = json.loads(line)
         except Exception as e:
-            LOGGER.debug("Failed to parse JSON line: %s", e)
+            logger.debug("Failed to parse JSON line: %s", e)
             continue
         if not isinstance(obj, dict):
             continue

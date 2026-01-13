@@ -6,7 +6,7 @@ import json
 import logging
 from pathlib import Path
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # Default relative to package root (packages/contextrouter/)
 DEFAULT_KEYWORDS_PATH = Path("assets/taxonomy.json")
@@ -15,16 +15,16 @@ DEFAULT_KEYWORDS_PATH = Path("assets/taxonomy.json")
 def load_keyword_taxonomy(path: Path | None = None) -> dict | None:
     taxonomy_path = path or DEFAULT_KEYWORDS_PATH
     if not taxonomy_path.exists():
-        LOGGER.debug("No keyword taxonomy found at %s", taxonomy_path)
+        logger.debug("No keyword taxonomy found at %s", taxonomy_path)
         return None
 
     try:
         with open(taxonomy_path) as f:
             taxonomy = json.load(f)
-        LOGGER.info("Loaded keyword taxonomy")
+        logger.info("Loaded keyword taxonomy")
         return taxonomy
     except Exception as e:
-        LOGGER.warning("Failed to load keyword taxonomy: %s", e)
+        logger.warning("Failed to load keyword taxonomy: %s", e)
         return None
 
 

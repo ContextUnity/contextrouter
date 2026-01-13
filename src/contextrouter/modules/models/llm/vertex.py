@@ -154,30 +154,15 @@ class VertexLLM(BaseModel):
 
         # Build multimodal messages
         messages = self._build_messages(request)
+        model = self._apply_request_params(request)
 
-        model = self._model.bind(
-            temperature=request.temperature,
-            max_output_tokens=request.max_output_tokens,
-            timeout=request.timeout_sec,
-            max_retries=request.max_retries,
-        )
         msg = await model.ainvoke(messages)
         content = getattr(msg, "content", "")
         text_result = content if isinstance(content, str) else str(content)
 
         return ModelResponse(
             text=text_result,
-            raw_provider=ProviderInfo(
-                provider="vertex",
-                model_name=(
-                    self._model.model_name if hasattr(self._model, "model_name") else "unknown"
-                ),
-                model_key=(
-                    f"vertex/{self._model.model_name}"
-                    if hasattr(self._model, "model_name")
-                    else "vertex/unknown"
-                ),
-            ),
+            raw_provider=self._get_provider_info(),
         )
 
     async def stream(
@@ -192,21 +177,57 @@ class VertexLLM(BaseModel):
 
         # Build multimodal messages
         messages = self._build_messages(request)
-
-        model = self._model.bind(
-            temperature=request.temperature,
-            max_output_tokens=request.max_output_tokens,
-            timeout=request.timeout_sec,
-            max_retries=request.max_retries,
-        )
+        model = self._apply_request_params(request)
 
         full = ""
         async for chunk in model.astream(messages):
-            c = getattr(chunk, "content", "")
-            if isinstance(c, str) and c:
+            raw_content = getattr(chunk, "content", "")
+            # Handle both string and list content (LangChain can return either)
+            if isinstance(raw_content, str):
+                c = raw_content
+            elif isinstance(raw_content, list):
+                # Extract text from list content (multimodal format)
+                text_parts = []
+                for part in raw_content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text_parts.append(str(part.get("text", "")))
+                    elif isinstance(part, str):
+                        text_parts.append(part)
+                c = "".join(text_parts)
+            else:
+                # Fallback: convert to string
+                c = str(raw_content) if raw_content else ""
+
+            if c:
                 full += c
                 yield TextDeltaEvent(delta=c)
+
         yield FinalTextEvent(text=full)
+
+    def _apply_request_params(self, request: ModelRequest) -> object:
+        """Bind request parameters to the underlying model."""
+        bind_kwargs: dict[str, object] = {}
+        if request.temperature is not None:
+            bind_kwargs["temperature"] = request.temperature
+        if request.max_output_tokens is not None:
+            bind_kwargs["max_output_tokens"] = request.max_output_tokens
+        if request.timeout_sec is not None:
+            bind_kwargs["timeout"] = request.timeout_sec
+        if request.max_retries is not None:
+            bind_kwargs["max_retries"] = request.max_retries
+
+        if not bind_kwargs:
+            return self._model
+        return self._model.bind(**bind_kwargs)
+
+    def _get_provider_info(self) -> ProviderInfo:
+        """Get normalized provider information."""
+        model_name = getattr(self._model, "model_name", "unknown")
+        return ProviderInfo(
+            provider="vertex",
+            model_name=model_name,
+            model_key=f"vertex/{model_name}",
+        )
 
     def _build_messages(self, request: ModelRequest) -> list[object]:
         """Build Gemini-compatible messages with multimodal support."""

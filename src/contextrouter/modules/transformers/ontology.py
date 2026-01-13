@@ -12,7 +12,7 @@ from contextrouter.modules.ingestion.rag.config import get_assets_paths, load_co
 from contextrouter.modules.ingestion.rag.graph.builder import ALLOWED_RELATION_LABELS
 from contextrouter.modules.ingestion.rag.settings import RagIngestionConfig
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 _DEFAULT_ENTITY_TYPES: list[str] = [
@@ -75,7 +75,7 @@ def build_ontology_from_taxonomy(*, config: RagIngestionConfig, overwrite: bool 
 
     ontology_path.parent.mkdir(parents=True, exist_ok=True)
     ontology_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    LOGGER.info("ontology: wrote %s", ontology_path)
+    logger.info("ontology: wrote %s", ontology_path)
     return ontology_path
 
 

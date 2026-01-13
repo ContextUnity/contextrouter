@@ -14,7 +14,7 @@ import logging
 from functools import lru_cache
 from pathlib import Path
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def _default_taxonomy_path() -> Path | None:
@@ -45,7 +45,7 @@ def load_taxonomy(taxonomy_path: str | None = None) -> dict[str, object] | None:
         data = json.loads(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else None
     except Exception as e:
-        LOGGER.warning("Failed to load taxonomy from %s: %s", path, e)
+        logger.warning("Failed to load taxonomy from %s: %s", path, e)
         return None
 
 

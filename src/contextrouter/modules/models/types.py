@@ -92,23 +92,24 @@ class ModelRequest(BaseModel):
     metadata: dict[str, StructDataValue] = Field(default_factory=dict)
 
     # Generation controls
-    temperature: float = 0.2
-    max_output_tokens: int = 1024
-    timeout_sec: float = 60.0
-    max_retries: int = 2
+    temperature: float | None = None
+    max_output_tokens: int | None = None  # None = use model default
+    timeout_sec: float | None = None
+    max_retries: int | None = None
 
     def required_modalities(self) -> set[str]:
         """Extract the set of required modalities from parts."""
         return {part.kind for part in self.parts}
 
-    def to_text_prompt(self) -> str:
+    def to_text_prompt(self, *, include_system: bool = False) -> str:
         """Best-effort conversion into a plain text prompt (text-only).
 
-        Providers that support true multimodal inputs should handle `parts` directly.
-        This is a safe helper for text-only providers or temporary compatibility wrappers.
+        Default behavior excludes `system` because providers that support system prompts
+        should pass it separately. Use `include_system=True` only for providers that
+        do not support a separate system prompt and need a merged prompt.
         """
         text_parts: list[str] = []
-        if isinstance(self.system, str) and self.system.strip():
+        if include_system and isinstance(self.system, str) and self.system.strip():
             text_parts.append(self.system.strip())
         for part in self.parts:
             if isinstance(part, TextPart) and part.text:

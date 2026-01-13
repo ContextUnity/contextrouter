@@ -33,7 +33,7 @@ from ..utils.records import (
     generate_id,
 )
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def extract_youtube_id_from_filename(filename: str) -> tuple[str | None, str]:
@@ -204,7 +204,7 @@ SEGMENTS:
             )
             if not text:
                 if attempt < max_batch_retries - 1:
-                    LOGGER.warning(
+                    logger.warning(
                         "video: %s: LLM returned empty (attempt %d/%d), retrying...",
                         batch_label or "batch",
                         attempt + 1,
@@ -212,7 +212,7 @@ SEGMENTS:
                     )
                     time.sleep(1 + attempt)
                     continue
-                LOGGER.warning(
+                logger.warning(
                     "video: %s: LLM returned empty after %d attempts",
                     batch_label or "batch",
                     max_batch_retries,
@@ -249,7 +249,7 @@ SEGMENTS:
             if success_rate >= success_rate_threshold:
                 # Success - batch complete
                 if attempt > 0:
-                    LOGGER.info(
+                    logger.info(
                         "video: %s: retry succeeded - %d/%d summaries (%.1f%%)",
                         batch_label or "batch",
                         parsed_count,
@@ -259,7 +259,7 @@ SEGMENTS:
                 break
             elif attempt < max_batch_retries - 1:
                 # Partial failure - retry
-                LOGGER.warning(
+                logger.warning(
                     "video: %s: only %d/%d summaries parsed (%.1f%%, < %.1f%% threshold, attempt %d/%d, retrying...)",
                     batch_label or "batch",
                     parsed_count,
@@ -272,7 +272,7 @@ SEGMENTS:
                 time.sleep(1 + attempt)
             else:
                 # Final attempt failed
-                LOGGER.warning(
+                logger.warning(
                     "video: %s: only %d/%d summaries parsed (%.1f%%) after %d attempts",
                     batch_label or "batch",
                     parsed_count,
@@ -297,7 +297,7 @@ SEGMENTS:
     # If we have failed records, retry them in smaller batches
     if failed_records:
         retry_batch_size = max(5, batch_size // 2)  # Smaller batches for retry (min 5)
-        LOGGER.info(
+        logger.info(
             "video: retrying %d failed records in smaller batches (size=%d)...",
             len(failed_records),
             retry_batch_size,
@@ -311,7 +311,7 @@ SEGMENTS:
             retry_failed.extend(failed)
 
         if retry_failed:
-            LOGGER.warning(
+            logger.warning(
                 "video: %d records still missing summaries after retry with smaller batches",
                 len(retry_failed),
             )
@@ -319,11 +319,11 @@ SEGMENTS:
     summaries_count = sum(1 for r in records if r.struct_data.get("summary"))
     if summaries_count < len(records):
         missing = len(records) - summaries_count
-        LOGGER.warning(
+        logger.warning(
             "video: generated %d/%d summaries (%d missing)", summaries_count, len(records), missing
         )
     else:
-        LOGGER.info("video: generated %d/%d summaries", summaries_count, len(records))
+        logger.info("video: generated %d/%d summaries", summaries_count, len(records))
 
 
 def _validate_video_segments(
@@ -396,7 +396,7 @@ class VideoPlugin(IngestionPlugin):
         """Load video transcripts from JSON files or youtube_transcript_api format."""
         source_dir = Path(assets_path)
         if not source_dir.exists():
-            LOGGER.warning("Video source directory does not exist: %s", assets_path)
+            logger.warning("Video source directory does not exist: %s", assets_path)
             return []
 
         raw_data: list[RawData] = []
@@ -428,13 +428,13 @@ class VideoPlugin(IngestionPlugin):
                         # Try youtube_transcript_api format
                         words = data.get("transcript", [])
                 else:
-                    LOGGER.warning(
+                    logger.warning(
                         "Unexpected JSON format in %s (expected list or dict)", json_file
                     )
                     continue
 
                 if not words:
-                    LOGGER.warning("No words/transcript found in %s", json_file)
+                    logger.warning("No words/transcript found in %s", json_file)
                     continue
 
                 # Smart gluing into sentences
@@ -457,7 +457,7 @@ class VideoPlugin(IngestionPlugin):
                 )
 
             except Exception as e:
-                LOGGER.error("Failed to load video file %s: %s", json_file, e)
+                logger.error("Failed to load video file %s: %s", json_file, e)
                 continue
 
         return raw_data
@@ -479,7 +479,7 @@ class VideoPlugin(IngestionPlugin):
             )
         shadow_records: list[ShadowRecord] = []
 
-        LOGGER.info("video: starting transform for %d video(s)", len(data))
+        logger.info("video: starting transform for %d video(s)", len(data))
 
         # Read LLM settings
         if config is None:
@@ -523,7 +523,7 @@ class VideoPlugin(IngestionPlugin):
 
             if sentences_timed:
                 total_windows = max(0, len(sentences_timed) - 2)
-                LOGGER.info(
+                logger.info(
                     "video: processing %s [%d/%d] - %d timed sentences -> ~%d windows",
                     video_title,
                     vid_idx,
@@ -535,7 +535,7 @@ class VideoPlugin(IngestionPlugin):
                 # Sliding window: stride=1, size=3 sentences
                 for i in range(total_windows):
                     if i > 0 and i % 100 == 0:
-                        LOGGER.info(
+                        logger.info(
                             "video: %s - processed %d/%d windows...", video_title, i, total_windows
                         )
 
@@ -585,7 +585,7 @@ class VideoPlugin(IngestionPlugin):
                         )
                     )
 
-                LOGGER.info(
+                logger.info(
                     "video: %s - created %d shadow records",
                     video_title,
                     len([r for r in shadow_records if r.struct_data.get("video_id") == video_id]),
@@ -596,7 +596,7 @@ class VideoPlugin(IngestionPlugin):
             sentences = [s.strip() for s in raw.content.split(". ") if s.strip()]
             total_windows = len(sentences) - 2
 
-            LOGGER.info(
+            logger.info(
                 "video: processing %s [%d/%d] - %d sentences -> ~%d windows (no timing data)",
                 video_title,
                 vid_idx,
@@ -608,7 +608,7 @@ class VideoPlugin(IngestionPlugin):
             # Sliding window: stride=1, size=3 sentences
             for i in range(total_windows):
                 if i > 0 and i % 100 == 0:
-                    LOGGER.info(
+                    logger.info(
                         "video: %s - processed %d/%d windows...", video_title, i, total_windows
                     )
 
@@ -664,7 +664,7 @@ class VideoPlugin(IngestionPlugin):
                     )
                 )
 
-        LOGGER.info("video: transform complete - %d total shadow records", len(shadow_records))
+        logger.info("video: transform complete - %d total shadow records", len(shadow_records))
 
         # Optional: Validate segments with LLM (expensive, off by default)
         if llm_segment_validation_enabled and shadow_records:
@@ -676,7 +676,7 @@ class VideoPlugin(IngestionPlugin):
 
         # Generate LLM summaries for all records (batch processing)
         if llm_summary_enabled and shadow_records:
-            LOGGER.info(
+            logger.info(
                 "video: generating LLM summaries for %d records (persona=%s)...",
                 len(shadow_records),
                 persona_name or "generic",

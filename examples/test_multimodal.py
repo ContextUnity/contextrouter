@@ -47,7 +47,7 @@ async def test_text_generation(provider: str, model_key: str) -> bool:
     from contextrouter.modules.models.registry import model_registry
     from contextrouter.modules.models.types import ModelRequest, TextPart
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"[TEXT] Testing {provider}: {model_key}")
     print("=" * 60)
 
@@ -81,7 +81,7 @@ async def test_image_input(provider: str, model_key: str) -> bool:
     from contextrouter.modules.models.registry import model_registry
     from contextrouter.modules.models.types import ImagePart, ModelRequest, TextPart
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"[IMAGE] Testing {provider}: {model_key}")
     print("=" * 60)
 
@@ -122,7 +122,7 @@ async def test_image_url(provider: str, model_key: str) -> bool:
     from contextrouter.modules.models.registry import model_registry
     from contextrouter.modules.models.types import ImagePart, ModelRequest, TextPart
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"[IMAGE URL] Testing {provider}: {model_key}")
     print("=" * 60)
 
@@ -160,7 +160,7 @@ async def test_audio_asr(provider: str, model_key: str) -> bool:
     from contextrouter.modules.models.registry import model_registry
     from contextrouter.modules.models.types import AudioPart, ModelRequest
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"[AUDIO ASR] Testing {provider}: {model_key}")
     print("=" * 60)
 
@@ -202,7 +202,7 @@ async def test_audio_from_file(provider: str, model_key: str, audio_path: str) -
     from contextrouter.modules.models.registry import model_registry
     from contextrouter.modules.models.types import AudioPart, ModelRequest
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"[AUDIO FILE] Testing {provider}: {model_key}")
     print("=" * 60)
 
@@ -245,7 +245,7 @@ async def test_video_input(provider: str, model_key: str, video_uri: str) -> boo
     from contextrouter.modules.models.registry import model_registry
     from contextrouter.modules.models.types import ModelRequest, TextPart, VideoPart
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"[VIDEO] Testing {provider}: {model_key}")
     print("=" * 60)
 
@@ -283,7 +283,7 @@ async def test_streaming(provider: str, model_key: str) -> bool:
     from contextrouter.modules.models.registry import model_registry
     from contextrouter.modules.models.types import ModelRequest, TextPart
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"[STREAM] Testing {provider}: {model_key}")
     print("=" * 60)
 
@@ -439,7 +439,7 @@ async def main() -> int:
         providers = list(PROVIDER_CONFIGS.keys())
 
     for provider in providers:
-        print(f"\n{'#'*70}")
+        print(f"\n{'#' * 70}")
         print(f"# Testing provider: {provider}")
         print("#" * 70)
 
@@ -468,7 +468,7 @@ async def main() -> int:
         total_failed += failed
 
         status = "✅" if failed == 0 else "❌"
-        print(f"{status} {provider}: {passed}/{passed+failed} tests passed")
+        print(f"{status} {provider}: {passed}/{passed + failed} tests passed")
         for test_name, success in results.items():
             mark = "✅" if success else "❌"
             print(f"    {mark} {test_name}")

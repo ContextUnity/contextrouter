@@ -20,7 +20,7 @@ from ..config import DEFAULT_TAXONOMY_PATH
 from ..settings import RagIngestionConfig
 from .types import GraphEnrichmentResult
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -103,7 +103,7 @@ def llm_generate_tsv(
             if attempt < retries - 1:
                 time.sleep(1 + attempt)  # Exponential backoff
                 continue
-            LOGGER.debug("llm_generate_tsv: all retries exhausted: %s", e)
+            logger.debug("llm_generate_tsv: all retries exhausted: %s", e)
     return ""
 
 
@@ -113,14 +113,14 @@ def load_taxonomy_safe(taxonomy_path: Path | None = None) -> StructData | None:
     if not isinstance(path, Path):
         return None
     if not path.exists():
-        LOGGER.debug("Taxonomy file not found: %s", path)
+        logger.debug("Taxonomy file not found: %s", path)
         return None
     try:
         with open(path, encoding="utf-8") as f:
             obj: StructDataValue = json.load(f)
             return obj if isinstance(obj, dict) else None
     except Exception as e:
-        LOGGER.warning("Failed to load taxonomy: %s", e)
+        logger.warning("Failed to load taxonomy: %s", e)
         return None
 
 

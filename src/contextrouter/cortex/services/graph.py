@@ -24,7 +24,7 @@ from pathlib import Path
 
 from contextrouter.modules.ingestion.rag.graph.serialization import load_graph_secure
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # Module-level singleton instance and lock
 _graph_service: "GraphService | None" = None
@@ -77,19 +77,19 @@ class GraphService:
                             self._node_index[k] = node
                 except Exception:
                     self._node_index = {}
-                LOGGER.info(
+                logger.info(
                     "GraphService loaded graph: %d nodes, %d edges",
                     self.graph.number_of_nodes(),
                     self.graph.number_of_edges(),
                 )
                 self._graph_enabled = True
             except Exception as e:
-                LOGGER.warning("Failed to load graph: %s. Graph service disabled.", e)
+                logger.warning("Failed to load graph: %s. Graph service disabled.", e)
                 self._graph_enabled = False
                 self._node_index = {}
                 self.graph = None
         else:
-            LOGGER.warning("Graph file not found: %s. Graph service disabled.", graph_path)
+            logger.warning("Graph file not found: %s. Graph service disabled.", graph_path)
             self._graph_enabled = False
             self._node_index = {}
 
@@ -110,17 +110,17 @@ class GraphService:
                             for keyword in keywords:
                                 if isinstance(keyword, str) and keyword.strip():
                                     self._keyword_to_category[keyword.strip().lower()] = cat_name
-                LOGGER.info(
+                logger.info(
                     "GraphService loaded taxonomy: %d categories, %d keywords",
                     len(cats) if isinstance(cats, dict) else 0,
                     len(self._keyword_to_category),
                 )
                 self._taxonomy_enabled = True
             except Exception as e:
-                LOGGER.warning("Failed to load taxonomy: %s. Taxonomy features disabled.", e)
+                logger.warning("Failed to load taxonomy: %s. Taxonomy features disabled.", e)
                 self._taxonomy_enabled = False
         else:
-            LOGGER.warning(
+            logger.warning(
                 "Taxonomy file not found: %s. Taxonomy features disabled.",
                 taxonomy_path,
             )
@@ -140,12 +140,12 @@ class GraphService:
                         str(x).strip() for x in labels if isinstance(x, str) and str(x).strip()
                     }
                 self._ontology_enabled = True
-                LOGGER.info(
+                logger.info(
                     "GraphService loaded ontology: fact_labels=%d",
                     len(self._fact_labels),
                 )
             except Exception as e:
-                LOGGER.warning("Failed to load ontology: %s. Ontology features disabled.", e)
+                logger.warning("Failed to load ontology: %s. Ontology features disabled.", e)
                 self._ontology_enabled = False
                 self._fact_labels = set()
         else:
@@ -369,7 +369,7 @@ def get_graph_service(
                 if ontology_path is None:
                     ontology_path = paths.get("ontology")
             except ImportError:
-                LOGGER.warning("Could not load config for default paths")
+                logger.warning("Could not load config for default paths")
 
         # Back-compat: some repos store graph as knowledge_graph.gpickle
         if graph_path is not None and not graph_path.exists():

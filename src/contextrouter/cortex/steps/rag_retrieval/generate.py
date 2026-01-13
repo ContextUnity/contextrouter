@@ -6,14 +6,14 @@ This keeps the direct-mode graph free of registry registration side effects.
 from __future__ import annotations
 
 import logging
-from abc import ABC, abstractmethod
-from typing import Any, List
+from typing import List, Protocol
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from contextrouter.core import get_core_config
 from contextrouter.cortex import AgentState
 from contextrouter.modules.models import model_registry
+from contextrouter.modules.models.types import ModelRequest, TextPart
 
 from ...llm import build_rag_prompt
 from ...nodes.utils import pipeline_log
@@ -22,7 +22,7 @@ from .no_results import no_results_response
 logger = logging.getLogger(__name__)
 
 
-def _last_nonempty_assistant_text(messages: list[Any]) -> str:
+def _last_nonempty_assistant_text(messages: list[BaseMessage]) -> str:
     for msg in reversed(messages or []):
         if not isinstance(msg, AIMessage):
             continue
@@ -33,14 +33,62 @@ def _last_nonempty_assistant_text(messages: list[Any]) -> str:
     return ""
 
 
-class IntentStrategy(ABC):
-    @abstractmethod
-    async def generate(self, state: AgentState) -> dict[str, Any]:
-        raise NotImplementedError
+async def _run_generation(model_instance: object, request: ModelRequest) -> str:
+    """Helper to run LLM streaming and accumulate the result."""
+    if not hasattr(model_instance, "stream"):
+        raise ValueError(f"Model instance {type(model_instance)} does not support streaming")
+
+    full_content = ""
+    # model_instance is expected to have a .stream(request) method returning AsyncIterator[ModelStreamEvent]
+    async for event in model_instance.stream(request):  # type: ignore[attr-defined]
+        event_type = getattr(event, "event_type", None)
+        if event_type == "text_delta":
+            full_content += event.delta
+        elif event_type == "final_text":
+            final_text = event.text or ""
+            if len(final_text) >= len(full_content):
+                full_content = final_text
+        elif event_type == "error":
+            logger.error("Generation error: %s", getattr(event, "error", "unknown"))
+
+    return full_content
+
+
+def _build_model_request(messages: list[BaseMessage], merge_system: bool = False) -> ModelRequest:
+    """Convert LangChain messages to ModelRequest, handling system prompts."""
+    system_parts: list[str] = []
+    other_parts: list[str] = []
+
+    for msg in messages:
+        content = msg.content if isinstance(msg.content, str) else str(msg.content)
+        if not content.strip():
+            continue
+
+        if isinstance(msg, SystemMessage) and not merge_system:
+            system_parts.append(content)
+        else:
+            other_parts.append(content)
+
+    system_prompt = "\n\n".join(system_parts) if system_parts else None
+    user_prompt = "\n\n".join(other_parts)
+
+    # Some providers require at least one user message/part even when a system prompt is present.
+    # Ensure we always send at least one TextPart to avoid provider-side validation errors.
+    if not user_prompt:
+        user_prompt = ""
+
+    return ModelRequest(
+        system=system_prompt,
+        parts=[TextPart(text=user_prompt)],
+    )
+
+
+class IntentStrategy(Protocol):
+    async def generate(self, state: AgentState) -> dict[str, object]: ...
 
 
 class RAGStrategy(IntentStrategy):
-    async def generate(self, state: AgentState) -> dict[str, Any]:
+    async def generate(self, state: AgentState) -> dict[str, object]:
         messages = state.get("messages", [])
         retrieved_docs = state.get("retrieved_docs", [])
         user_query = state.get("user_query", "")
@@ -73,52 +121,26 @@ class RAGStrategy(IntentStrategy):
             retrieved_docs=retrieved_docs,
             user_query=intent_text,
             platform=platform,
-            style_prompt=str(state.get("style_prompt") or ""),
-            rag_system_prompt_override=str(state.get("rag_system_prompt_override") or ""),
+            style_prompt=str(state.get("style_prompt") or "").strip(),
+            rag_system_prompt_override=str(state.get("rag_system_prompt_override") or "").strip(),
             graph_facts=state.get("graph_facts", []) or [],
         )
 
-        from contextrouter.modules.models.types import ModelRequest, TextPart
-
         core_cfg = get_core_config()
-
         generation_cfg = core_cfg.models.rag.generation
-        generation_model_key = generation_cfg.model or core_cfg.models.default_llm
-        fallback_keys = list(generation_cfg.fallback or [])
-        strategy = generation_cfg.strategy or "fallback"
+        model_key = generation_cfg.model or core_cfg.models.default_llm
 
-        model = model_registry.get_llm_with_fallback(
-            key=generation_model_key,
-            fallback_keys=fallback_keys,
-            strategy=strategy,
+        llm = model_registry.get_llm_with_fallback(
+            key=model_key,
+            fallback_keys=list(generation_cfg.fallback or []),
+            strategy=generation_cfg.strategy or "fallback",
             config=core_cfg,
         )
 
-        # Direct model usage with new multimodal interface
-        llm = model
-
-        # Convert LangChain messages to text prompt
-        prompt_parts = []
-        for msg in prompt_messages:
-            if hasattr(msg, "content"):
-                content = msg.content
-                if isinstance(content, str):
-                    prompt_parts.append(content)
-                else:
-                    prompt_parts.append(str(content))
-
-        full_prompt = "\n\n".join(prompt_parts)
-
-        request = ModelRequest(
-            parts=[TextPart(text=full_prompt)],
+        request = _build_model_request(
+            prompt_messages, merge_system=core_cfg.llm.merge_system_prompt
         )
-
-        full_content = ""
-        async for event in llm.stream(request):
-            if getattr(event, "event_type", None) == "text_delta":
-                full_content += event.delta
-            elif getattr(event, "event_type", None) == "final_text":
-                full_content = event.text
+        full_content = await _run_generation(llm, request)
 
         if not full_content.strip():
             full_content = "We apologize, but we encountered an issue generating a response. Please try again later."
@@ -129,7 +151,7 @@ class RAGStrategy(IntentStrategy):
             "generation_complete": True,
         }
 
-    def _format_history(self, messages: List[Any]) -> str:
+    def _format_history(self, messages: List[BaseMessage]) -> str:
         parts: list[str] = []
         for msg in list(messages)[-10:]:
             role = "User" if isinstance(msg, HumanMessage) else "Assistant"
@@ -141,7 +163,7 @@ class RAGStrategy(IntentStrategy):
 
 
 class IdentityStrategy(IntentStrategy):
-    async def generate(self, state: AgentState) -> dict[str, Any]:
+    async def generate(self, state: AgentState) -> dict[str, object]:
         from contextrouter.cortex.prompting import IDENTITY_PROMPT
 
         intent_text = state.get("intent_text") or state.get("user_query") or ""
@@ -151,47 +173,21 @@ class IdentityStrategy(IntentStrategy):
         system_content = IDENTITY_PROMPT.format(style_context=style_context, query=intent_text)
         prompt_messages = [SystemMessage(content=system_content), HumanMessage(content=intent_text)]
 
-        from contextrouter.modules.models.types import ModelRequest, TextPart
-
         core_cfg = get_core_config()
-
         generation_cfg = core_cfg.models.rag.generation
-        generation_model_key = generation_cfg.model or core_cfg.models.default_llm
-        fallback_keys = list(generation_cfg.fallback or [])
-        strategy = generation_cfg.strategy or "fallback"
+        model_key = generation_cfg.model or core_cfg.models.default_llm
 
-        model = model_registry.get_llm_with_fallback(
-            key=generation_model_key,
-            fallback_keys=fallback_keys,
-            strategy=strategy,
+        llm = model_registry.get_llm_with_fallback(
+            key=model_key,
+            fallback_keys=list(generation_cfg.fallback or []),
+            strategy=generation_cfg.strategy or "fallback",
             config=core_cfg,
         )
 
-        # Direct model usage with new multimodal interface
-        llm = model
-
-        # Convert LangChain messages to text prompt
-        prompt_parts = []
-        for msg in prompt_messages:
-            if hasattr(msg, "content"):
-                content = msg.content
-                if isinstance(content, str):
-                    prompt_parts.append(content)
-                else:
-                    prompt_parts.append(str(content))
-
-        full_prompt = "\n\n".join(prompt_parts)
-
-        request = ModelRequest(
-            parts=[TextPart(text=full_prompt)],
+        request = _build_model_request(
+            prompt_messages, merge_system=core_cfg.llm.merge_system_prompt
         )
-
-        full_content = ""
-        async for event in llm.stream(request):
-            if getattr(event, "event_type", None) == "text_delta":
-                full_content += event.delta
-            elif getattr(event, "event_type", None) == "final_text":
-                full_content = event.text
+        full_content = await _run_generation(llm, request)
 
         # Suggestions for identity are handled by suggest node; keep empty here.
         return {
@@ -203,7 +199,7 @@ class IdentityStrategy(IntentStrategy):
 
 
 class TransformStrategy(IntentStrategy):
-    async def generate(self, state: AgentState) -> dict[str, Any]:
+    async def generate(self, state: AgentState) -> dict[str, object]:
         intent = state.get("intent", "rewrite")
         intent_text = state.get("intent_text") or state.get("user_query") or ""
         messages = state.get("messages", [])
@@ -225,7 +221,6 @@ class TransformStrategy(IntentStrategy):
             "rewrite": "Rewrite the text below according to the user's instruction. Improve clarity.",
         }
         instruction = instructions.get(intent, instructions["rewrite"])
-
         prompt_messages = [
             SystemMessage(content="You are a helpful assistant."),
             HumanMessage(
@@ -233,47 +228,21 @@ class TransformStrategy(IntentStrategy):
             ),
         ]
 
-        from contextrouter.modules.models.types import ModelRequest, TextPart
-
         core_cfg = get_core_config()
-
         generation_cfg = core_cfg.models.rag.generation
-        generation_model_key = generation_cfg.model or core_cfg.models.default_llm
-        fallback_keys = list(generation_cfg.fallback or [])
-        strategy = generation_cfg.strategy or "fallback"
+        model_key = generation_cfg.model or core_cfg.models.default_llm
 
-        model = model_registry.get_llm_with_fallback(
-            key=generation_model_key,
-            fallback_keys=fallback_keys,
-            strategy=strategy,
+        llm = model_registry.get_llm_with_fallback(
+            key=model_key,
+            fallback_keys=list(generation_cfg.fallback or []),
+            strategy=generation_cfg.strategy or "fallback",
             config=core_cfg,
         )
 
-        # Direct model usage with new multimodal interface
-        llm = model
-
-        # Convert LangChain messages to text prompt
-        prompt_parts = []
-        for msg in prompt_messages:
-            if hasattr(msg, "content"):
-                content = msg.content
-                if isinstance(content, str):
-                    prompt_parts.append(content)
-                else:
-                    prompt_parts.append(str(content))
-
-        full_prompt = "\n\n".join(prompt_parts)
-
-        request = ModelRequest(
-            parts=[TextPart(text=full_prompt)],
+        request = _build_model_request(
+            prompt_messages, merge_system=core_cfg.llm.merge_system_prompt
         )
-
-        full_content = ""
-        async for event in llm.stream(request):
-            if getattr(event, "event_type", None) == "text_delta":
-                full_content += event.delta
-            elif getattr(event, "event_type", None) == "final_text":
-                full_content = event.text
+        full_content = await _run_generation(llm, request)
 
         return {
             "messages": [AIMessage(content=full_content)],
@@ -283,7 +252,7 @@ class TransformStrategy(IntentStrategy):
         }
 
 
-async def generate_response(state: AgentState) -> dict[str, Any]:
+async def generate_response(state: AgentState) -> dict[str, object]:
     """Generate response using explicit RAG pipeline."""
     intent = state.get("intent", "rag_and_web")
 

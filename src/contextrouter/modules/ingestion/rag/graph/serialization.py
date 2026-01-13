@@ -11,7 +11,7 @@ from typing import Any
 
 import joblib
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def _compute_file_hash(file_path: Path) -> str:
@@ -45,7 +45,7 @@ def save_graph_secure(graph: Any, file_path: Path, hash_file_path: Path | None =
     file_hash = _compute_file_hash(file_path)
     hash_file_path.write_text(file_hash)
 
-    LOGGER.debug(
+    logger.debug(
         "Graph saved securely to %s with integrity hash at %s",
         file_path,
         hash_file_path,
@@ -84,7 +84,7 @@ def load_graph_secure(file_path: Path, hash_file_path: Path | None = None) -> An
                 "Expected hash: {expected_hash}, Actual hash: {actual_hash}"
             )
     else:
-        LOGGER.warning(
+        logger.warning(
             "No integrity hash file found for %s. "
             "Loading without verification - this reduces security.",
             file_path,

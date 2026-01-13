@@ -17,7 +17,7 @@ from contextrouter.modules.ingestion.rag.stages.store import (
     write_shadow_records_jsonl,
 )
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def build_shadow_records(
@@ -43,13 +43,13 @@ def build_shadow_records(
         t0 = time.perf_counter()
         plugin = plugins_by_type.get(t)
         if plugin is None:
-            LOGGER.warning("shadow: no plugin registered for type=%s (skipping)", t)
+            logger.warning("shadow: no plugin registered for type=%s (skipping)", t)
             return (t, "")
 
         in_path = paths["clean_text"] / f"{t}.jsonl"
         items = read_raw_data_jsonl(in_path)
         if not items:
-            LOGGER.warning("shadow: no clean_text items for type=%s at %s", t, in_path)
+            logger.warning("shadow: no clean_text items for type=%s at %s", t, in_path)
             return (t, "")
 
         records = plugin.transform(
@@ -62,7 +62,7 @@ def build_shadow_records(
 
         out_path = paths["shadow"] / f"{t}.jsonl"
         count = write_shadow_records_jsonl(records, out_path, overwrite=overwrite)
-        LOGGER.warning(
+        logger.warning(
             "shadow: wrote %d records for type=%s -> %s (%.1fs)",
             count,
             t,

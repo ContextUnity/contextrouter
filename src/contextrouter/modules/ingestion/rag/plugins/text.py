@@ -27,7 +27,7 @@ from ..core.utils import (
 from ..settings import RagIngestionConfig
 from ..utils.records import generate_id
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 @register_plugin("knowledge")

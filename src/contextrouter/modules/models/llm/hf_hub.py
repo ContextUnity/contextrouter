@@ -163,7 +163,7 @@ class HuggingFaceHubLLM(BaseModel):
         )
 
     async def _generate_classification(self, request: ModelRequest) -> ModelResponse:
-        prompt = request.to_text_prompt()
+        prompt = request.to_text_prompt(include_system=True)
         out = await self._client.text_classification(prompt)
         # out is usually list of dicts with label/score
         return ModelResponse(

@@ -11,7 +11,7 @@ from contextrouter.core import Config, get_core_config
 
 ALL_TYPES = ["video", "book", "qa", "web", "knowledge"]
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def load_core_cfg() -> Config:
@@ -110,7 +110,7 @@ def require_exports(paths: dict[str, Path], types: list[str]) -> None:
 
 __all__ = [
     "ALL_TYPES",
-    "LOGGER",
+    "logger",
     "coerce_types",
     "load_core_cfg",
     "missing",

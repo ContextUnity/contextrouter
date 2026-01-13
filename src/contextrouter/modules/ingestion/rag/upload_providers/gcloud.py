@@ -15,7 +15,7 @@ from .base import (
     UploadResult,
 )
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class GCloudUploadProvider(UploadProvider):
@@ -114,7 +114,7 @@ class GCloudUploadProvider(UploadProvider):
                 error=f"Failed to resolve data_store_id: {e}",
             )
 
-        LOGGER.info(
+        logger.info(
             "GCloud upload: project=%s, bucket=%s, datastore=%s, location=%s",
             self._project_id,
             self._gcs_bucket,
@@ -128,7 +128,7 @@ class GCloudUploadProvider(UploadProvider):
             blob_name = f"ingestion/{date_folder}/{local_path.name}"
 
             # Upload to GCS
-            LOGGER.info(
+            logger.info(
                 "Uploading %s to gs://%s/%s ...", local_path.name, self._gcs_bucket, blob_name
             )
             storage_client = storage.Client()
@@ -136,10 +136,10 @@ class GCloudUploadProvider(UploadProvider):
             blob = bucket.blob(blob_name)
             blob.upload_from_filename(str(local_path), content_type="application/json")
             gcs_uri = f"gs://{self._gcs_bucket}/{blob_name}"
-            LOGGER.info("Uploaded to %s", gcs_uri)
+            logger.info("Uploaded to %s", gcs_uri)
 
             # Trigger Vertex AI Search import
-            LOGGER.info(
+            logger.info(
                 "Triggering import to datastore '%s' in location '%s'...",
                 data_store_id,
                 self._location,
@@ -167,13 +167,13 @@ class GCloudUploadProvider(UploadProvider):
 
             operation = de_client.import_documents(request=request)
             op_name = operation.operation.name
-            LOGGER.info("Import operation started: %s", op_name)
+            logger.info("Import operation started: %s", op_name)
 
             if wait:
-                LOGGER.info("Waiting for import to complete (this may take several minutes)...")
+                logger.info("Waiting for import to complete (this may take several minutes)...")
                 response = operation.result(timeout=3600)  # 1 hour timeout
-                LOGGER.info("Import completed successfully!")
-                LOGGER.info("Import result: %s", response)
+                logger.info("Import completed successfully!")
+                logger.info("Import result: %s", response)
 
             return UploadResult(
                 success=True,
@@ -189,7 +189,7 @@ class GCloudUploadProvider(UploadProvider):
             )
 
         except Exception as e:
-            LOGGER.exception("GCloud upload failed")
+            logger.exception("GCloud upload failed")
             return UploadResult(
                 success=False,
                 provider=self.name,

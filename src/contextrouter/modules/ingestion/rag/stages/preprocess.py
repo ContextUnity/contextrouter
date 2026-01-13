@@ -28,7 +28,7 @@ from ..settings import RagIngestionConfig
 from ..utils.llm import MODEL_FLASH, MODEL_LIGHT, llm_generate
 from .store import write_raw_data_jsonl
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def preprocess_to_clean_text(
@@ -50,7 +50,7 @@ def preprocess_to_clean_text(
         import time
 
         start = time.perf_counter()
-        LOGGER.info("preprocess: processing type=%s", t)
+        logger.info("preprocess: processing type=%s", t)
         out_path = paths["clean_text"] / f"{t}.jsonl"
         items: list[RawData]
 
@@ -78,12 +78,12 @@ def preprocess_to_clean_text(
         elif t == "knowledge":
             items = TextPlugin().load(str(get_plugin_source_dir("knowledge", config)))
         else:
-            LOGGER.warning("preprocess: unknown type=%s (skipped)", t)
+            logger.warning("preprocess: unknown type=%s (skipped)", t)
             return (t, out_path, 0)
 
         count = write_raw_data_jsonl(items, out_path, overwrite=overwrite)
         elapsed = time.perf_counter() - start
-        LOGGER.info(
+        logger.info(
             "preprocess: wrote=%d type=%s path=%s (%.1fs)",
             count,
             t,
@@ -94,7 +94,7 @@ def preprocess_to_clean_text(
 
     w = resolve_workers(config=config, workers=workers)
     if w > 1 and len(only_types) > 1:
-        LOGGER.info("preprocess: parallelism workers=%d", w)
+        logger.info("preprocess: parallelism workers=%d", w)
 
     results = parallel_map(only_types, _run_one, workers=w, ordered=False, swallow_exceptions=False)
     for r in results:
@@ -135,9 +135,9 @@ def _preprocess_qa(
     if not speaker_enabled:
         return items
 
-    LOGGER.info("preprocess(qa): speaker detection enabled")
+    logger.info("preprocess(qa): speaker detection enabled")
     if question_filter_enabled:
-        LOGGER.info("preprocess(qa): question filtering enabled")
+        logger.info("preprocess(qa): question filtering enabled")
 
     for i, raw in enumerate(items, start=1):
         title = ""
@@ -145,7 +145,7 @@ def _preprocess_qa(
             title = str(
                 raw.metadata.get("session_title") or raw.metadata.get("source_title") or ""
             )[:80]
-        LOGGER.info("preprocess(qa): session %d/%d title=%s", i, len(items), title or "Untitled")
+        logger.info("preprocess(qa): session %d/%d title=%s", i, len(items), title or "Untitled")
 
         interactions = plugin.split_by_speakers_llm(raw.content)
         if not interactions:
@@ -360,7 +360,7 @@ HOST:"""
                 if result.casefold() == corrected_name.casefold() or result.casefold() == cand:
                     return corrected_name
     except Exception as e:
-        LOGGER.debug("LLM host detection failed: %s (using heuristic)", e)
+        logger.debug("LLM host detection failed: %s (using heuristic)", e)
 
     return None
 
@@ -463,7 +463,7 @@ CHUNKS:
                 parse_json=False,
             )
         except Exception as e:
-            LOGGER.warning(
+            logger.warning(
                 "QA question filtering failed for batch at %d: %s (keeping all)",
                 batch_start,
                 e,
@@ -475,7 +475,7 @@ CHUNKS:
             continue
 
         if not isinstance(text, str) or not text.strip():
-            LOGGER.warning(
+            logger.warning(
                 "QA question filtering returned empty for batch at %d (keeping all)",
                 batch_start,
             )
@@ -529,7 +529,7 @@ CHUNKS:
 
     dropped = len(interactions) - len(filtered)
     if dropped > 0:
-        LOGGER.info("    Filtered %d/%d meaningless interactions", dropped, len(interactions))
+        logger.info("    Filtered %d/%d meaningless interactions", dropped, len(interactions))
 
     return filtered
 
@@ -539,7 +539,7 @@ def _populate_web_llm_summaries(
 ) -> None:
     """Ensure each web RawData has a short summary in metadata for citations/UI."""
     if not config.web.llm_summary_enabled:
-        LOGGER.info("preprocess(web): llm_summary_enabled=false (skipping)")
+        logger.info("preprocess(web): llm_summary_enabled=false (skipping)")
         return
 
     max_chars = config.web.llm_summary_max_chars
@@ -576,7 +576,7 @@ def _populate_web_llm_summaries(
                 parse_json=False,
             )
         except Exception as e:
-            LOGGER.warning("preprocess(web): summary LLM failed (url=%s): %s", url, e)
+            logger.warning("preprocess(web): summary LLM failed (url=%s): %s", url, e)
             continue
 
         if isinstance(summary, str):
@@ -600,7 +600,7 @@ def _preprocess_video(
     filler, garbled text, and promotional content while preserving timing.
     """
     if not source_dir.exists():
-        LOGGER.warning("Video source directory does not exist: %s", source_dir)
+        logger.warning("Video source directory does not exist: %s", source_dir)
         return []
 
     llm_clean_enabled = config.video.llm_clean_enabled
@@ -616,7 +616,7 @@ def _preprocess_video(
         try:
             payload = json.loads(json_file.read_text(encoding="utf-8"))
         except Exception as e:
-            LOGGER.warning("Failed to read video JSON %s: %s", json_file, e)
+            logger.warning("Failed to read video JSON %s: %s", json_file, e)
             continue
 
         extracted_id, clean_filename = extract_youtube_id_from_filename(json_file.stem)
@@ -635,10 +635,10 @@ def _preprocess_video(
                 words = w
 
         if not words:
-            LOGGER.warning("No words/transcript found in %s", json_file)
+            logger.warning("No words/transcript found in %s", json_file)
             continue
 
-        LOGGER.info("preprocess(video): %d/%d %s", file_idx, total_files, video_title)
+        logger.info("preprocess(video): %d/%d %s", file_idx, total_files, video_title)
 
         sentences = smart_glue_words(words)
 
@@ -751,7 +751,7 @@ def _llm_clean_video_sentences(
             {"idx": batch_start + i, "text": s.get("text", "")} for i, s in enumerate(batch)
         ]
 
-        LOGGER.info(
+        logger.info(
             "preprocess(video): llm clean batch %d/%d (%d sentences overlap=%d)",
             batch_num,
             total_batches,
@@ -809,7 +809,7 @@ INPUT JSON:
                 parse_json=False,
             )
         except Exception as e:
-            LOGGER.warning(
+            logger.warning(
                 "LLM clean failed for batch at %d: %s (keeping original)",
                 batch_start,
                 e,
@@ -821,7 +821,7 @@ INPUT JSON:
             continue
 
         if not isinstance(raw, str) or not raw.strip():
-            LOGGER.warning(
+            logger.warning(
                 "LLM clean returned empty output for batch at %d (keeping original)",
                 batch_start,
             )
@@ -889,7 +889,7 @@ INPUT JSON:
         )
 
     dropped = len(sentences) - len(cleaned)
-    LOGGER.info(
+    logger.info(
         "preprocess(video): llm clean complete: %d -> %d sentences (dropped %d)",
         len(sentences),
         len(cleaned),

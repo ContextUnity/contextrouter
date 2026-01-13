@@ -11,7 +11,7 @@ from contextrouter.core.config import Config
 from ..core.types import RawData
 from ..utils.llm import MODEL_PRO, llm_generate
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def generate_persona_profile(
@@ -39,7 +39,7 @@ def generate_persona_profile(
     filtered = [d for d in all_data if d.source_type in ["video", "qa", "knowledge"]]
 
     if not filtered:
-        LOGGER.warning("No video/qa/knowledge content found for persona generation")
+        logger.warning("No video/qa/knowledge content found for persona generation")
         return
 
     persona_name = (persona_name or "").strip() or "Speaker Name"
@@ -84,7 +84,7 @@ Rules:
 - End with a final line: END_SYSTEM_INSTRUCTION
 """
 
-    LOGGER.info(
+    logger.info(
         "Generating persona profile (samples=%d persona_name=%s)...", len(sampled), persona_name
     )
     persona_text = llm_generate(
@@ -100,9 +100,9 @@ Rules:
         persona_text = str(persona_text)
 
     if isinstance(persona_text, str) and "END_SYSTEM_INSTRUCTION" not in persona_text:
-        LOGGER.warning("Persona output may be truncated (missing END_SYSTEM_INSTRUCTION)")
+        logger.warning("Persona output may be truncated (missing END_SYSTEM_INSTRUCTION)")
 
     # Save to file
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(persona_text, encoding="utf-8")
-    LOGGER.info("Saved persona profile to %s", output_path)
+    logger.info("Saved persona profile to %s", output_path)

@@ -12,7 +12,7 @@ import click
 from contextrouter.cli.registry import register_command
 from contextrouter.core.config import get_env
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def _check_env() -> None:
@@ -214,7 +214,7 @@ def cmd_test(queries_file: Path, platform: str, output: Path | None) -> None:
                     f"  {status} Response: {len(response)} chars, Citations: {len(citations)}"
                 )
             except Exception as e:
-                LOGGER.exception("Query failed")
+                logger.exception("Query failed")
                 results.append(
                     {
                         "query": query,
@@ -292,7 +292,7 @@ def cmd_benchmark(queries_file: Path, output: Path | None) -> None:
                 )
             except Exception as e:
                 elapsed = time.perf_counter() - t0
-                LOGGER.exception("Retrieval failed")
+                logger.exception("Retrieval failed")
                 results.append(
                     {
                         "query": query,

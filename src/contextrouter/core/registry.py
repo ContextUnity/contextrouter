@@ -280,7 +280,7 @@ agent_registry: Registry = Registry(name="agents", builtin_map=BUILTIN_AGENTS)
 
 # ---- Plugin scanning -------------------------------------------------------
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def scan(plugin_dir: Path) -> None:
@@ -293,16 +293,16 @@ def scan(plugin_dir: Path) -> None:
         plugin_dir: Directory containing Python plugin modules
     """
     if not plugin_dir.exists() or not plugin_dir.is_dir():
-        LOGGER.debug(f"Plugin directory does not exist: {plugin_dir}")
+        logger.debug(f"Plugin directory does not exist: {plugin_dir}")
         return
 
     # Find all .py files in the directory
     plugin_files = list(plugin_dir.glob("*.py"))
     if not plugin_files:
-        LOGGER.debug(f"No Python files found in plugin directory: {plugin_dir}")
+        logger.debug(f"No Python files found in plugin directory: {plugin_dir}")
         return
 
-    LOGGER.info(f"Scanning {len(plugin_files)} plugin files in {plugin_dir}")
+    logger.info(f"Scanning {len(plugin_files)} plugin files in {plugin_dir}")
 
     # Import each plugin file
     for plugin_file in plugin_files:
@@ -315,11 +315,11 @@ def scan(plugin_dir: Path) -> None:
             if spec and spec.loader:
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
-                LOGGER.info(f"Loaded plugin: {module_name} from {plugin_file}")
+                logger.info(f"Loaded plugin: {module_name} from {plugin_file}")
             else:
-                LOGGER.warning(f"Could not load plugin: {plugin_file}")
+                logger.warning(f"Could not load plugin: {plugin_file}")
         except Exception as e:
-            LOGGER.error(f"Failed to load plugin {plugin_file}: {e}")
+            logger.error(f"Failed to load plugin {plugin_file}: {e}")
 
 
 __all__ = [
