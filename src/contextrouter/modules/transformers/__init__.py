@@ -11,4 +11,5 @@ __all__ = [
     "graph",
     "shadow",
     "ontology",
+    "ner",
 ]
