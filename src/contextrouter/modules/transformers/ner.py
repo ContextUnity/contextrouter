@@ -10,9 +10,10 @@ Supports multiple backends:
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
-from typing import Any
+from typing import NotRequired, TypedDict
 
 from contextrouter.core.bisquit import BisquitEnvelope
 from contextrouter.core.config import Config
@@ -41,7 +42,46 @@ STANDARD_ENTITY_TYPES = {
     "WORK_OF_ART",  # Books, movies, art
     "FAC",  # Facilities, buildings
     "NORP",  # Nationalities, religious/political groups
+    "MISC",  # Catch-all used by common NER models (e.g. CoNLL03)
 }
+
+_ENTITY_TYPE_ALIASES: dict[str, str] = {
+    # CoNLL03-style
+    "PER": "PERSON",
+    "ORG": "ORG",
+    "LOC": "LOC",
+    "MISC": "MISC",
+    # spaCy common labels
+    "PERSON": "PERSON",
+    "GPE": "GPE",
+    "NORP": "NORP",
+    "FAC": "FAC",
+    "PRODUCT": "PRODUCT",
+    "EVENT": "EVENT",
+    "WORK_OF_ART": "WORK_OF_ART",
+    "LAW": "LAW",
+    "LANGUAGE": "LANGUAGE",
+    "DATE": "DATE",
+    "MONEY": "MONEY",
+    "PERCENT": "PERCENT",
+    "QUANTITY": "QUANTITY",
+}
+
+
+class NEREntity(TypedDict):
+    """JSON-serializable NER entity record stored in envelope.metadata / struct_data."""
+
+    text: str
+    entity_type: str
+    start: int
+    end: int
+    confidence: float
+    source: NotRequired[str]
+
+
+def _normalize_entity_type(raw: object) -> str:
+    t = str(raw or "").strip().upper()
+    return _ENTITY_TYPE_ALIASES.get(t, t)
 
 
 @register_transformer("ner")
@@ -66,27 +106,36 @@ class NERTransformer(Transformer):
         self.entity_types: set[str] | None = None
         self.min_confidence: float = 0.5
         self._core_cfg: Config | None = None
-        self._spacy_model: Any = None
-        self._transformers_pipeline: Any = None
+        # External models/pipelines are intentionally typed as object (SDK-owned types).
+        self._spacy_model: object | None = None
+        self._transformers_pipeline: object | None = None
 
-    def configure(self, params: dict[str, Any] | None) -> None:
+    def configure(self, params: dict[str, object] | None) -> None:
         """Configure NER transformer."""
         super().configure(params)
         if params:
-            self.mode = params.get("mode", "llm")
-            entity_types = params.get("entity_types")
-            if entity_types:
-                self.entity_types = set(entity_types) if isinstance(entity_types, list) else None
-            self.min_confidence = float(params.get("min_confidence", 0.5))
-            cfg = params.get("core_cfg")
-            if isinstance(cfg, Config):
-                self._core_cfg = cfg
+            self.mode = str(params.get("mode", "llm") or "llm").strip() or "llm"
 
-    def _load_spacy_model(self) -> Any:
+            raw_entity_types = params.get("entity_types")
+            if isinstance(raw_entity_types, list):
+                parsed = {_normalize_entity_type(x) for x in raw_entity_types if str(x).strip()}
+                self.entity_types = parsed or None
+            else:
+                self.entity_types = None
+
+            try:
+                self.min_confidence = float(params.get("min_confidence", 0.5) or 0.5)
+            except Exception:
+                self.min_confidence = 0.5
+
+            cfg = params.get("core_cfg")
+            self._core_cfg = cfg if isinstance(cfg, Config) else None
+
+    def _load_spacy_model(self) -> object:
         """Lazy-load spaCy model."""
         if self._spacy_model is None:
             try:
-                import spacy
+                spacy = importlib.import_module("spacy")
 
                 # Try to load Ukrainian model first, fallback to English
                 try:
@@ -102,15 +151,16 @@ class NERTransformer(Transformer):
                         )
                         raise
             except ImportError:
-                logger.warning("spaCy not installed. Install with: pip install spacy")
+                logger.warning("spaCy not installed. Install with: uv add spacy")
                 raise
         return self._spacy_model
 
-    def _load_transformers_pipeline(self) -> Any:
+    def _load_transformers_pipeline(self) -> object:
         """Lazy-load transformers pipeline."""
         if self._transformers_pipeline is None:
             try:
-                from transformers import pipeline
+                transformers = importlib.import_module("transformers")
+                pipeline = getattr(transformers, "pipeline")
 
                 # Use a multilingual model that supports Ukrainian
                 self._transformers_pipeline = pipeline(
@@ -120,29 +170,32 @@ class NERTransformer(Transformer):
                 )
                 logger.info("Loaded transformers NER pipeline")
             except ImportError:
-                logger.warning("transformers not installed. Install with: pip install transformers")
+                logger.warning(
+                    "transformers not installed. Install with: uv add transformers torch"
+                )
                 raise
         return self._transformers_pipeline
 
-    def _extract_with_spacy(self, text: str) -> list[dict[str, Any]]:
+    def _extract_with_spacy(self, text: str) -> list[NEREntity]:
         """Extract entities using spaCy."""
         try:
             nlp = self._load_spacy_model()
             doc = nlp(text)
-            entities = []
+            entities: list[NEREntity] = []
 
             for ent in doc.ents:
-                entity_type = ent.label_
+                entity_type = _normalize_entity_type(getattr(ent, "label_", ""))
                 if self.entity_types and entity_type not in self.entity_types:
                     continue
 
                 entities.append(
                     {
-                        "text": ent.text,
-                        "type": entity_type,
-                        "start": ent.start_char,
-                        "end": ent.end_char,
+                        "text": str(getattr(ent, "text", "")),
+                        "entity_type": entity_type,
+                        "start": int(getattr(ent, "start_char", 0)),
+                        "end": int(getattr(ent, "end_char", 0)),
                         "confidence": 1.0,  # spaCy doesn't provide confidence by default
+                        "source": "spacy",
                     }
                 )
 
@@ -151,16 +204,18 @@ class NERTransformer(Transformer):
             logger.error(f"spaCy NER extraction failed: {e}")
             return []
 
-    def _extract_with_transformers(self, text: str) -> list[dict[str, Any]]:
+    def _extract_with_transformers(self, text: str) -> list[NEREntity]:
         """Extract entities using transformers library."""
         try:
             pipe = self._load_transformers_pipeline()
-            results = pipe(text)
+            results = pipe(text)  # type: ignore[operator]
 
-            entities = []
+            entities: list[NEREntity] = []
             for item in results:
-                entity_type = item.get("entity_group", item.get("label", "UNKNOWN"))
-                confidence = item.get("score", 1.0)
+                entity_type = _normalize_entity_type(
+                    item.get("entity_group", item.get("label", "UNKNOWN"))
+                )
+                confidence = float(item.get("score", 1.0))
 
                 if confidence < self.min_confidence:
                     continue
@@ -169,11 +224,12 @@ class NERTransformer(Transformer):
 
                 entities.append(
                     {
-                        "text": item.get("word", ""),
-                        "type": entity_type,
-                        "start": item.get("start", 0),
-                        "end": item.get("end", 0),
+                        "text": str(item.get("word", "")),
+                        "entity_type": entity_type,
+                        "start": int(item.get("start", 0)),
+                        "end": int(item.get("end", 0)),
                         "confidence": confidence,
+                        "source": "transformers",
                     }
                 )
 
@@ -182,7 +238,7 @@ class NERTransformer(Transformer):
             logger.error(f"Transformers NER extraction failed: {e}")
             return []
 
-    async def _extract_with_llm(self, text: str) -> list[dict[str, Any]]:
+    async def _extract_with_llm(self, text: str) -> list[NEREntity]:
         """Extract entities using LLM (via model registry)."""
         if not self._core_cfg:
             from contextrouter.core import get_core_config
@@ -195,7 +251,7 @@ class NERTransformer(Transformer):
 
         prompt = f"""Extract all named entities from the following text. Return a JSON array of entities, each with:
 - "text": the entity text
-- "type": one of {', '.join(sorted(STANDARD_ENTITY_TYPES))}
+- "entity_type": one of {", ".join(sorted(STANDARD_ENTITY_TYPES))}
 - "start": character position where entity starts
 - "end": character position where entity ends
 
@@ -232,11 +288,11 @@ Return only valid JSON array, no markdown formatting."""
                 return []
 
             # Validate and filter entities
-            validated = []
+            validated: list[NEREntity] = []
             for ent in entities:
                 if not isinstance(ent, dict):
                     continue
-                entity_type = ent.get("type", "").upper()
+                entity_type = _normalize_entity_type(ent.get("entity_type", ent.get("type", "")))
                 if self.entity_types and entity_type not in self.entity_types:
                     continue
                 if entity_type not in STANDARD_ENTITY_TYPES:
@@ -245,10 +301,11 @@ Return only valid JSON array, no markdown formatting."""
                 validated.append(
                     {
                         "text": str(ent.get("text", "")),
-                        "type": entity_type,
+                        "entity_type": entity_type,
                         "start": int(ent.get("start", 0)),
                         "end": int(ent.get("end", 0)),
                         "confidence": float(ent.get("confidence", 1.0)),
+                        "source": "llm",
                     }
                 )
 
@@ -276,7 +333,7 @@ Return only valid JSON array, no markdown formatting."""
             return envelope
 
         # Extract entities based on mode
-        entities: list[dict[str, Any]] = []
+        entities: list[NEREntity] = []
         if self.mode == "spacy":
             entities = self._extract_with_spacy(text)
         elif self.mode == "transformers":
@@ -289,9 +346,9 @@ Return only valid JSON array, no markdown formatting."""
             return envelope
 
         # Group entities by type for easier access
-        entities_by_type: dict[str, list[dict[str, Any]]] = {}
+        entities_by_type: dict[str, list[NEREntity]] = {}
         for ent in entities:
-            entity_type = ent.get("type", "UNKNOWN")
+            entity_type = ent.get("entity_type", "UNKNOWN")
             if entity_type not in entities_by_type:
                 entities_by_type[entity_type] = []
             entities_by_type[entity_type].append(ent)
@@ -318,4 +375,4 @@ Return only valid JSON array, no markdown formatting."""
         return envelope
 
 
-__all__ = ["NERTransformer", "STANDARD_ENTITY_TYPES"]
+__all__ = ["NEREntity", "NERTransformer", "STANDARD_ENTITY_TYPES"]

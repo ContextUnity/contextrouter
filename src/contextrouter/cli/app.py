@@ -1,11 +1,14 @@
-"""Main Click application root."""
+"""Main Click application root with Typer-enhanced error handling."""
 
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
 import click
+from rich.console import Console
+from rich.traceback import Traceback
 
 # Trigger builtin command discovery (side-effect imports that call register_command).
 from contextrouter.cli import commands as _commands  # noqa: F401
@@ -15,6 +18,9 @@ from contextrouter.core.config.main import Config
 from contextrouter.core.registry import scan
 
 logger = logging.getLogger(__name__)
+
+# Rich console for CLI error output only (not installed globally to avoid affecting runtime traces)
+console = Console(stderr=True)
 
 
 @click.group()
@@ -60,3 +66,37 @@ def cli(ctx, verbose, config_path):
 
 for name, cmd in iter_commands():
     cli.add_command(cmd, name=name)
+
+
+def _handle_exception(exc: Exception) -> None:
+    """Enhanced error handler using Rich for beautiful error output (CLI-only, doesn't affect runtime traces)."""
+    if isinstance(exc, click.ClickException):
+        # Click exceptions already have formatted messages
+        console.print(f"[bold red]Error:[/bold red] {exc.format_message()}")
+        sys.exit(exc.exit_code)
+    elif isinstance(exc, click.Abort):
+        console.print("[yellow]Aborted by user[/yellow]")
+        sys.exit(1)
+    elif isinstance(exc, KeyboardInterrupt):
+        console.print("\n[yellow]Interrupted by user[/yellow]")
+        sys.exit(130)
+    else:
+        # Use Rich traceback for unhandled exceptions (CLI context only)
+        # This doesn't affect runtime traces in web servers or other parts of the app
+        traceback = Traceback.from_exception(
+            type(exc),
+            exc,
+            exc.__traceback__,
+            show_locals=True,
+            suppress=[click],
+        )
+        console.print(traceback)
+        sys.exit(1)
+
+
+def main() -> None:
+    """Main entrypoint with enhanced error handling."""
+    try:
+        cli()
+    except Exception as exc:
+        _handle_exception(exc)

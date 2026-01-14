@@ -52,9 +52,9 @@ enriched = await transformer.transform(envelope)
 # Access entities
 entities = enriched.metadata["ner_entities"]
 # [
-#   {"text": "Apple Inc.", "type": "ORG", "start": 0, "end": 10, "confidence": 1.0},
-#   {"text": "Steve Jobs", "type": "PERSON", "start": 30, "end": 40, "confidence": 1.0},
-#   {"text": "Cupertino", "type": "GPE", "start": 44, "end": 53, "confidence": 1.0},
+#   {"text": "Apple Inc.", "entity_type": "ORG", "start": 0, "end": 10, "confidence": 1.0},
+#   {"text": "Steve Jobs", "entity_type": "PERSON", "start": 30, "end": 40, "confidence": 1.0},
+#   {"text": "Cupertino", "entity_type": "GPE", "start": 44, "end": 53, "confidence": 1.0},
 # ]
 ```
 
@@ -128,7 +128,7 @@ async def enhance_query_with_ner(state: AgentState) -> dict[str, object]:
     entities = enriched.metadata.get("ner_entities", [])
 
     # Add entity names to retrieval queries
-    entity_names = [e["text"] for e in entities if e["type"] in ["PERSON", "ORG"]]
+    entity_names = [e["text"] for e in entities if e["entity_type"] in ["PERSON", "ORG"]]
 
     retrieval_queries = state.get("retrieval_queries", [])
     if entity_names:
@@ -146,7 +146,7 @@ After processing with NER transformer, metadata contains:
     "ner_entities": [
         {
             "text": "Apple Inc.",
-            "type": "ORG",
+            "entity_type": "ORG",
             "start": 0,
             "end": 10,
             "confidence": 1.0

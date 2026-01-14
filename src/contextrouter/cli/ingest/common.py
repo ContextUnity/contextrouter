@@ -58,8 +58,8 @@ def coerce_types(only_types: tuple[str, ...] | None) -> list[str]:
 
 
 def missing(msg: str, *, hint: str) -> None:
-    """Raise ClickException with helpful hint."""
-    raise click.ClickException(f"{msg}\nHint: {hint}")
+    """Raise ClickException with helpful hint (formatted by Rich in app.py)."""
+    raise click.ClickException(f"{msg}\n💡 Hint: {hint}")
 
 
 def require_clean_text(paths: dict[str, Path], types: list[str]) -> None:

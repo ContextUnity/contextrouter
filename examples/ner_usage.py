@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 
 from contextrouter.core.bisquit import BisquitEnvelope
-from contextrouter.core.config import Config
 from contextrouter.modules.transformers.ner import NERTransformer
 
 
@@ -22,7 +21,6 @@ async def example_llm_ner():
         {
             "mode": "llm",
             "entity_types": ["PERSON", "ORG", "LOC", "DATE"],  # Optional filter
-            "core_cfg": Config(),  # Uses default config
         }
     )
 
@@ -84,7 +82,7 @@ async def example_spacy_ner():
         print("\n=== spaCy NER Results ===")
         print(f"Total entities: {len(entities)}")
         for ent in entities:
-            print(f"  {ent['type']}: {ent['text']}")
+            print(f"  {ent['entity_type']}: {ent['text']}")
 
         return enriched
     except Exception as e:
@@ -111,7 +109,7 @@ async def example_integration_with_retrieval():
     entities = enriched.metadata.get("ner_entities", [])
 
     # Extract entity names for search enhancement
-    entity_names = [ent["text"] for ent in entities if ent["type"] in ["ORG", "PERSON"]]
+    entity_names = [ent["text"] for ent in entities if ent["entity_type"] in ["ORG", "PERSON"]]
 
     print("\n=== Query Enhancement ===")
     print(f"Original query: {user_query}")

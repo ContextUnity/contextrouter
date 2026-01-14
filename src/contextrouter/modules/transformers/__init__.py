@@ -12,4 +12,5 @@ __all__ = [
     "shadow",
     "ontology",
     "ner",
+    "keyphrases",
 ]
