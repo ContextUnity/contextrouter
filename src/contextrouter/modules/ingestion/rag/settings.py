@@ -72,9 +72,21 @@ class QASection(BaseModel):
     model_config = ConfigDict(extra="ignore")
     llm_speaker_detect_enabled: bool = False
     llm_question_filter_enabled: bool = True
+    # Use an LLM to detect the session host when multiple speakers exist.
+    # If disabled, preprocessing falls back to a heuristic (interaction_count / word_count).
+    llm_host_detect_enabled: bool = False
     llm_question_validation_enabled: bool = True
     llm_answer_validation_enabled: bool = True
     corrections: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("corrections", mode="before")
+    @classmethod
+    def _validate_corrections(cls, v: object) -> dict[str, str]:
+        if v is None:
+            raise ValueError("qa.corrections must be a table/dict, not null")
+        if isinstance(v, dict):
+            return v
+        raise ValueError("qa.corrections must be a table/dict")
 
 
 class VideoSection(BaseModel):
@@ -87,6 +99,15 @@ class VideoSection(BaseModel):
     llm_summary_max_sentences: int = Field(default=3, ge=1, le=10)
     llm_segment_validation_enabled: bool = True
     llm_segment_validation_batch_size: int = Field(default=50, ge=1)
+
+    @field_validator("corrections", mode="before")
+    @classmethod
+    def _validate_corrections(cls, v: object) -> dict[str, str]:
+        if v is None:
+            raise ValueError("video.corrections must be a table/dict, not null")
+        if isinstance(v, dict):
+            return v
+        raise ValueError("video.corrections must be a table/dict")
 
 
 class WebSection(BaseModel):
@@ -123,6 +144,68 @@ class PersonaSection(BaseModel):
     max_output_tokens: int = Field(default=8192, ge=256, le=65536)
 
 
+class NerSection(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    mode: Literal["llm", "spacy", "transformers"] = "llm"
+    model: str = ""
+    entity_types: list[str] = Field(default_factory=list)
+    min_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class KeyphrasesSection(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    mode: Literal["llm"] = "llm"
+    max_phrases: int = Field(default=15, ge=1, le=50)
+    min_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    model: str = ""
+
+
+class EnrichmentSection(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    ner_enabled: bool = False
+    keyphrases_enabled: bool = False
+    ner: NerSection = Field(default_factory=NerSection)
+    keyphrases: KeyphrasesSection = Field(default_factory=KeyphrasesSection)
+
+
+class ModelsSection(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    ingestion_taxonomy_model: str = ""
+    ingestion_preprocess_model: str = ""
+    ingestion_graph_model: str = ""
+    ingestion_persona_model: str = ""
+    ingestion_json_model: str = ""
+    ingestion_ner_model: str = ""
+    ingestion_keyphrases_model: str = ""
+
+    @field_validator(
+        "ingestion_taxonomy_model",
+        "ingestion_preprocess_model",
+        "ingestion_graph_model",
+        "ingestion_persona_model",
+        "ingestion_json_model",
+        "ingestion_ner_model",
+        "ingestion_keyphrases_model",
+        mode="before",
+    )
+    @classmethod
+    def _validate_model_key(cls, v: object) -> str:
+        if v is None:
+            return ""
+        value = str(v).strip()
+        if not value:
+            return ""
+        if "/" not in value:
+            raise ValueError("model key must be 'provider/name'")
+        return value
+
+
+class LocalSection(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    vllm_base_url: str = ""
+    ollama_base_url: str = ""
+
+
 class UploadGCloudSection(BaseModel):
     model_config = ConfigDict(extra="ignore")
     project_id: str | None = None
@@ -131,12 +214,23 @@ class UploadGCloudSection(BaseModel):
     data_store_id: str | None = None
 
 
+class UploadPostgresSection(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    dsn: str | None = None
+    pool_min_size: int = 2
+    pool_max_size: int = 10
+    embeddings_model: str | None = None
+    tenant_id: str | None = None
+    user_id: str | None = None
+
+
 class UploadSection(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    provider: Literal["gcloud"] = "gcloud"
+    provider: Literal["gcloud", "postgres"] = "gcloud"
     db_name: str = "green"
     include_date: bool = True
     gcloud: UploadGCloudSection = Field(default_factory=UploadGCloudSection)
+    postgres: UploadPostgresSection = Field(default_factory=UploadPostgresSection)
 
 
 class ValidationSection(BaseModel):
@@ -190,6 +284,9 @@ class RagIngestionConfig(BaseModel):
     video: VideoSection = Field(default_factory=VideoSection)
     web: WebSection = Field(default_factory=WebSection)
     persona: PersonaSection = Field(default_factory=PersonaSection)
+    enrichment: EnrichmentSection = Field(default_factory=EnrichmentSection)
+    models: ModelsSection = Field(default_factory=ModelsSection)
+    local: LocalSection = Field(default_factory=LocalSection)
     upload: UploadSection = Field(default_factory=UploadSection)
     validation: ValidationSection = Field(default_factory=ValidationSection)
     plugins: PluginsSection = Field(default_factory=PluginsSection)

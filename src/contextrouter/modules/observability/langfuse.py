@@ -7,7 +7,7 @@ import logging
 from contextlib import contextmanager
 from typing import Generator
 
-from contextrouter.core.config import get_core_config
+from contextrouter.core import get_core_config
 
 logger = logging.getLogger(__name__)
 

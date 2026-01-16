@@ -11,8 +11,7 @@ from __future__ import annotations
 import logging
 from typing import AsyncIterator
 
-from contextrouter.core.config import Config
-from contextrouter.core.config.base import set_env_default
+from contextrouter.core import Config, set_env_default
 from contextrouter.core.tokens import BiscuitToken
 
 from ..base import BaseModel

@@ -22,6 +22,16 @@ class VertexConfig(BaseModel):
     credentials_path: str = ""
 
 
+class PostgresConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    dsn: str = ""
+    pool_min_size: int = 2
+    pool_max_size: int = 10
+    rls_enabled: bool = True
+    vector_dim: int = 768
+
+
 class OpenAIConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

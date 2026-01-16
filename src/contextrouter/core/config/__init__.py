@@ -31,6 +31,7 @@ from .providers import (
     OpenAIConfig,
     OpenRouterConfig,
     PluginsConfig,
+    PostgresConfig,
     VertexConfig,
 )
 from .security import (
@@ -65,6 +66,7 @@ __all__ = [
     "GoogleCSEConfig",
     "LangfuseConfig",
     "PluginsConfig",
+    "PostgresConfig",
     # Ingestion configs
     "RAGConfig",
     # Security configs

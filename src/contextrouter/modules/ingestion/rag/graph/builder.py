@@ -11,14 +11,13 @@ from typing import Any
 
 import networkx as nx
 
-from contextrouter.core.config import Config
+from contextrouter.core import Config
 
 from ..core.types import RawData
 from ..core.utils import (
     llm_generate_tsv,
     parse_tsv_line,
 )
-from ..utils.llm import MODEL_PRO
 from .prompts import format_extraction_prompt
 from .serialization import (
     load_graph_secure,
@@ -68,7 +67,7 @@ class GraphBuilder:
         taxonomy_path: Path | None = None,
         ontology_path: Path | None = None,
         *,
-        model: str = MODEL_PRO,
+        model: str | None = None,
         mode: str = "llm",  # "llm", "local", "hybrid"
         core_cfg: Config,
     ) -> None:
@@ -82,7 +81,7 @@ class GraphBuilder:
         """
         self.graph = nx.Graph()
         self.max_workers = max_workers
-        self.model = model
+        self.model = model or core_cfg.models.ingestion.graph.model
         self.mode = mode
         self.core_cfg = core_cfg
         self.taxonomy: dict[str, Any] | None = None

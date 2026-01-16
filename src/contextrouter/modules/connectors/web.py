@@ -15,9 +15,9 @@ from typing import AsyncIterator
 from contextrouter.core import (
     BaseConnector,
     BisquitEnvelope,
+    get_bool_env,
     get_core_config,
 )
-from contextrouter.core.config import get_bool_env
 from contextrouter.modules.observability import retrieval_span
 from contextrouter.modules.retrieval.rag.models import RetrievedDoc
 

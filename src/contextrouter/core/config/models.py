@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import partial
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class RagConfig(BaseModel):
@@ -73,8 +73,19 @@ class IngestionModelsConfig(_ModelsGroup):
     """
 
     taxonomy: ModelSelector = Field(default_factory=_selector_factory("vertex/gemini-2.5-flash"))
+    preprocess: ModelSelector = Field(
+        default_factory=_selector_factory("vertex/gemini-2.5-flash-lite")
+    )
     graph: ModelSelector = Field(default_factory=_selector_factory("vertex/gemini-2.5-pro"))
     persona: ModelSelector = Field(default_factory=_selector_factory("vertex/gemini-2.5-flash"))
+    json_model: ModelSelector = Field(default_factory=_selector_factory("vertex/gemini-2.5-flash"))
+
+    @field_validator("json_model")
+    @classmethod
+    def _require_json_model(cls, v: ModelSelector) -> ModelSelector:
+        if not isinstance(v, ModelSelector) or not v.model.strip():
+            raise ValueError("models.ingestion.json_model.model must be set")
+        return v
 
 
 class ModelsConfig(BaseModel):
@@ -82,7 +93,7 @@ class ModelsConfig(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     default_llm: str = Field(default="vertex/gemini-2.5-flash", alias="default")
-    default_embeddings: str = "vertex/text-embedding"
+    default_embeddings: str = "hf/sentence-transformers"
 
     # Canonical per-component configuration:
     rag: RagModelsConfig = Field(default_factory=RagModelsConfig)

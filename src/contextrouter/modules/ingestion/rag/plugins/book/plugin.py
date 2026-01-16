@@ -33,7 +33,7 @@ except ImportError:
     except ImportError:
         fitz = None  # Fallback to markdown parsing if not available
 
-from contextrouter.core.config import Config
+from contextrouter.core import Config
 
 from ...core.plugins import IngestionPlugin
 from ...core.prompts import book_batch_analysis_prompt
@@ -54,7 +54,6 @@ from ...core.utils import (
     parse_tsv_line,
 )
 from ...settings import RagIngestionConfig
-from ...utils.llm import MODEL_FLASH
 from ...utils.records import generate_id
 
 logger = logging.getLogger(__name__)
@@ -454,6 +453,19 @@ class BookPlugin(IngestionPlugin):
             content = clean_book_content(content, keep_page_markers=True)
         return content
 
+    def _extract_text_basic(self, pdf_path: str) -> str:
+        if fitz is None:
+            return ""
+        try:
+            doc = fitz.open(pdf_path)
+            try:
+                return self._extract_pdf_text_between_pages(doc, start_page=1, end_page=None)
+            finally:
+                doc.close()
+        except Exception as e:
+            logger.error("Basic PDF extraction failed for %s: %s", pdf_path, e)
+            return ""
+
     def _extract_chapters_from_markdown(
         self, pdf_path: str, book_title: str
     ) -> list[dict[str, Any]]:
@@ -463,17 +475,18 @@ class BookPlugin(IngestionPlugin):
         """
         try:
             import pymupdf4llm
+        except ImportError as e:
+            raise RuntimeError(
+                "pymupdf4llm is required for book markdown extraction. "
+                "Install it or provide a working PyMuPDF pipeline."
+            ) from e
 
-            # Convert PDF to Markdown using pymupdf4llm with layout analysis
-            markdown_content = pymupdf4llm.to_markdown(
-                pdf_path,
-                write_images=False,
-                page_separators=True,  # Adds <page: N> markers
-            )
-        except ImportError:
-            logger.warning("pymupdf4llm not available, falling back to basic text extraction")
-            # Fallback to basic text extraction if pymupdf4llm is not available
-            markdown_content = self._extract_text_basic(pdf_path)
+        # Convert PDF to Markdown using pymupdf4llm with layout analysis
+        markdown_content = pymupdf4llm.to_markdown(
+            pdf_path,
+            write_images=False,
+            page_separators=True,  # Adds <page: N> markers
+        )
 
         # Clean markdown: normalize headers, filter testimonials, normalize unicode
         from ...core.utils import (
@@ -702,8 +715,13 @@ class BookPlugin(IngestionPlugin):
                 # Extract taxonomy keywords
                 taxonomy_keywords = self._extract_taxonomy_terms(chunk_text, taxonomy)
 
-                # Combine graph + taxonomy keywords, deduplicated
-                keywords = list(dict.fromkeys(graph_keywords + taxonomy_keywords))[:10]
+                # Combine metadata + graph + taxonomy keywords, deduplicated
+                initial_keywords = raw.metadata.get("keywords", [])
+                if not isinstance(initial_keywords, list):
+                    initial_keywords = []
+                keywords = list(
+                    dict.fromkeys([*initial_keywords, *graph_keywords, *taxonomy_keywords])
+                )[:10]
 
                 # Build input_text with QA-style explicit enrichment format (include topic if available)
                 input_text = self._build_input_text(
@@ -852,7 +870,7 @@ class BookPlugin(IngestionPlugin):
             text = llm_generate_tsv(
                 core_cfg=core_cfg,
                 prompt=prompt,
-                model=MODEL_FLASH,
+                model=core_cfg.models.ingestion.taxonomy.model,
                 max_tokens=16384,
                 temperature=0.1,
                 retries=3,

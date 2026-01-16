@@ -18,7 +18,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from contextrouter.core.config import get_env
+from contextrouter.core import get_env
 
 from .settings import RagIngestionConfig
 

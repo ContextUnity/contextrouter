@@ -47,7 +47,7 @@ def cmd_index(
     stage_banner("INDEX (CleanText + taxonomy + ontology → graph.pickle + shadow records)")
 
     cfg = load_config(config_path)
-    core_cfg = load_core_cfg()
+    core_cfg = load_core_cfg(cfg)
     paths = get_assets_paths(cfg)
 
     types = coerce_types(only_types)

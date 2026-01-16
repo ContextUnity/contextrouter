@@ -16,7 +16,15 @@ import types
 
 # Note: registry is imported dynamically via __getattr__ to avoid circular imports
 from contextrouter.core.bisquit import BisquitEnvelope
-from contextrouter.core.config import Config, get_core_config
+from contextrouter.core.config import (
+    Config,
+    FlowConfig,
+    get_bool_env,
+    get_core_config,
+    get_env,
+    set_core_config,
+)
+from contextrouter.core.config.base import set_env_default
 from contextrouter.core.flow_manager import FlowManager
 from contextrouter.core.interfaces import (
     BaseAgent,
@@ -34,7 +42,12 @@ __all__ = [
     # Kernel
     "BisquitEnvelope",
     "Config",
+    "FlowConfig",
     "get_core_config",
+    "set_core_config",
+    "get_env",
+    "get_bool_env",
+    "set_env_default",
     "FlowManager",
     # Interfaces
     "BaseAgent",

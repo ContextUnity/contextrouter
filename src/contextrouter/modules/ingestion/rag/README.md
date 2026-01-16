@@ -13,7 +13,11 @@ flowchart TD
   CleanTextStore --> TaxonomyStage[Stage2_BuildTaxonomy]
   TaxonomyStage --> TaxonomyFile[taxonomy_json]
 
-  TaxonomyFile --> OntologyStage[Stage2b_BuildOntology]
+  TaxonomyFile --> EnrichStage[Stage2b_EnrichNER_Keyphrases]
+  CleanTextStore --> EnrichStage
+  EnrichStage --> CleanTextStore
+
+  TaxonomyFile --> OntologyStage[Stage2c_BuildOntology]
   OntologyStage --> OntologyFile[ontology_json]
 
   CleanTextStore --> GraphStage[Stage3_BuildGraph]
@@ -41,6 +45,8 @@ All commands are under `contextrouter ingest ...`.
 - `persona`: CleanText → `persona.txt` (optional; controlled by `[persona].enabled`)
 - `taxonomy`: CleanText → `taxonomy.json` (hybrid Pass A/B/C pipeline)
 - `ontology`: Taxonomy → `ontology.json` (schema + relation constraints)
+- `enrich`: CleanText → NER + keyphrases (optional; does not depend on taxonomy)
+  - Output is merged into `keywords` and indexed for keyword search in Postgres
 - `graph`: CleanText + `taxonomy.json` + `ontology.json` → `knowledge_graph.pickle`
 - `graph-peek`: Quick inspection of graph (nodes/edges + top labels + sample edges)
 - `graph-show`: Comprehensive graph statistics and structure
@@ -49,7 +55,8 @@ All commands are under `contextrouter ingest ...`.
 - `export`: Shadow → Vertex import JSONL (per type)
 - `deploy`: JSONL → upload + import into Vertex AI Search
 - `report`: Generate ingestion report with stats (taxonomy/graph/ontology coverage)
-- `run`: runs preprocess → persona (optional) → taxonomy → ontology → graph → shadow → export (deploy is separate)
+- `run`: runs preprocess → persona (optional) → taxonomy → ontology → enrich → graph → shadow → export (deploy is separate)
+  - `enrich` can be run independently after `preprocess`
 
 **Preflight policy**: every stage checks prerequisites and prints an actionable hint when something is missing.
 

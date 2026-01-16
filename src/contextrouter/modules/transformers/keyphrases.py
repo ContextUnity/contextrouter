@@ -16,8 +16,10 @@ import json
 import logging
 from typing import NotRequired, TypedDict
 
+from pydantic import BaseModel, ConfigDict, Field
+
+from contextrouter.core import Config
 from contextrouter.core.bisquit import BisquitEnvelope
-from contextrouter.core.config import Config
 from contextrouter.core.registry import register_transformer
 from contextrouter.modules.models import model_registry
 from contextrouter.modules.models.types import ModelRequest, TextPart
@@ -41,6 +43,18 @@ def _normalize_phrase(s: object) -> str:
     return t.strip(" \t\r\n,.;:!?'\"()[]{}")
 
 
+class KeyphraseConfig(BaseModel):
+    """Configuration for KeyphraseTransformer."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    mode: str = "llm"
+    max_phrases: int = Field(default=15, ge=1, le=50)
+    min_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    model: str = ""
+    core_cfg: Config | None = None
+
+
 @register_transformer("keyphrases")
 class KeyphraseTransformer(Transformer):
     """Extract keyphrases from document content and enrich metadata.
@@ -56,31 +70,38 @@ class KeyphraseTransformer(Transformer):
 
     def __init__(self) -> None:
         super().__init__()
-        self.mode: str = "llm"
-        self.max_phrases: int = 15
-        self.min_score: float = 0.0
-        self._core_cfg: Config | None = None
+        self.config = KeyphraseConfig()
+
+    @property
+    def mode(self) -> str:
+        return self.config.mode
+
+    @property
+    def max_phrases(self) -> int:
+        return self.config.max_phrases
+
+    @property
+    def min_score(self) -> float:
+        return self.config.min_score
+
+    @property
+    def model(self) -> str:
+        return self.config.model
+
+    @property
+    def _core_cfg(self) -> Config | None:
+        return self.config.core_cfg
+
+    @_core_cfg.setter
+    def _core_cfg(self, value: Config | None) -> None:
+        self.config.core_cfg = value
 
     def configure(self, params: dict[str, object] | None) -> None:
         super().configure(params)
         if not params:
             return
 
-        self.mode = str(params.get("mode", "llm") or "llm").strip() or "llm"
-        try:
-            self.max_phrases = int(params.get("max_phrases", 15) or 15)
-        except Exception:
-            self.max_phrases = 15
-        self.max_phrases = max(1, min(self.max_phrases, 50))
-
-        try:
-            self.min_score = float(params.get("min_score", 0.0) or 0.0)
-        except Exception:
-            self.min_score = 0.0
-        self.min_score = max(0.0, min(self.min_score, 1.0))
-
-        cfg = params.get("core_cfg")
-        self._core_cfg = cfg if isinstance(cfg, Config) else None
+        self.config = KeyphraseConfig.model_validate(params)
 
     async def _extract_with_llm(self, text: str) -> list[Keyphrase]:
         if not self._core_cfg:
@@ -107,7 +128,7 @@ TEXT:
 {text}
 """
 
-        model_key = self._core_cfg.models.default_llm
+        model_key = self.model or self._core_cfg.models.default_llm
         llm = model_registry.get_llm_with_fallback(
             key=model_key,
             fallback_keys=[],

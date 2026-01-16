@@ -1,5 +1,6 @@
 [models]
 default = "vertex/gemini-2.5-flash"
+default_embeddings = "hf/sentence-transformers"
 
 # Example: using Groq for intent detection (high speed)
 [models.rag.intent]
@@ -33,3 +34,11 @@ mode = "agent"
 [google_cse]
 enabled = true
 # api_key and cx are usually provided via environment variables for security
+
+[postgres]
+# Optional: only needed when Postgres retrieval or ingestion is enabled.
+dsn = "postgresql+psycopg://USER:PASS@HOST:5432/DBNAME"
+pool_min_size = 2
+pool_max_size = 10
+rls_enabled = true
+vector_dim = 768

@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from contextrouter.core.config import Config
+from contextrouter.core import Config
 from contextrouter.core.tokens import BiscuitToken
 
 from ..base import BaseEmbeddings
@@ -30,7 +30,7 @@ class HuggingFaceEmbeddings(BaseEmbeddings):
     def __init__(self, config: Config, *, model_name: str | None = None, **_: object) -> None:
         self._cfg = config
         self._model = None
-        self._model_name = (model_name or "").strip() or "all-MiniLM-L6-v2"
+        self._model_name = (model_name or "").strip() or "all-mpnet-base-v2"
 
     async def embed_query(self, text: str, *, token: BiscuitToken | None = None) -> list[float]:
         _ = token

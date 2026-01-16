@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import AsyncIterator
 
-from contextrouter.core.config import Config
+from contextrouter.core import Config
 from contextrouter.core.tokens import BiscuitToken
 
 from ..base import BaseModel

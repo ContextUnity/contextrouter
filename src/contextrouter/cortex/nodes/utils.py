@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from contextrouter.core.config import get_bool_env
+from contextrouter.core import get_bool_env
 
 logger = logging.getLogger("contextrouter")
 

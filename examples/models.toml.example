@@ -8,7 +8,10 @@
 
 [models]
 default = "vertex/gemini-2.5-flash"
-default_embeddings = "vertex/text-embedding"
+# Available embeddings (examples):
+# - hf/sentence-transformers (default, local; model: all-mpnet-base-v2, 768-dim)
+# - vertex/text-embedding (requires Vertex credentials + API access)
+default_embeddings = "hf/sentence-transformers"  # Default HF embeddings model: all-mpnet-base-v2 (768-dim)
 
 [models.rag.intent]
 model = "vertex/gemini-2.5-flash-lite"
@@ -24,6 +27,9 @@ strategy = "fallback"
 model = "vertex/gemini-2.5-flash-lite"
 fallback = ["anthropic/claude-haiku-4.5"]
 strategy = "fallback"
+
+[models.ingestion.json_model]
+model = "vertex/gemini-2.5-flash"  # JSON-critical ingestion steps
 
 [vertex]
 # Vertex AI uses GCP credentials (ADC), not API keys.

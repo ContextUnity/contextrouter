@@ -11,37 +11,33 @@ from typing import TYPE_CHECKING, Any, Callable
 if TYPE_CHECKING:
     from .transformer import QATransformer
 
-from contextrouter.core.config import Config
+from contextrouter.core import Config
 from contextrouter.core.types import StructData
 
-from ..core import (
+from ...core import (
     IngestionMetadata,
     IngestionPlugin,
     RawData,
     ShadowRecord,
     register_plugin,
 )
-from ..core.loaders import FileLoaderMixin, read_text_file
-from ..core.prompts import (
+from ...core.loaders import FileLoaderMixin, read_text_file
+from ...core.prompts import (
     qa_batch_analysis_prompt,
     qa_speaker_detection_prompt,
     qa_validate_answer_prompt,
     qa_validate_question_prompt,
 )
-from ..core.types import GraphEnrichmentResult, QAStructData
-from ..core.utils import (
+from ...core.types import GraphEnrichmentResult, QAStructData
+from ...core.utils import (
     clean_str_list,
     get_graph_enrichment,
     llm_generate_tsv,
     load_taxonomy_safe,
     parse_tsv_line,
 )
-from ..settings import RagIngestionConfig
-from ..utils.llm import (
-    MODEL_FLASH,
-    MODEL_LIGHT,
-    llm_generate,
-)
+from ...settings import RagIngestionConfig
+from ...utils.llm import llm_generate
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +63,9 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
         self._core_cfg: Config | None = None
         self._transformer: QATransformer | None = None
 
+    def set_core_cfg(self, core_cfg: Config) -> None:
+        self._core_cfg = core_cfg
+
     def _require_core_cfg(self) -> Config:
         if self._core_cfg is None:
             raise ValueError("QAPlugin requires core_cfg (contextrouter.core.config.Config)")
@@ -75,7 +74,7 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
     def _get_transformer(self) -> QATransformer:
         """Lazy initialization of transformer."""
         if self._transformer is None:
-            from .qa.transformer import QATransformer
+            from .transformer import QATransformer
 
             self._transformer = QATransformer(self._require_core_cfg())
         return self._transformer
@@ -270,6 +269,7 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
                     enrichment_func=enrichment_func,
                     persona_name=persona_name,
                     session_host=session_host,
+                    initial_keywords=raw.metadata.get("keywords", []),
                     config=config,
                 )
                 if record is not None:
@@ -328,6 +328,7 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
         persona_name: str,
         *,
         session_host: str = "",
+        initial_keywords: list[str] | object | None = None,
         config: RagIngestionConfig | None = None,
     ) -> ShadowRecord | None:
         """Create a ShadowRecord from a chunk with analysis.
@@ -435,7 +436,7 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
                 validated = llm_generate(
                     core_cfg=self._require_core_cfg(),
                     prompt=validation_prompt,
-                    model=MODEL_LIGHT,
+                    model=self._require_core_cfg().models.ingestion.preprocess.model,
                     max_tokens=32,
                     temperature=0.0,
                 )
@@ -481,7 +482,7 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
                     validated = llm_generate(
                         core_cfg=self._require_core_cfg(),
                         prompt=validation_prompt,
-                        model=MODEL_LIGHT,
+                        model=self._require_core_cfg().models.ingestion.preprocess.model,
                         max_tokens=256,
                         temperature=0.0,  # Deterministic
                     )
@@ -533,6 +534,8 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
         keywords, _, parent_categories = get_graph_enrichment(
             text=enrichment_text, enrichment_func=enrichment_func
         )
+        base = initial_keywords if isinstance(initial_keywords, list) else []
+        keywords = list(dict.fromkeys([*base, *keywords]))[:10]
 
         # Build shadow context (input_text)
         input_text = self._build_input_text(
@@ -681,7 +684,7 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
         text = llm_generate_tsv(
             core_cfg=self._require_core_cfg(),
             prompt=prompt,
-            model=MODEL_LIGHT,
+            model=self._require_core_cfg().models.ingestion.preprocess.model,
             max_tokens=32768,
             temperature=0.1,
             retries=3,
@@ -859,7 +862,7 @@ class QAPlugin(IngestionPlugin, FileLoaderMixin):
             text = llm_generate_tsv(
                 core_cfg=self._require_core_cfg(),
                 prompt=prompt,
-                model=MODEL_FLASH,
+                model=self._require_core_cfg().models.ingestion.preprocess.model,
                 max_tokens=16384,
                 temperature=0.1,
                 retries=3,

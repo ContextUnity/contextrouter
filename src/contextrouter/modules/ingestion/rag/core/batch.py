@@ -54,9 +54,9 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
 
-from contextrouter.core.config import Config
+from contextrouter.core import Config
 
-from ..utils.llm import MODEL_LIGHT, llm_generate
+from ..utils.llm import llm_generate
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ def batch_validate(
     core_cfg: Config,
     prompt_builder: Callable[[list[tuple[int, T]]], str],
     batch_size: int = 50,
-    model: str = MODEL_LIGHT,
+    model: str | None = None,
     parse_decision: Callable[[str], bool] = lambda s: "VALUABLE" in s.upper(),
     on_error: str = "keep",  # "keep" | "drop"
     label: str = "items",
@@ -113,6 +113,9 @@ def batch_validate(
 
     valid_indices: set[int] = set()
     total = len(items)
+
+    if not model:
+        model = core_cfg.models.ingestion.preprocess.model.strip()
 
     for batch_start in range(0, total, batch_size):
         batch_end = min(batch_start + batch_size, total)
@@ -183,7 +186,7 @@ def batch_transform(
     prompt_builder: Callable[[list[tuple[int, T]]], str],
     result_parser: Callable[[str, int], R | None],
     batch_size: int = 50,
-    model: str = MODEL_LIGHT,
+    model: str | None = None,
     label: str = "items",
 ) -> dict[int, R]:
     """Batch transform items, returning dict of index -> result.
@@ -204,6 +207,9 @@ def batch_transform(
 
     results: dict[int, R] = {}
     total = len(items)
+
+    if not model:
+        model = core_cfg.models.ingestion.preprocess.model.strip()
 
     for batch_start in range(0, total, batch_size):
         batch_end = min(batch_start + batch_size, total)

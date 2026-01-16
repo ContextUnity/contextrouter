@@ -119,6 +119,7 @@ _EXPORTS: dict[str, str] = {
     "build_persona": "contextrouter.modules.ingestion.rag.stages.persona.build_persona",
     "preprocess_to_clean_text": "contextrouter.modules.ingestion.rag.stages.preprocess.preprocess_to_clean_text",
     "build_ingestion_report": "contextrouter.modules.ingestion.rag.stages.report.build_ingestion_report",
+    "enrich_clean_text": "contextrouter.modules.ingestion.rag.stages.enrich.enrich_clean_text",
     "read_raw_data_jsonl": "contextrouter.modules.ingestion.rag.stages.store.read_raw_data_jsonl",
     "write_shadow_records_jsonl": "contextrouter.modules.ingestion.rag.stages.store.write_shadow_records_jsonl",
 }

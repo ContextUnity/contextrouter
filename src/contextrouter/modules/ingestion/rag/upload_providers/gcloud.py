@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from contextrouter.core.config import get_core_config, get_env
+from contextrouter.core import get_core_config, get_env
 from contextrouter.modules.retrieval.rag.settings import resolve_data_store_id
 
 from .base import (
@@ -23,7 +23,7 @@ class GCloudUploadProvider(UploadProvider):
 
     Configuration priority (highest to lowest):
     1. Explicit config values in settings.toml [upload.gcloud]
-    2. Environment variables (PROJECT_ID, LOCATION, RAG_GCS_BUCKET, RAG_DB_NAME)
+    2. Environment variables (VERTEX_PROJECT_ID, VERTEX_LOCATION, RAG_GCS_BUCKET, RAG_DB_NAME)
 
     Supports blue/green symbolic names for data_store_id.
     """
@@ -39,8 +39,16 @@ class GCloudUploadProvider(UploadProvider):
         self._config = config
 
         # Resolve configuration with fallback to env vars
-        self._project_id = config.get("project_id") or get_env("PROJECT_ID")
-        self._location = config.get("location") or get_env("LOCATION", "global")
+        self._project_id = (
+            config.get("project_id")
+            or get_env("VERTEX_PROJECT_ID")
+            or get_env("CONTEXTROUTER_VERTEX_PROJECT_ID")
+        )
+        self._location = (
+            config.get("location")
+            or get_env("VERTEX_LOCATION", "global")
+            or get_env("CONTEXTROUTER_VERTEX_LOCATION", "global")
+        )
         self._gcs_bucket = config.get("gcs_bucket") or get_env("RAG_GCS_BUCKET")
 
         # Data store ID: config > resolve from env
@@ -87,7 +95,7 @@ class GCloudUploadProvider(UploadProvider):
                 success=False,
                 provider=self.name,
                 details={},
-                error="project_id not set (config or PROJECT_ID env)",
+                error="project_id not set (config or VERTEX_PROJECT_ID env)",
             )
         if not self._gcs_bucket:
             return UploadResult(

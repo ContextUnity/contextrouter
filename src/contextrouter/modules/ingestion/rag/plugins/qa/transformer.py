@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from contextrouter.core.config import Config
+from contextrouter.core import Config
 from contextrouter.core.types import StructData
 
 from .analyzer import QuestionAnalyzer
@@ -25,7 +25,11 @@ class QATransformer:
         self.taxonomy_mapper = TaxonomyMapper(taxonomy)
 
     def transform_content(
-        self, content: str, taxonomy: StructData | None = None
+        self,
+        content: str,
+        taxonomy: StructData | None = None,
+        *,
+        session_title: str = "",
     ) -> list[dict[str, Any]]:
         """Transform raw QA content into structured Q&A pairs."""
         try:
@@ -52,6 +56,9 @@ class QATransformer:
                         )
 
                         record = {
+                            # Expected by downstream struct_data builders (Vertex requires it).
+                            "session_title": session_title,
+                            "source_title": session_title,
                             "question": analysis.get("question", ""),
                             "answer": analysis.get("answer", ""),
                             "speaker": interaction.get("speaker", ""),

@@ -15,12 +15,22 @@ from .base import (
 from .gcloud import (
     GCloudUploadProvider,
 )
+from .postgres import (
+    PostgresUploadProvider,
+)
 
-__all__ = ["UploadProvider", "UploadResult", "GCloudUploadProvider", "get_provider"]
+__all__ = [
+    "UploadProvider",
+    "UploadResult",
+    "GCloudUploadProvider",
+    "PostgresUploadProvider",
+    "get_provider",
+]
 
 # Registry of available providers
 _PROVIDERS: dict[str, type[UploadProvider]] = {
     "gcloud": GCloudUploadProvider,
+    "postgres": PostgresUploadProvider,
 }
 
 
@@ -43,6 +53,9 @@ def get_provider(config: RagIngestionConfig) -> UploadProvider:
         raise ValueError(f"Unknown upload provider '{provider_name}'. Available: {available}")
 
     provider_class = _PROVIDERS[provider_name]
-    provider_config = config.upload.gcloud.model_dump()
+    if provider_name == "postgres":
+        provider_config = config.upload.postgres.model_dump()
+    else:
+        provider_config = config.upload.gcloud.model_dump()
 
     return provider_class(provider_config)

@@ -23,8 +23,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from contextrouter.core import get_core_config
 from contextrouter.core.bisquit import BisquitEnvelope
-from contextrouter.core.config import get_core_config
 from contextrouter.core.exceptions import ProviderError
 from contextrouter.core.interfaces import BaseProvider, IRead, IWrite, secured
 from contextrouter.core.tokens import BiscuitToken

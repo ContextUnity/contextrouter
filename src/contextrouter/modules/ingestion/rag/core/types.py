@@ -94,6 +94,11 @@ class IngestionMetadata(TypedDict, total=False):
     # Generic
     summary: str
     keywords: list[str]
+    keyphrases: list[dict[str, object]]
+    keyphrase_texts: list[str]
+    ner_entities: list[dict[str, object]]
+    ner_entities_by_type: dict[str, list[dict[str, object]]]
+    ner_entity_count: int
 
 
 class GraphEnrichmentResult(TypedDict, total=False):

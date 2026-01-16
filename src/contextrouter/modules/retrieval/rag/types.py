@@ -156,3 +156,11 @@ class RuntimeRagSettings(TypedDict, total=False):
     general_retrieval_enabled: bool
     general_retrieval_initial_count: int
     general_retrieval_final_count: int
+    reranking_enabled: bool
+    ranker_model: str
+    provider: str
+    dual_read_enabled: bool
+    dual_read_shadow_backend: str
+    dual_read_sample_rate: float
+    dual_read_timeout_ms: int
+    dual_read_log_payloads: bool

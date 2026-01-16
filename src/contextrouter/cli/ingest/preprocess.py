@@ -30,7 +30,6 @@ def cmd_preprocess(
     """Preprocess raw source files into CleanText JSONL."""
     # Import heavy ingestion modules lazily so `--help` works without extras installed.
     from contextrouter.modules.ingestion.rag import (
-        build_ingestion_report,
         ensure_directories_exist,
         get_assets_paths,
         load_config,
@@ -43,7 +42,7 @@ def cmd_preprocess(
 
     t0 = time.perf_counter()
     cfg = load_config(config_path)
-    core_cfg = load_core_cfg()
+    core_cfg = load_core_cfg(cfg)
     paths = get_assets_paths(cfg)
     ensure_directories_exist(paths)
 
@@ -56,12 +55,6 @@ def cmd_preprocess(
         core_cfg=core_cfg, config=cfg, only_types=types, overwrite=overwrite, workers=w
     )
     click.echo(click.style(f"✓ preprocess completed ({time.perf_counter() - t0:.1f}s)", fg="green"))
-
-    # Report is best-effort; never fail the main stage.
-    try:
-        build_ingestion_report(config=cfg, types=types)
-    except Exception:
-        logger.debug("report: failed after preprocess", exc_info=True)
 
 
 __all__ = ["cmd_preprocess"]

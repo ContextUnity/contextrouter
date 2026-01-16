@@ -22,6 +22,7 @@ from .providers import (
     OpenAIConfig,
     OpenRouterConfig,
     PluginsConfig,
+    PostgresConfig,
     RunPodConfig,
     VertexConfig,
 )
@@ -84,6 +85,7 @@ class Config(BaseModel):
 
     # Provider configurations
     vertex: VertexConfig = Field(default_factory=VertexConfig)
+    postgres: PostgresConfig = Field(default_factory=PostgresConfig)
     openai: OpenAIConfig = Field(default_factory=OpenAIConfig)
     anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
     openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)
@@ -120,12 +122,6 @@ class Config(BaseModel):
     @classmethod
     def load(cls, config_path: Path | str | None = None) -> "Config":
         """Load configuration from files and environment."""
-        load_dotenv()
-
-        # Optional explicit override for core config path.
-        # This is intentionally separate from ingestion's CONTEXTROUTER_CONFIG_PATH.
-        core_config_path = get_env("CONTEXTROUTER_CORE_CONFIG_PATH")
-
         # Force Vertex AI mode for langchain-google-genai / google-genai SDK.
         # Without this, the SDK may try API-key auth and fail with:
         # "Could not resolve API token from the environment".
@@ -134,6 +130,14 @@ class Config(BaseModel):
 
         config = cls()
         paths = config.paths
+
+        # Optional explicit override for core config path.
+        # This is intentionally separate from ingestion's CONTEXTROUTER_CONFIG_PATH.
+        core_config_path = get_env("CONTEXTROUTER_CORE_CONFIG_PATH")
+        # Deterministic `.env` loading: only load from the detected project root
+        # (e.g. `<repo>/contextrouter/.env`). This avoids accidental cross-repo leakage.
+        if paths.env_file.exists():
+            load_dotenv(paths.env_file, override=False)
 
         # Load from TOML if available
         toml_path = (
@@ -181,17 +185,55 @@ class Config(BaseModel):
             self.models.rag.no_results.model = no_results_val
 
         # Vertex configuration
-        if project_id := get_env("CONTEXTROUTER_VERTEX_PROJECT_ID"):
+        # Primary (in-repo) env names:
+        # - VERTEX_PROJECT_ID
+        # - VERTEX_LOCATION
+        #
+        # Optional host/embedding alias (e.g. when contextrouter is used as a library):
+        # - CONTEXTROUTER_VERTEX_PROJECT_ID
+        # - CONTEXTROUTER_VERTEX_LOCATION
+        if project_id := (
+            get_env("VERTEX_PROJECT_ID") or get_env("CONTEXTROUTER_VERTEX_PROJECT_ID")
+        ):
             self.vertex.project_id = project_id
-        if location := get_env("CONTEXTROUTER_VERTEX_LOCATION"):
+        if location := (get_env("VERTEX_LOCATION") or get_env("CONTEXTROUTER_VERTEX_LOCATION")):
             self.vertex.location = location
         # Vertex AI Search / Discovery Engine location (separate from Vertex LLM region).
-        if v := get_env("CONTEXTROUTER_VERTEX_DISCOVERY_ENGINE_LOCATION"):
+        if v := (
+            get_env("VERTEX_DISCOVERY_ENGINE_LOCATION")
+            or get_env("CONTEXTROUTER_VERTEX_DISCOVERY_ENGINE_LOCATION")
+        ):
             self.vertex.discovery_engine_location = v
-        if v := get_env("CONTEXTROUTER_VERTEX_DATA_STORE_LOCATION"):
+        if v := (
+            get_env("VERTEX_DATA_STORE_LOCATION")
+            or get_env("CONTEXTROUTER_VERTEX_DATA_STORE_LOCATION")
+        ):
             self.vertex.data_store_location = v
-        if credentials_path := get_env("CONTEXTROUTER_VERTEX_CREDENTIALS_PATH"):
+        if credentials_path := (
+            get_env("VERTEX_CREDENTIALS_PATH") or get_env("CONTEXTROUTER_VERTEX_CREDENTIALS_PATH")
+        ):
             self.vertex.credentials_path = credentials_path
+
+        # Postgres configuration
+        if dsn := get_env("POSTGRES_DSN"):
+            self.postgres.dsn = dsn
+        if v := get_env("POSTGRES_POOL_MIN_SIZE"):
+            try:
+                self.postgres.pool_min_size = max(1, int(v))
+            except ValueError:
+                pass
+        if v := get_env("POSTGRES_POOL_MAX_SIZE"):
+            try:
+                self.postgres.pool_max_size = max(1, int(v))
+            except ValueError:
+                pass
+        if v := get_env("POSTGRES_RLS_ENABLED"):
+            self.postgres.rls_enabled = v.lower() in {"1", "true", "yes", "on"}
+        if v := get_env("PGVECTOR_DIM"):
+            try:
+                self.postgres.vector_dim = max(1, int(v))
+            except ValueError:
+                pass
 
         # OpenAI configuration
         if openai_key := get_env("OPENAI_API_KEY"):

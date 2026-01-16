@@ -15,8 +15,10 @@ import json
 import logging
 from typing import NotRequired, TypedDict
 
+from pydantic import BaseModel, ConfigDict
+
+from contextrouter.core import Config
 from contextrouter.core.bisquit import BisquitEnvelope
-from contextrouter.core.config import Config
 from contextrouter.core.registry import register_transformer
 from contextrouter.modules.models import model_registry
 from contextrouter.modules.models.types import ModelRequest, TextPart
@@ -84,6 +86,18 @@ def _normalize_entity_type(raw: object) -> str:
     return _ENTITY_TYPE_ALIASES.get(t, t)
 
 
+class NERConfig(BaseModel):
+    """Configuration for NERTransformer."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    mode: str = "llm"
+    model: str = ""
+    entity_types: list[str] | None = None
+    min_confidence: float = 0.5
+    core_cfg: Config | None = None
+
+
 @register_transformer("ner")
 class NERTransformer(Transformer):
     """Extract named entities from document content and enrich metadata.
@@ -102,34 +116,44 @@ class NERTransformer(Transformer):
 
     def __init__(self) -> None:
         super().__init__()
-        self.mode: str = "llm"
-        self.entity_types: set[str] | None = None
-        self.min_confidence: float = 0.5
-        self._core_cfg: Config | None = None
+        self.config = NERConfig()
         # External models/pipelines are intentionally typed as object (SDK-owned types).
         self._spacy_model: object | None = None
         self._transformers_pipeline: object | None = None
+
+    @property
+    def mode(self) -> str:
+        return self.config.mode
+
+    @property
+    def model(self) -> str:
+        return self.config.model
+
+    @property
+    def entity_types(self) -> set[str] | None:
+        if not self.config.entity_types:
+            return None
+        parsed = {_normalize_entity_type(x) for x in self.config.entity_types if str(x).strip()}
+        return parsed or None
+
+    @property
+    def min_confidence(self) -> float:
+        return self.config.min_confidence
+
+    @property
+    def _core_cfg(self) -> Config | None:
+        return self.config.core_cfg
+
+    @_core_cfg.setter
+    def _core_cfg(self, value: Config | None) -> None:
+        self.config.core_cfg = value
 
     def configure(self, params: dict[str, object] | None) -> None:
         """Configure NER transformer."""
         super().configure(params)
         if params:
-            self.mode = str(params.get("mode", "llm") or "llm").strip() or "llm"
-
-            raw_entity_types = params.get("entity_types")
-            if isinstance(raw_entity_types, list):
-                parsed = {_normalize_entity_type(x) for x in raw_entity_types if str(x).strip()}
-                self.entity_types = parsed or None
-            else:
-                self.entity_types = None
-
-            try:
-                self.min_confidence = float(params.get("min_confidence", 0.5) or 0.5)
-            except Exception:
-                self.min_confidence = 0.5
-
-            cfg = params.get("core_cfg")
-            self._core_cfg = cfg if isinstance(cfg, Config) else None
+            # Pydantic handles type coercion safely
+            self.config = NERConfig.model_validate(params)
 
     def _load_spacy_model(self) -> object:
         """Lazy-load spaCy model."""
@@ -261,7 +285,7 @@ Text:
 Return only valid JSON array, no markdown formatting."""
 
         try:
-            model_key = self._core_cfg.models.default_llm
+            model_key = self.model or self._core_cfg.models.default_llm
             llm = model_registry.get_llm_with_fallback(
                 key=model_key,
                 fallback_keys=[],
@@ -365,6 +389,7 @@ Return only valid JSON array, no markdown formatting."""
             struct_data = dict(metadata["struct_data"])
             struct_data["ner_entities"] = entities
             metadata["struct_data"] = struct_data
+            envelope.struct_data = struct_data
 
         envelope.metadata = metadata
 

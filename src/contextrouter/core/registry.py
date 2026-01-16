@@ -68,7 +68,7 @@ class ComponentFactory:
                 "VertexProvider",
             ),
             "postgres": (
-                "contextrouter.modules.providers.storage.postgres",
+                "contextrouter.modules.providers.storage.postgres.provider",
                 "PostgresProvider",
             ),
             "gcs": ("contextrouter.modules.providers.storage.gcs", "GCSProvider"),

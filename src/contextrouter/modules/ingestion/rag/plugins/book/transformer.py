@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
-from contextrouter.core.config import Config
+from contextrouter.core import Config
 from contextrouter.core.types import StructData
 
 from .analyzer import BookAnalyzer
@@ -81,7 +82,10 @@ class BookTransformer:
         for pdf_path in pdf_paths:
             logger.info("Processing book: %s", pdf_path.name)
             result = self.transform_pdf(pdf_path)
-            result["filename"] = pdf_path.name
+            # Keep metadata consistent with ingestion schema (reader expects book_title).
+            book_title_raw = pdf_path.stem.replace("_", " ").replace("-", " ").strip()
+            book_title_raw = re.sub(r"\s+", " ", book_title_raw)
+            result["book_title"] = book_title_raw.title() if book_title_raw else pdf_path.stem
             results.append(result)
 
         return results
@@ -103,7 +107,7 @@ class BookTransformer:
                 "metadata": {
                     "themes": analysis.get("themes", []),
                     "topics": analysis.get("topics", []),
-                    "filename": transformation_result.get("filename", ""),
+                    "book_title": transformation_result.get("book_title", ""),
                     **transformation_result.get("metadata", {}),
                 },
             }

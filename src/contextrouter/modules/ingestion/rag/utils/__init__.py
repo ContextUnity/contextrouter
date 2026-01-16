@@ -4,12 +4,7 @@ from .keywords import (
     get_taxonomy_keywords,
     load_keyword_taxonomy,
 )
-from .llm import (
-    MODEL_FLASH,
-    MODEL_LIGHT,
-    MODEL_PRO,
-    llm_generate,
-)
+from .llm import llm_generate
 from .records import (
     create_record,
     format_timestamp,
@@ -20,9 +15,6 @@ from .records import (
 
 __all__ = [
     "llm_generate",
-    "MODEL_PRO",
-    "MODEL_FLASH",
-    "MODEL_LIGHT",
     "create_record",
     "write_jsonl",
     "generate_id",

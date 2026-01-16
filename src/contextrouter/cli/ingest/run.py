@@ -24,6 +24,7 @@ from contextrouter.modules.ingestion.rag import (
     build_persona,
     build_shadow_records,
     build_taxonomy_from_clean_text,
+    enrich_clean_text,
     export_jsonl_per_type,
     get_assets_paths,
     load_config,
@@ -38,6 +39,7 @@ from contextrouter.modules.ingestion.rag import (
 @click.option("--skip-preprocess", is_flag=True, default=False)
 @click.option("--skip-structure", is_flag=True, default=False)
 @click.option("--skip-index", is_flag=True, default=False)
+@click.option("--skip-enrich", is_flag=True, default=False)
 @click.option("--skip-export", is_flag=True, default=False)
 @click.option("--overwrite/--no-overwrite", default=True)
 @click.option("--workers", type=int, default=0, show_default="auto")
@@ -48,10 +50,11 @@ def cmd_run(
     skip_structure: bool,
     skip_index: bool,
     skip_export: bool,
+    skip_enrich: bool,
     overwrite: bool,
     workers: int,
 ) -> None:
-    """Run full ingestion pipeline: preprocess → persona → structure → index → export."""
+    """Run full ingestion pipeline: preprocess → persona → structure → enrich → index → export."""
     suppress_noisy_loggers()
 
     click.echo(click.style("\n" + "═" * 60, fg="bright_blue", bold=True))
@@ -59,7 +62,7 @@ def cmd_run(
     click.echo(click.style("═" * 60, fg="bright_blue", bold=True))
 
     cfg = load_config(config_path)
-    core_cfg = load_core_cfg()
+    core_cfg = load_core_cfg(cfg)
     paths = get_assets_paths(cfg)
 
     types = coerce_types(only_types)
@@ -106,6 +109,28 @@ def cmd_run(
             )
         )
         require_taxonomy(paths)
+
+    # Stage 2b: Enrichment (optional; independent from structure)
+    if not skip_enrich:
+        stage_banner("2b/4 ENRICH (CleanText → NER + keyphrases) (optional)")
+        import asyncio
+
+        out = asyncio.run(
+            enrich_clean_text(
+                config=cfg, core_cfg=core_cfg, only_types=types, overwrite=overwrite, workers=w
+            )
+        )
+        if not out:
+            click.echo(
+                click.style(
+                    "  ⊘ enrichment disabled (enrichment.ner_enabled/keyphrases_enabled=false)",
+                    fg="yellow",
+                )
+            )
+        else:
+            click.echo(click.style("  ✓ enrichment done", fg="green"))
+    else:
+        click.echo(click.style("  ⊘ enrich skipped (using existing CleanText)", fg="yellow"))
 
     # Stage 3: Index (graph + shadow)
     if not skip_index:

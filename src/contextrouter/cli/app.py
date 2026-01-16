@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import warnings
 from pathlib import Path
 
 import click
@@ -13,8 +14,7 @@ from rich.traceback import Traceback
 # Trigger builtin command discovery (side-effect imports that call register_command).
 from contextrouter.cli import commands as _commands  # noqa: F401
 from contextrouter.cli.registry import iter_commands
-from contextrouter.core.config import get_core_config, set_core_config
-from contextrouter.core.config.main import Config
+from contextrouter.core import Config, get_core_config, set_core_config
 from contextrouter.core.registry import scan
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,15 @@ def cli(ctx, verbose, config_path):
     ctx.ensure_object(dict)
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=level, format="%(levelname)s %(message)s")
+
+    # Keep CLI output readable: suppress noisy LangChain deprecation warnings by default.
+    # This is CLI-only; library/runtime users still get full warnings by default.
+    if not verbose:
+        try:
+            from langchain_core._api.deprecation import LangChainDeprecationWarning
+        except Exception:
+            LangChainDeprecationWarning = Warning  # type: ignore[assignment]
+        warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
 
     # Suppress verbose HTTP logging from Google API clients
     logging.getLogger("google").setLevel(logging.WARNING)
@@ -87,7 +96,8 @@ def _handle_exception(exc: Exception) -> None:
             type(exc),
             exc,
             exc.__traceback__,
-            show_locals=True,
+            show_locals=False,
+            max_frames=20,
             suppress=[click],
         )
         console.print(traceback)
@@ -97,6 +107,6 @@ def _handle_exception(exc: Exception) -> None:
 def main() -> None:
     """Main entrypoint with enhanced error handling."""
     try:
-        cli()
+        cli(standalone_mode=False)
     except Exception as exc:
         _handle_exception(exc)

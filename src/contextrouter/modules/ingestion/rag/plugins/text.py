@@ -93,7 +93,11 @@ class TextPlugin(IngestionPlugin, FileLoaderMixin):
             for para in paragraphs:
                 if len(current_chunk) + len(para) > 1000 and current_chunk:
                     record = self._create_knowledge_record(
-                        current_chunk, title, enrichment_func, taxonomy
+                        current_chunk,
+                        title,
+                        enrichment_func,
+                        taxonomy,
+                        initial_keywords=raw.metadata.get("keywords", []),
                     )
                     shadow_records.append(record)
                     current_chunk = para
@@ -103,7 +107,11 @@ class TextPlugin(IngestionPlugin, FileLoaderMixin):
             # Handle remaining chunk
             if current_chunk:
                 record = self._create_knowledge_record(
-                    current_chunk, title, enrichment_func, taxonomy
+                    current_chunk,
+                    title,
+                    enrichment_func,
+                    taxonomy,
+                    initial_keywords=raw.metadata.get("keywords", []),
                 )
                 shadow_records.append(record)
 
@@ -115,6 +123,8 @@ class TextPlugin(IngestionPlugin, FileLoaderMixin):
         title: str,
         enrichment_func: Callable[[str], GraphEnrichmentResult],
         taxonomy: StructData | None,
+        *,
+        initial_keywords: list[str] | object | None = None,
     ) -> ShadowRecord:
         """Create a ShadowRecord for a knowledge chunk."""
         # Graph enrichment
@@ -125,8 +135,9 @@ class TextPlugin(IngestionPlugin, FileLoaderMixin):
         # Extract taxonomy terms from content
         taxonomy_terms = self._extract_taxonomy_terms(chunk, taxonomy)
 
-        # Combine keywords (taxonomy + graph), deduplicated
-        all_keywords = list(dict.fromkeys(taxonomy_terms + graph_keywords))[:15]
+        # Combine metadata + taxonomy + graph keywords, deduplicated
+        base = initial_keywords if isinstance(initial_keywords, list) else []
+        all_keywords = list(dict.fromkeys([*base, *taxonomy_terms, *graph_keywords]))[:15]
 
         # Build input_text with natural language enrichment
         input_text = build_enriched_input_text(

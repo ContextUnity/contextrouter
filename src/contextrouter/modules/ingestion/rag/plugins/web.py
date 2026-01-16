@@ -11,7 +11,7 @@ from typing import Any, Callable
 from urllib.parse import urldefrag, urljoin, urlparse
 from urllib.request import Request, urlopen
 
-from contextrouter.core.config import Config
+from contextrouter.core import Config
 from contextrouter.core.types import StructData
 
 from ..core.plugins import IngestionPlugin
@@ -30,7 +30,7 @@ from ..core.utils import (
     normalize_clean_text,
 )
 from ..settings import RagIngestionConfig
-from ..utils.llm import MODEL_LIGHT, llm_generate
+from ..utils.llm import llm_generate
 from ..utils.records import generate_id
 
 logger = logging.getLogger(__name__)
@@ -724,7 +724,7 @@ class WebPlugin(IngestionPlugin):
             result = llm_generate(
                 core_cfg=core_cfg,
                 prompt=prompt,
-                model=MODEL_LIGHT,
+                model=core_cfg.models.ingestion.preprocess.model,
                 max_tokens=256,
                 temperature=0.3,
                 parse_json=False,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from contextrouter.core.config import Config
+from contextrouter.core import Config
 
 logger = logging.getLogger(__name__)
 

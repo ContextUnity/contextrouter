@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable, Iterable, TypeVar
 
-from contextrouter.core.config import Config
+from contextrouter.core import Config
 from contextrouter.core.types import StructData, StructDataValue
 
 from ..config import DEFAULT_TAXONOMY_PATH
@@ -56,7 +56,7 @@ def llm_generate_tsv(
 
     Args:
         prompt: The prompt to send to the LLM
-        model: Model identifier (e.g., MODEL_FLASH)
+        model: Model identifier (e.g., "vertex/gemini-2.5-flash")
         max_tokens: Maximum tokens in response
         temperature: Sampling temperature
         retries: Number of retry attempts

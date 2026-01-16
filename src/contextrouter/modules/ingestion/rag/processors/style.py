@@ -6,10 +6,10 @@ import logging
 import random
 from pathlib import Path
 
-from contextrouter.core.config import Config
+from contextrouter.core import Config
 
 from ..core.types import RawData
-from ..utils.llm import MODEL_PRO, llm_generate
+from ..utils.llm import llm_generate
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ Rules:
     persona_text = llm_generate(
         core_cfg=core_cfg,
         prompt=prompt,
-        model=MODEL_PRO,
+        model=core_cfg.models.ingestion.persona.model,
         temperature=0.3,
         parse_json=False,
         max_tokens=max(512, int(max_output_tokens)),

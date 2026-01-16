@@ -10,23 +10,23 @@ from pathlib import Path
 import click
 
 from contextrouter.cli.registry import register_command
-from contextrouter.core.config import get_env
+from contextrouter.core import get_env
 
 logger = logging.getLogger(__name__)
 
 
 def _check_env() -> None:
     """Check required environment variables and provide helpful error messages."""
-    from contextrouter.core.config import get_core_config
+    from contextrouter.core import get_core_config
 
     # Ensure config is loaded (which loads environment)
-    get_core_config()
+    cfg = get_core_config()
     missing = []
 
     if not get_env("RAG_DB_NAME"):
         missing.append("RAG_DB_NAME")
-    if not get_env("PROJECT_ID"):
-        missing.append("PROJECT_ID")
+    if not cfg.vertex.project_id:
+        missing.append("VERTEX_PROJECT_ID")
 
     if missing:
         click.echo(click.style("✗ Missing required environment variables:", fg="red", bold=True))
@@ -34,7 +34,7 @@ def _check_env() -> None:
             click.echo(f"  - {var}")
         click.echo("\nHint: Set these in your .env file or environment:")
         click.echo("  export RAG_DB_NAME=green  # or blue")
-        click.echo("  export PROJECT_ID=your-project-id")
+        click.echo("  export VERTEX_PROJECT_ID=your-project-id")
         raise click.ClickException("Environment configuration incomplete")
 
 

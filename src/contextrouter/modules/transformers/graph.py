@@ -12,7 +12,6 @@ from contextrouter.modules.ingestion.rag.core.utils import resolve_workers
 from contextrouter.modules.ingestion.rag.graph.builder import GraphBuilder
 from contextrouter.modules.ingestion.rag.settings import RagIngestionConfig
 from contextrouter.modules.ingestion.rag.stages.store import read_raw_data_jsonl
-from contextrouter.modules.ingestion.rag.utils.llm import MODEL_PRO
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +36,7 @@ def build_graph_from_clean_text(
     incremental = config.graph.incremental
     if overwrite:
         incremental = False
-    model = config.graph.model.strip() or core_cfg.models.ingestion.graph.model.strip() or MODEL_PRO
+    model = config.graph.model.strip() or core_cfg.models.ingestion.graph.model.strip()
     builder_mode = config.graph.builder_mode
 
     all_items: list[Any] = []

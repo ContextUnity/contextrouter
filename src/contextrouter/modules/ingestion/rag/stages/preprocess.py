@@ -25,10 +25,14 @@ from ..plugins.video import (
 )
 from ..plugins.web import WebPlugin
 from ..settings import RagIngestionConfig
-from ..utils.llm import MODEL_FLASH, MODEL_LIGHT, llm_generate
+from ..utils.llm import llm_generate
 from .store import write_raw_data_jsonl
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_preprocess_model(core_cfg: Config) -> str:
+    return core_cfg.models.ingestion.preprocess.model.strip()
 
 
 def preprocess_to_clean_text(
@@ -44,6 +48,8 @@ def preprocess_to_clean_text(
     Returns a mapping {source_type: output_path}.
     """
     paths = get_assets_paths(config)
+    preprocess_model = _resolve_preprocess_model(core_cfg)
+    logger.info("preprocess: model=%s", preprocess_model)
     outputs: dict[str, Path] = {}
 
     def _run_one(t: str) -> tuple[str, Path, int]:
@@ -51,7 +57,8 @@ def preprocess_to_clean_text(
 
         start = time.perf_counter()
         logger.info("preprocess: processing type=%s", t)
-        out_path = paths["clean_text"] / f"{t}.jsonl"
+        model_name = preprocess_model.split("/")[-1]
+        out_path = paths["clean_text"] / f"{t}_{model_name}.jsonl"
         items: list[RawData]
 
         if t == "video":
@@ -131,6 +138,7 @@ def _preprocess_qa(
     question_filter_enabled = bool(config.qa.llm_question_filter_enabled)
 
     plugin = QAPlugin()
+    plugin.set_core_cfg(core_cfg)
     items = plugin.load(str(source_dir))
     if not speaker_enabled:
         return items
@@ -148,6 +156,8 @@ def _preprocess_qa(
         logger.info("preprocess(qa): session %d/%d title=%s", i, len(items), title or "Untitled")
 
         interactions = plugin.split_by_speakers_llm(raw.content)
+        if interactions is None:
+            raise RuntimeError("QA speaker detection returned None; expected list of interactions")
         if not interactions:
             interactions = [{"speaker": "Unknown", "text": raw.content}]
 
@@ -345,10 +355,11 @@ Return ONLY the exact name from the candidates list, nothing else.
 HOST:"""
 
     try:
+        preprocess_model = _resolve_preprocess_model(core_cfg)
         result = llm_generate(
             core_cfg=core_cfg,
             prompt=prompt,
-            model=MODEL_LIGHT,
+            model=preprocess_model,
             max_tokens=50,
             temperature=0.0,
         )
@@ -454,10 +465,11 @@ CHUNKS:
 """
 
         try:
+            preprocess_model = _resolve_preprocess_model(core_cfg)
             text = llm_generate(
                 core_cfg=core_cfg,
                 prompt=prompt,
-                model=MODEL_LIGHT,
+                model=preprocess_model,
                 max_tokens=1024,
                 temperature=0.1,
                 parse_json=False,
@@ -567,10 +579,11 @@ def _populate_web_llm_summaries(
             f"CONTENT:\n{content[:max_chars]}\n"
         )
         try:
+            preprocess_model = _resolve_preprocess_model(core_cfg)
             summary = llm_generate(
                 core_cfg=core_cfg,
                 prompt=prompt,
-                model=MODEL_FLASH,
+                model=preprocess_model,
                 max_tokens=256,
                 temperature=0.2,
                 parse_json=False,
@@ -800,10 +813,11 @@ INPUT JSON:
 """
 
         try:
+            preprocess_model = _resolve_preprocess_model(core_cfg)
             raw = llm_generate(
                 core_cfg=core_cfg,
                 prompt=prompt,
-                model=MODEL_FLASH,
+                model=preprocess_model,
                 max_tokens=2048,
                 temperature=0.1,
                 parse_json=False,

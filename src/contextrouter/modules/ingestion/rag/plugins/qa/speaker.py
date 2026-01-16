@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import logging
 
-from contextrouter.core.config import Config
+from contextrouter.core import Config
 from contextrouter.core.exceptions import IngestionError
 
-from ...utils.llm import MODEL_LIGHT, llm_generate
+from ...utils.llm import llm_generate
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class SpeakerProcessor:
                 core_cfg=self.core_cfg,
                 prompt=prompt,
                 content=content,
-                model=MODEL_LIGHT,
+                model=self.core_cfg.models.ingestion.preprocess.model,
                 max_tokens=4096,
                 temperature=0.0,
             )

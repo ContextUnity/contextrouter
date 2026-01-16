@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from contextrouter.core.config import Config
+from contextrouter.core import Config
 
 from ..core.utils import (
     llm_generate_tsv,
@@ -24,7 +24,6 @@ from ..core.utils import (
     strip_markdown_from_text,
 )
 from ..settings import RagIngestionConfig
-from ..utils.llm import MODEL_FLASH
 from .taxonomy.sampling import (
     collect_clean_text_samples_from_dir,
 )
@@ -62,9 +61,7 @@ def build_taxonomy(
     focus = config.taxonomy.philosophy_focus.strip()
     max_samples = config.taxonomy.max_samples
     scan_model = (
-        config.taxonomy.scan_model.strip()
-        or core_cfg.models.ingestion.taxonomy.model.strip()
-        or MODEL_FLASH
+        config.taxonomy.scan_model.strip() or core_cfg.models.ingestion.taxonomy.model.strip()
     )
 
     # Load predefined categories from config

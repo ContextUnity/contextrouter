@@ -1,0 +1,56 @@
+# Ingestion settings example (copy to assets/ingestion/settings.toml)
+
+[ingestion]
+workers = 2
+
+[taxonomy]
+include_types = ["video", "book", "qa", "knowledge"]
+max_samples = 100
+hard_cap_samples = 500
+# scan_model = "vertex/gemini-2.5-flash"
+
+[graph]
+include_types = ["video", "book", "qa", "knowledge"]
+builder_mode = "hybrid"
+cognee_enabled = true
+# model = "vertex/gemini-2.5-flash"
+
+[models]
+# Core LLM overrides for ingestion runs (optional)
+ingestion_taxonomy_model = "local-vllm/openai/gpt-oss-20b"
+ingestion_preprocess_model = "local-vllm/openai/gpt-oss-20b"
+ingestion_graph_model = "local-vllm/openai/gpt-oss-20b"
+ingestion_persona_model = "local-vllm/openai/gpt-oss-20b"
+ingestion_json_model = "vertex/gemini-2.5-flash"  # JSON-critical steps
+ingestion_ner_model = "local-vllm/openai/gpt-oss-20b"
+ingestion_keyphrases_model = "local-vllm/openai/gpt-oss-20b"
+
+[local]
+vllm_base_url = "http://192.168.77.211:8000/v1"
+
+[enrichment]
+ner_enabled = false
+keyphrases_enabled = false
+
+[enrichment.ner]
+mode = "transformers"  # llm | spacy | transformers
+model = ""  # only used when mode="llm" (e.g., local-vllm/openai/gpt-oss-20b)
+entity_types = []
+min_confidence = 0.5
+
+[enrichment.keyphrases]
+mode = "llm"
+max_phrases = 15
+min_score = 0.0
+
+[upload]
+provider = "postgres"
+include_date = true
+
+[upload.postgres]
+# Leave empty to use POSTGRES_DSN from env
+dsn = ""
+pool_min_size = 2
+pool_max_size = 10
+embeddings_model = "hf/sentence-transformers"
+tenant_id = "public"

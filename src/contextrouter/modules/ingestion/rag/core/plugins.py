@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Callable
 
-from contextrouter.core.config import Config
+from contextrouter.core import Config
 
 from ..settings import RagIngestionConfig
 from .types import RawData, ShadowRecord

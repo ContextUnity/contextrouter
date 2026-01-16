@@ -6,22 +6,26 @@ import asyncio
 import json
 import logging
 
-from contextrouter.core.config import Config
+from contextrouter.core import Config
 from contextrouter.modules.models.registry import model_registry
 from contextrouter.modules.models.types import ModelRequest, TextPart
 
 logger = logging.getLogger(__name__)
 
-MODEL_PRO = "vertex/gemini-2.5-pro"
-MODEL_FLASH = "vertex/gemini-2.5-flash"
-MODEL_LIGHT = "vertex/gemini-2.5-flash-lite"
+
+def _resolve_json_model(core_cfg: Config, model: str) -> str:
+    """Resolve model for JSON-critical ingestion steps via config override."""
+    json_model = core_cfg.models.ingestion.json_model.model.strip()
+    if json_model:
+        return json_model
+    return model
 
 
 def llm_generate(
     *,
     core_cfg: Config,
     prompt: str,
-    model: str = MODEL_PRO,
+    model: str,
     max_tokens: int = 16384,
     temperature: float = 0.1,
     max_retries: int = 5,
@@ -55,7 +59,7 @@ async def llm_generate_async(
     *,
     core_cfg: Config,
     prompt: str,
-    model: str = MODEL_PRO,
+    model: str,
     max_tokens: int = 16384,
     temperature: float = 0.1,
     max_retries: int = 5,
@@ -83,6 +87,9 @@ async def _llm_generate_impl(
     max_retries: int,
     parse_json: bool,
 ) -> dict[str, object] | list[object] | str:
+    if parse_json:
+        model = _resolve_json_model(core_cfg, model)
+
     for attempt in range(max_retries):
         try:
             model_instance = model_registry.get_llm_with_fallback(
@@ -102,10 +109,18 @@ async def _llm_generate_impl(
             text = resp.text.strip()
             if not text:
                 if attempt < max_retries - 1:
-                    logger.warning("Empty text, retrying...")
+                    logger.warning(
+                        "Empty text, retrying (model=%s prompt_chars=%d attempt=%d/%d)",
+                        model,
+                        len(prompt),
+                        attempt + 1,
+                        max_retries,
+                    )
                     await asyncio.sleep(3)
                     continue
-                raise ValueError("LLM returned empty text")
+                raise ValueError(
+                    f"LLM returned empty text (model={model} prompt_chars={len(prompt)})"
+                )
 
             if not parse_json:
                 return text
@@ -147,4 +162,4 @@ async def _llm_generate_impl(
     raise ValueError("LLM generation failed after all retries")
 
 
-__all__ = ["llm_generate", "llm_generate_async", "MODEL_PRO", "MODEL_FLASH", "MODEL_LIGHT"]
+__all__ = ["llm_generate", "llm_generate_async"]

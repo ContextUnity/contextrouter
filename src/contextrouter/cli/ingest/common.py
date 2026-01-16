@@ -8,18 +8,50 @@ from pathlib import Path
 import click
 
 from contextrouter.core import Config, get_core_config
+from contextrouter.modules.ingestion.rag.settings import RagIngestionConfig
 
 ALL_TYPES = ["video", "book", "qa", "web", "knowledge"]
 
 logger = logging.getLogger(__name__)
 
 
-def load_core_cfg() -> Config:
+def load_core_cfg(config: RagIngestionConfig | None = None) -> Config:
     """Load contextrouter core config for LLM-backed ingestion steps.
 
     CLI owns env/TOML loading. Library ingestion modules must not read env directly.
     """
-    return get_core_config()
+    core_cfg = get_core_config()
+    if config is not None:
+        _apply_ingestion_model_overrides(core_cfg, config)
+        _validate_required_models(core_cfg)
+    return core_cfg
+
+
+def _apply_ingestion_model_overrides(core_cfg: Config, cfg: RagIngestionConfig) -> None:
+    models = cfg.models
+    if models.ingestion_taxonomy_model:
+        core_cfg.models.ingestion.taxonomy.model = models.ingestion_taxonomy_model
+    if models.ingestion_preprocess_model:
+        core_cfg.models.ingestion.preprocess.model = models.ingestion_preprocess_model
+    if models.ingestion_graph_model:
+        core_cfg.models.ingestion.graph.model = models.ingestion_graph_model
+    if models.ingestion_persona_model:
+        core_cfg.models.ingestion.persona.model = models.ingestion_persona_model
+    if models.ingestion_json_model:
+        core_cfg.models.ingestion.json_model.model = models.ingestion_json_model
+    if models.ingestion_ner_model and not cfg.enrichment.ner.model:
+        cfg.enrichment.ner.model = models.ingestion_ner_model
+    if models.ingestion_keyphrases_model and not cfg.enrichment.keyphrases.model:
+        cfg.enrichment.keyphrases.model = models.ingestion_keyphrases_model
+    if cfg.local.vllm_base_url:
+        core_cfg.local.vllm_base_url = cfg.local.vllm_base_url
+    if cfg.local.ollama_base_url:
+        core_cfg.local.ollama_base_url = cfg.local.ollama_base_url
+
+
+def _validate_required_models(core_cfg: Config) -> None:
+    if not core_cfg.models.ingestion.json_model.model.strip():
+        raise click.ClickException("models.ingestion.json_model.model is required")
 
 
 def suppress_noisy_loggers() -> None:

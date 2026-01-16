@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
-from contextrouter.core.config import Config
+from contextrouter.core import Config
 
 from ..core import (
     IngestionMetadata,
@@ -27,7 +27,6 @@ from ..core.utils import (
     parse_tsv_line,
 )
 from ..settings import RagIngestionConfig
-from ..utils.llm import MODEL_FLASH
 from ..utils.records import (
     format_timestamp,
     generate_id,
@@ -197,7 +196,7 @@ SEGMENTS:
             text = llm_generate_tsv(
                 core_cfg=core_cfg,
                 prompt=prompt,
-                model=MODEL_FLASH,
+                model=core_cfg.models.ingestion.preprocess.model,
                 max_tokens=8192,
                 temperature=0.2,
                 retries=2,
@@ -551,6 +550,10 @@ class VideoPlugin(IngestionPlugin):
                     keywords, summary, parent_categories = get_graph_enrichment(
                         text=window_text, enrichment_func=enrichment_func
                     )
+                    initial_keywords = raw.metadata.get("keywords", [])
+                    if not isinstance(initial_keywords, list):
+                        initial_keywords = []
+                    keywords = list(dict.fromkeys([*initial_keywords, *keywords]))[:10]
 
                     # Build input_text with QA-style explicit enrichment format
                     input_text = self._build_input_text(
@@ -625,6 +628,10 @@ class VideoPlugin(IngestionPlugin):
                 keywords, summary, parent_categories = get_graph_enrichment(
                     text=window_text, enrichment_func=enrichment_func
                 )
+                initial_keywords = raw.metadata.get("keywords", [])
+                if not isinstance(initial_keywords, list):
+                    initial_keywords = []
+                keywords = list(dict.fromkeys([*initial_keywords, *keywords]))[:10]
 
                 # Build input_text with QA-style explicit enrichment format
                 input_text = self._build_input_text(

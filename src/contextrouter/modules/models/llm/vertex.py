@@ -7,7 +7,7 @@ from typing import AsyncIterator
 
 from langchain_core.messages import SystemMessage
 
-from contextrouter.core.config import Config
+from contextrouter.core import Config
 from contextrouter.core.tokens import BiscuitToken
 
 from ..base import BaseModel
@@ -58,21 +58,25 @@ class VertexLLM(BaseModel):
         try:
             import google.auth
             import google.auth.transport.requests
-
-            self._credentials, _project = google.auth.default(
-                scopes=["https://www.googleapis.com/auth/cloud-platform"]
-            )
-            if hasattr(self._credentials, "refresh"):
-                self._credentials.refresh(google.auth.transport.requests.Request())
-        except (
-            google.auth.exceptions.DefaultCredentialsError,
-            google.auth.transport.requests.RequestError,
-        ) as e:  # pragma: no cover
-            logger.warning("VertexLLM: Failed to initialize credentials: %s", e)
-            self._credentials = None
         except Exception as e:  # pragma: no cover
-            logger.warning("VertexLLM: Unexpected credential error: %s", e)
+            logger.warning("VertexLLM: google-auth not available: %s", e)
             self._credentials = None
+        else:
+            try:
+                self._credentials, _project = google.auth.default(
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                )
+                if hasattr(self._credentials, "refresh"):
+                    self._credentials.refresh(google.auth.transport.requests.Request())
+            except (
+                google.auth.exceptions.DefaultCredentialsError,
+                google.auth.transport.requests.RequestError,
+            ) as e:  # pragma: no cover
+                logger.warning("VertexLLM: Failed to initialize credentials: %s", e)
+                self._credentials = None
+            except Exception as e:  # pragma: no cover
+                logger.warning("VertexLLM: Unexpected credential error: %s", e)
+                self._credentials = None
 
         chosen_model = (model_name or "").strip() or "gemini-2.5-flash"
 
@@ -80,7 +84,22 @@ class VertexLLM(BaseModel):
         location = config.vertex.location
         if not project_id or not location:
             # Keep error explicit and early (enterprise-friendly).
-            raise ValueError("VertexLLM requires vertex.project_id and vertex.location in Config")
+            raise ValueError(
+                "VertexLLM requires vertex.project_id and vertex.location in Config. "
+                "Set them in core settings.toml under [vertex], or via env vars "
+                "VERTEX_PROJECT_ID and VERTEX_LOCATION "
+                "(you can put them in `.env`). "
+                "When contextrouter is embedded as a library, the host may also set "
+                "CONTEXTROUTER_VERTEX_PROJECT_ID / CONTEXTROUTER_VERTEX_LOCATION."
+            )
+        if self._credentials is None:
+            raise ValueError(
+                "VertexLLM requires valid Google Application Default Credentials (ADC). "
+                "Set GOOGLE_APPLICATION_CREDENTIALS=/abs/path/to/service-account.json "
+                "or run `gcloud auth application-default login`. "
+                "The credentials must have access to Vertex AI in project "
+                f"{project_id!r}."
+            )
 
         # Determine capabilities based on model
         self._capabilities = self._get_capabilities(chosen_model)
@@ -101,27 +120,11 @@ class VertexLLM(BaseModel):
                 streaming=streaming,
                 credentials=self._credentials,
             )
-        except ModuleNotFoundError:
-            # Fallback: langchain-google-genai in Vertex mode.
-            #
-            # IMPORTANT: This relies on `core.config.Config.load()` setting
-            # `GOOGLE_GENAI_USE_VERTEXAI=true` **before** model construction.
-            #
-            # Some versions of langchain-google-genai do not accept project/location ctor args,
-            # so we only pass portable args here.
-            from langchain_google_genai import ChatGoogleGenerativeAI
-
-            self._model = ChatGoogleGenerativeAI(
-                model=chosen_model,
-                temperature=(config.llm.temperature if temperature is None else temperature),
-                max_output_tokens=(
-                    config.llm.max_output_tokens if max_output_tokens is None else max_output_tokens
-                ),
-                streaming=streaming,
-                credentials=self._credentials,
-                timeout=config.llm.timeout_sec,
-                max_retries=config.llm.max_retries,
-            )
+        except ModuleNotFoundError as e:
+            raise ModuleNotFoundError(
+                "VertexLLM requires `langchain-google-vertexai`. "
+                "Install it via `uv sync --extra vertex` (or `pip install langchain-google-vertexai`)."
+            ) from e
 
     @property
     def capabilities(self) -> ModelCapabilities:

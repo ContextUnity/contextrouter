@@ -10,7 +10,7 @@ import re
 
 from langchain_core.messages import AIMessage
 
-from contextrouter.core.config import get_core_config
+from contextrouter.core import get_core_config
 from contextrouter.modules.observability.langfuse import retrieval_span
 
 from ...llm import get_no_results_response

@@ -22,8 +22,10 @@ from contextrouter.cortex import AgentState, get_graph_service, get_last_user_qu
 from contextrouter.modules.retrieval import BaseRetrievalPipeline
 
 from .citations import build_citations
+from .mmr import mmr_select
 from .models import Citation, RetrievedDoc
-from .ranking import rerank_documents
+from .parity import DualReadHarness, ParityConfig
+from .rerankers import get_reranker
 from .settings import RagRetrievalSettings, get_rag_retrieval_settings
 
 logger = logging.getLogger(__name__)
@@ -120,6 +122,13 @@ class RetrievalPipeline:
                 provider_elapsed_ms,
             )
             all_docs.extend(provider_docs)
+            self._run_dual_read(
+                cfg=cfg,
+                query=user_query,
+                token=token,
+                primary_docs=provider_docs,
+                primary_elapsed_ms=provider_elapsed_ms,
+            )
         except Exception as e:
             provider_elapsed_ms = (time.perf_counter() - provider_start) * 1000
             logger.error(
@@ -147,15 +156,33 @@ class RetrievalPipeline:
         # 3) Deduplicate
         deduped = self._deduplicate(all_docs)
 
-        # 4) Rerank and select
+        # 4) MMR (optional) + rerank and select
+        reranker = get_reranker(cfg=cfg, provider=provider_name)
         if cfg.general_retrieval_enabled:
-            ranked_docs = await rerank_documents(
+            candidates = deduped
+            if cfg.mmr_enabled:
+                candidates = mmr_select(
+                    query=user_query,
+                    candidates=candidates,
+                    k=min(len(candidates), int(cfg.general_retrieval_initial_count)),
+                    lambda_mult=float(cfg.mmr_lambda),
+                )
+            ranked_docs = await reranker.rerank(
                 query=user_query,
-                documents=deduped,
+                documents=candidates,
                 top_n=cfg.general_retrieval_final_count,
             )
         else:
-            ranked_all = await rerank_documents(query=user_query, documents=deduped)
+            candidates = deduped
+            if cfg.mmr_enabled:
+                total_limit = int(sum(self._type_limits(cfg).values()) or len(candidates))
+                candidates = mmr_select(
+                    query=user_query,
+                    candidates=candidates,
+                    k=min(len(candidates), total_limit),
+                    lambda_mult=float(cfg.mmr_lambda),
+                )
+            ranked_all = await reranker.rerank(query=user_query, documents=candidates)
             ranked_docs = self._select_top_per_type(ranked_all, cfg)
 
         # 5) Citations (optional RAG capability)
@@ -441,6 +468,41 @@ class RetrievalPipeline:
             return False
         domains = state.get("web_allowed_domains") or []
         return bool(domains)
+
+    def _run_dual_read(
+        self,
+        *,
+        cfg: RagRetrievalSettings,
+        query: str,
+        token: BiscuitToken,
+        primary_docs: list[RetrievedDoc],
+        primary_elapsed_ms: float,
+    ) -> None:
+        if not getattr(cfg, "dual_read_enabled", False):
+            return
+        parity_cfg = ParityConfig(
+            enabled=bool(getattr(cfg, "dual_read_enabled", False)),
+            shadow_backend=getattr(cfg, "dual_read_shadow_backend", None),
+            sample_rate=float(getattr(cfg, "dual_read_sample_rate", 0.0) or 0.0),
+            timeout_ms=int(getattr(cfg, "dual_read_timeout_ms", 300) or 300),
+            log_payloads=bool(getattr(cfg, "dual_read_log_payloads", False)),
+        )
+        harness = DualReadHarness(parity_cfg)
+        if not harness.should_run():
+            return
+        if cfg.general_retrieval_enabled:
+            limit = int(cfg.general_retrieval_initial_count)
+        else:
+            limit = int(sum(self._type_limits(cfg).values()) or 15)
+        asyncio.create_task(
+            harness.compare(
+                query=query,
+                token=token,
+                primary_docs=primary_docs,
+                primary_ms=primary_elapsed_ms,
+                limit=limit,
+            )
+        )
 
 
 __all__ = ["RetrievalPipeline", "RetrievalResult"]

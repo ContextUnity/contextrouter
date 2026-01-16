@@ -27,7 +27,7 @@ def cmd_persona(config_path: Path | None) -> None:
     suppress_noisy_loggers()
     stage_banner("PERSONA (CleanText → persona.txt)")
     cfg = load_config(config_path)
-    core_cfg = load_core_cfg()
+    core_cfg = load_core_cfg(cfg)
     paths = get_assets_paths(cfg)
     require_clean_text(paths, list(ALL_TYPES))
     out = build_persona(config=cfg, core_cfg=core_cfg)
