@@ -16,9 +16,10 @@ def test_build_scope_filters_basic():
         scope=TaxonomyPath(path="book.chapter_01"),
         source_types=["book", "video"],
     )
-    assert "tenant_id = %s" in where
-    assert "taxonomy_path <@ %s::ltree" in where
-    assert "source_type = ANY(%s::text[])" in where
+    where_strs = [str(w) for w in where]
+    assert any("tenant_id = %s" in s for s in where_strs)
+    assert any("taxonomy_path <@ %s::ltree" in s for s in where_strs)
+    assert any("source_type = ANY(%s::text[])" in s for s in where_strs)
     assert params == ["tenant", "user", "book.chapter_01", ["book", "video"]]
 
 

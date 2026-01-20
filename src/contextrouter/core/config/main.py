@@ -131,13 +131,14 @@ class Config(BaseModel):
         config = cls()
         paths = config.paths
 
-        # Optional explicit override for core config path.
-        # This is intentionally separate from ingestion's CONTEXTROUTER_CONFIG_PATH.
-        core_config_path = get_env("CONTEXTROUTER_CORE_CONFIG_PATH")
         # Deterministic `.env` loading: only load from the detected project root
         # (e.g. `<repo>/contextrouter/.env`). This avoids accidental cross-repo leakage.
         if paths.env_file.exists():
             load_dotenv(paths.env_file, override=False)
+
+        # Optional explicit override for core config path.
+        # This is intentionally separate from ingestion's CONTEXTROUTER_CONFIG_PATH.
+        core_config_path = get_env("CONTEXTROUTER_CORE_CONFIG_PATH")
 
         # Load from TOML if available
         toml_path = (

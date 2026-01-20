@@ -6,6 +6,7 @@ from contextrouter.core.config import Config
 from contextrouter.modules.models.base import BaseModel
 from contextrouter.modules.models.registry import FallbackModel
 from contextrouter.modules.models.types import (
+    ImagePart,
     ModelCapabilities,
     ModelRequest,
     ModelResponse,
@@ -73,7 +74,9 @@ class TestFallbackLogic:
         assert len(filtered) == 3  # All support text
 
         # Image request should filter to multimodal only
-        image_request = ModelRequest(parts=[TextPart(text="Hi"), MockImagePart()])
+        image_request = ModelRequest(
+            parts=[TextPart(text="Hi"), ImagePart(mime="image/png", uri="gcs://test")]
+        )
         filtered = fallback._filter_candidates(image_request.required_modalities())
         assert len(filtered) == 2  # multimodal and failing
         assert filtered[0][0] == "multimodal"
@@ -89,12 +92,14 @@ class TestFallbackLogic:
         fallback = FallbackModel(None, ["text-only"], "fallback", config)
         fallback._candidates = candidates
 
-        image_request = ModelRequest(parts=[TextPart(text="Hi"), MockImagePart()])
+        image_request = ModelRequest(
+            parts=[TextPart(text="Hi"), ImagePart(mime="image/png", uri="gcs://test")]
+        )
 
         with pytest.raises(Exception):  # Should raise ModelCapabilityError
             fallback._filter_candidates(image_request.required_modalities())
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_sequential_fallback_success(self):
         """Test sequential fallback with first model succeeding."""
         config = Config()
@@ -110,7 +115,7 @@ class TestFallbackLogic:
 
         assert response.text == "Success"
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_sequential_fallback_with_retry(self):
         """Test sequential fallback with first model failing."""
         config = Config()
@@ -129,12 +134,3 @@ class TestFallbackLogic:
         response = await fallback.generate(request)
 
         assert response.text == "Fallback success"
-
-
-class MockImagePart:
-    """Mock image part for testing."""
-
-    kind = "image"
-
-    def __init__(self):
-        pass

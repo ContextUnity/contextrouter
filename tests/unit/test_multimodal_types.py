@@ -66,7 +66,9 @@ class TestModelCapabilities:
 
     def test_empty_capabilities(self):
         caps = ModelCapabilities()
-        assert not caps.supports({"text"})
+        # Default is text=True, others=False
+        assert caps.supports({"text"})
+        assert not caps.supports({"image"})
 
 
 class TestModelRequest:

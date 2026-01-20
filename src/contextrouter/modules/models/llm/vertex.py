@@ -70,7 +70,7 @@ class VertexLLM(BaseModel):
                     self._credentials.refresh(google.auth.transport.requests.Request())
             except (
                 google.auth.exceptions.DefaultCredentialsError,
-                google.auth.transport.requests.RequestError,
+                Exception,  # Catch any network/auth related errors during credential refresh
             ) as e:  # pragma: no cover
                 logger.warning("VertexLLM: Failed to initialize credentials: %s", e)
                 self._credentials = None

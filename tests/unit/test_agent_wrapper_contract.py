@@ -38,7 +38,7 @@ async def test_agent_wrappers_return_dict_not_coroutine(
         return {"ok": True}
 
     monkeypatch.setattr(extract_mod, "_extract_user_query", _sync_update, raising=True)
-    monkeypatch.setattr(intent_mod, "_detect_intent", _sync_update, raising=True)
+    monkeypatch.setattr(intent_mod, "_detect_intent", _async_update, raising=True)
     monkeypatch.setattr(retrieve_mod, "_retrieve_documents", _async_update, raising=True)
     monkeypatch.setattr(generate_mod, "_generate_response", _async_update, raising=True)
     monkeypatch.setattr(suggest_mod, "_generate_search_suggestions", _async_update, raising=True)

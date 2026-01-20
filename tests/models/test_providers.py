@@ -74,7 +74,7 @@ class TestVertexLLM:
             mock_vertex_class.return_value = mock_model
 
             model = VertexLLM(mock_config)
-            request = ModelRequest(parts=[TextPart(text="Hello world")])
+            request = ModelRequest(parts=[TextPart(text="Hello world")], temperature=0.5)
 
             response = await model.generate(request)
 
@@ -101,7 +101,7 @@ class TestVertexLLM:
             mock_vertex_class.return_value = mock_model
 
             model = VertexLLM(mock_config)
-            request = ModelRequest(parts=[TextPart(text="Hello world")])
+            request = ModelRequest(parts=[TextPart(text="Hello world")], temperature=0.5)
 
             events = []
             async for event in model.stream(request):

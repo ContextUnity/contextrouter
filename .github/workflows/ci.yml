@@ -34,7 +34,7 @@ jobs:
     - name: Install dependencies
       run: |
         uv sync --dev
-        uv sync --extra ingestion --extra vertex
+        uv sync --extra ingestion --extra vertex --extra storage
 
     - name: Run ruff linting
       run: uv run ruff check src/contextrouter

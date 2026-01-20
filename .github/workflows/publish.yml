@@ -28,7 +28,9 @@ jobs:
         version: "latest"
 
     - name: Install dependencies
-      run: uv sync --dev
+      run: |
+        uv sync --dev
+        uv sync --extra storage
 
     - name: Clean dist
       run: rm -rf dist && mkdir -p dist

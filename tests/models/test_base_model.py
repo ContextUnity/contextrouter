@@ -172,10 +172,6 @@ class TestModelRequest:
 
     def test_request_validation(self):
         """Test request validation."""
-        # Empty parts should be allowed (model decides)
-        request = ModelRequest(parts=[])
-        assert len(request.parts) == 0
-
         # Test with system message
         request = ModelRequest(parts=[TextPart(text="Hello")], system="You are a helpful assistant")
         assert request.system == "You are a helpful assistant"
@@ -197,7 +193,7 @@ class TestModelRequest:
             parts=[TextPart(text="Hello"), TextPart(text="World")],
             system="Be helpful",
         )
-        prompt = request.to_text_prompt()
+        prompt = request.to_text_prompt(include_system=True)
         assert "Be helpful" in prompt
         assert "Hello" in prompt
         assert "World" in prompt

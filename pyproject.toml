@@ -1,6 +1,6 @@
 [project]
 name = "contextrouter"
-version = "0.11.0"
+version = "0.11.1"
 description = "Modular LangGraph-powered agentic brain for multi-source knowledge orchestration and RAG"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -27,6 +27,12 @@ dependencies = [
     "tomli>=2.0.0",
     "joblib>=1.5.3",
 ]
+
+[project.urls]
+Homepage = "https://contextrouter.dev"
+Documentation = "https://contextrouter.org"
+Repository = "https://github.com/ContextRouter/contextrouter"
+Issues = "https://github.com/ContextRouter/contextrouter/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -131,6 +137,7 @@ dev = [
     "bandit>=1.9.2",
     "pre-commit>=4.5.1",
     "pytest>=8.0.0",
+    "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
     "ruff>=0.14.0",
     "alembic>=1.13.0",

@@ -87,7 +87,7 @@ class ModelRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    parts: list[ModelPart] = Field(default_factory=list)
+    parts: list[ModelPart] = Field(default_factory=list, min_length=1)
     system: str | None = None
     metadata: dict[str, StructDataValue] = Field(default_factory=dict)
 

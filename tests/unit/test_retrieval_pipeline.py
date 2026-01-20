@@ -35,13 +35,17 @@ def test_retrieval_pipeline_calls_vertex_and_builds_citations(monkeypatch) -> No
     async def _identity_rerank(**kw):
         return kw["documents"]
 
+    class MockReranker:
+        async def rerank(self, query, documents, top_n=None):
+            return documents[:top_n] if top_n else documents
+
     # Mock ComponentFactory.create_provider to return our test provider
     monkeypatch.setattr(ComponentFactory, "create_provider", lambda name, **kwargs: _Provider())
     monkeypatch.setattr(RagPipeline, "_should_run_web", lambda _s, _state: False)
     monkeypatch.setattr(RagPipeline, "_get_graph_facts", lambda _s, _state: ["f1"])
     monkeypatch.setattr(
-        "contextrouter.modules.retrieval.rag.pipeline.rerank_documents",
-        _identity_rerank,
+        "contextrouter.modules.retrieval.rag.pipeline.get_reranker",
+        lambda **kwargs: MockReranker(),
     )
     monkeypatch.setattr(
         "contextrouter.modules.retrieval.rag.pipeline.build_citations",
