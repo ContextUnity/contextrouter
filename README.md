@@ -48,7 +48,10 @@ ContextRouter's architecture is built around specialized modules:
 
 - **`modules/models/`** — LLM and embedding model abstractions (OpenAI, Anthropic, Vertex AI, Groq, local models)
 - **`modules/protocols/`** — Platform adapters (AG-UI events, A2A/A2UI protocols)
-- **`cortex/`** — LangGraph-based agent orchestration and workflow management
+- **`cortex/graphs/`** — LangGraph-based agent workflows:
+  - `dispatcher.py` — Central graph selection (by config/registry)
+  - `rag_retrieval.py` — RAG pipeline (retrieve → generate)
+  - `commerce/` — Commerce domain (gardener, lexicon, matcher, chat)
 - **`core/`** — ContextUnit protocol, token management, and core interfaces
 
 ## Integration with ContextUnity

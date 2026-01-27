@@ -1,64 +1,103 @@
 # Cortex Graphs
 
-This directory contains **graph wiring** (topology) only.
+This directory contains **graph definitions** (topology and wiring).
 
 Business logic lives in:
 - `contextrouter/cortex/steps/` (pure-ish step functions)
 - `contextrouter/modules/` (capabilities: providers/connectors/transformers)
 
-## `brain.py` (central dispatcher)
+## Structure
 
-`brain.py` is the explicit entrypoint that selects which graph to compile/run.
-It uses `Config.router.graph` as a simple key
+```
+graphs/
+├── dispatcher.py         # Central graph selection (by config/registry)
+├── rag_retrieval.py      # RAG pipeline (retrieve → generate)
+│
+└── commerce/             # Commerce domain (subgraph architecture)
+    ├── graph.py          # CommerceGraph (main entry)
+    ├── state.py          # CommerceState
+    ├── chat/             # LLM intent detection
+    ├── gardener/         # Taxonomy enrichment
+    ├── lexicon/          # Content generation
+    └── matcher/          # Product matching
+```
 
-## `rag_retrieval.py` (chat / RAG retrieval graph)
+## `dispatcher.py` (central graph selection)
 
-**Purpose**: handle a user chat turn end-to-end (intent → optional retrieval → generation).
+Dispatches to the correct graph based on configuration.
 
-- **Build/compile**: `build_graph()` / `compile_graph()`
-- **Typical invocation**: via runners (preferred)
-  - `contextrouter.cortex.runners.chat.stream_agent(...)` (LangGraph `astream_events(v2)` passthrough)
-  - `contextrouter.cortex.runners.chat.invoke_agent(...)`
-- **Steps** live in: `contextrouter/cortex/steps/rag_retrieval/`
-- **Node wrappers** (thin) live in: `contextrouter/cortex/nodes/rag_retrieval/`
+```python
+from contextrouter.cortex.graphs import compile_graph
 
-This graph is currently “named”/static (selected by `router.graph`), not recipe-built.
+# Use config (router.graph setting)
+graph = compile_graph()
 
-## `rag_ingestion.py` (ingestion graphs)
+# Or explicit graph
+graph = compile_graph("commerce")
+```
 
-**Purpose**: build/update knowledge assets (clean text, taxonomy/ontology/graph, shadow/export/deploy/report).
+**Priority:**
+1. `router.override_path` — custom Python path (power-user)
+2. `graph_registry` — registered via `@register_graph`
+3. Built-in: `rag_retrieval`, `commerce`
 
-### Two ways to wire ingestion
+## `commerce/` (Commerce domain)
 
-- **Default full pipeline**: `build_graph()` / `compile_graph()`
-- **Dynamic recipe graph**: `build_graph_from_recipe(recipe)` / `compile_graph_from_recipe(recipe)`
+Commerce graphs use subgraph architecture:
 
-### Why recipes exist
+```python
+from contextrouter.cortex.graphs.commerce import build_commerce_graph
 
-Transports (API/job runners) must not send Python objects/code. Instead, they can send a
-JSON payload that selects a safe subset of stages.
+# Programmatic access
+graph = build_commerce_graph()
+result = await graph.ainvoke({"intent": "enrich", ...})
 
-#### `IngestionRecipe`
+# Chat mode (LLM intent detection)
+from contextrouter.cortex.graphs.commerce import invoke_chat
+result = await invoke_chat("Classify products from Vysota")
+```
 
-Recipe controls **topology** only:
+### Subgraphs
 
-- `stages`: subset of allowed stage names (in canonical order)
-- `allow_unsafe`: bypass dependency validation (power-user mode)
+| Subgraph | Intent | Purpose |
+|----------|--------|---------|
+| `gardener` | `enrich` | Taxonomy, NER, KG enrichment |
+| `lexicon` | `generate_content` | AI content generation |
+| `matcher` | `match_products` | Product deduplication |
+| `chat` | (wrapper) | LLM intent detection |
 
-#### `IngestionJobSpec` (API-friendly)
+## `rag_retrieval.py` (RAG pipeline)
 
-Job spec is a single JSON payload:
+Handles chat/QA with retrieval:
 
-- `recipe`: `IngestionRecipe`
-- `input`: input params (subset of `IngestionInputState`, e.g. `ingestion_config_path`, `only_types`, `overwrite`, `skip_*`, `workers`)
+```
+START → extract_query → fetch_memory → detect_intent
+                                           ↓
+                              [should_retrieve?]
+                              ↓              ↓
+                          retrieve      →  generate
+                              ↓              ↓
+                          suggest       →  reflect → END
+```
 
-This format is:
-- JSON-safe
-- easy to persist as a job payload
-- easy to replay
+**Typical invocation** via runners:
+```python
+from contextrouter.cortex.runners.chat import stream_agent, invoke_agent
+```
 
-### Compiled graph cache
+## Registering Custom Graphs
 
-`compile_graph_from_recipe(recipe)` memoizes compiled graphs **in-process** using a stable
-`recipe_cache_key(recipe)`. This avoids repeated compilation for common recipes like:
-`preprocess-only`, `preprocess+taxonomy`, or `full`.
+```python
+from contextrouter.core.registry import register_graph
+
+@register_graph("my_custom")
+def build_my_graph():
+    workflow = StateGraph(MyState)
+    # ... add nodes, edges
+    return workflow.compile()
+```
+
+Then use via config:
+```
+router.graph = "my_custom"
+```
