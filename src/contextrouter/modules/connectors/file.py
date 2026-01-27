@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import AsyncIterator
 
-from contextrouter.core.bisquit import BisquitEnvelope
+from contextcore import ContextUnit
+
 from contextrouter.core.interfaces import BaseConnector
 
 
@@ -23,7 +24,7 @@ class FileConnector(BaseConnector):
         ]
         self._recursive = bool(recursive)
 
-    async def connect(self) -> AsyncIterator[BisquitEnvelope]:
+    async def connect(self) -> AsyncIterator[ContextUnit]:
         # Minimal async generator wrapper; downstream decides how to parse bytes/text.
         it = self._root.rglob("*") if self._recursive else self._root.glob("*")
         for p in sorted(it):
@@ -32,11 +33,12 @@ class FileConnector(BaseConnector):
             if self._extensions and p.suffix.lower() not in self._extensions:
                 continue
             data = p.read_bytes()
-            yield BisquitEnvelope(
-                data=data,
+            unit = ContextUnit(
+                payload={"data": data, "path": str(p)},
                 provenance=[f"connector:file:{p.name}"],
-                metadata={"path": str(p)},
+                modality="binary",
             )
+            yield unit
 
 
 __all__ = ["FileConnector"]

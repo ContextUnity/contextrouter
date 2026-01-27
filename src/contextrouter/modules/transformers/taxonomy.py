@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from contextrouter.core import BaseTransformer, BisquitEnvelope, Config
+from contextrouter.core import BaseTransformer, Config, ContextUnit
 from contextrouter.modules.ingestion.rag.config import get_assets_paths, load_config
 from contextrouter.modules.ingestion.rag.core.utils import resolve_workers
 from contextrouter.modules.ingestion.rag.processors.taxonomy_builder import (
@@ -68,29 +68,36 @@ class TaxonomyTransformer(BaseTransformer):
         cc = (params or {}).get("core_cfg")
         self._core_cfg = cc if isinstance(cc, Config) else None
 
-    async def transform(self, envelope: BisquitEnvelope) -> BisquitEnvelope:
-        envelope.add_trace(self.name)
+    async def transform(self, unit: ContextUnit) -> ContextUnit:
+        unit.provenance.append(self.name)
+
+        payload = unit.payload or {}
+        if not isinstance(payload, dict):
+            payload = {}
 
         cfg = None
-        if isinstance(envelope.content, RagIngestionConfig):
-            cfg = envelope.content
-        elif isinstance(envelope.content, dict):
-            cfg = RagIngestionConfig.model_validate(envelope.content)
-        elif isinstance(envelope.metadata.get("ingestion_config"), RagIngestionConfig):
-            cfg = envelope.metadata["ingestion_config"]
-        elif isinstance(envelope.metadata.get("ingestion_config"), dict):
-            cfg = RagIngestionConfig.model_validate(envelope.metadata["ingestion_config"])
-        elif isinstance(envelope.metadata.get("config"), RagIngestionConfig):
-            cfg = envelope.metadata["config"]
-        elif isinstance(envelope.metadata.get("config"), dict):
-            cfg = RagIngestionConfig.model_validate(envelope.metadata["config"])
+        content = payload.get("content")
+        metadata = payload.get("metadata", {}) if isinstance(payload.get("metadata"), dict) else {}
+
+        if isinstance(content, RagIngestionConfig):
+            cfg = content
+        elif isinstance(content, dict):
+            cfg = RagIngestionConfig.model_validate(content)
+        elif isinstance(metadata.get("ingestion_config"), RagIngestionConfig):
+            cfg = metadata["ingestion_config"]
+        elif isinstance(metadata.get("ingestion_config"), dict):
+            cfg = RagIngestionConfig.model_validate(metadata["ingestion_config"])
+        elif isinstance(metadata.get("config"), RagIngestionConfig):
+            cfg = metadata["config"]
+        elif isinstance(metadata.get("config"), dict):
+            cfg = RagIngestionConfig.model_validate(metadata["config"])
         if cfg is None and self._config is not None:
             cfg = self._config
         if cfg is None:
             cfg = load_config()
 
-        overwrite = bool(envelope.metadata.get("overwrite", self.params.get("overwrite", True)))
-        workers = int(envelope.metadata.get("workers", self.params.get("workers", 0)))
+        overwrite = bool(metadata.get("overwrite", self.params.get("overwrite", True)))
+        workers = int(metadata.get("workers", self.params.get("workers", 0)))
 
         if self._core_cfg is None:
             raise ValueError(
@@ -99,15 +106,20 @@ class TaxonomyTransformer(BaseTransformer):
         taxonomy_path = build_taxonomy_from_clean_text(
             config=cfg, core_cfg=self._core_cfg, force=overwrite, workers=workers
         )
-        envelope.metadata["taxonomy_path"] = taxonomy_path
+        metadata["taxonomy_path"] = taxonomy_path
         # Also include resolved assets paths for downstream stages.
         try:
             paths = get_assets_paths(cfg)
-            envelope.metadata.setdefault("assets_paths", {k: str(v) for k, v in paths.items()})
+            if "assets_paths" not in metadata:
+                metadata["assets_paths"] = {}
+            metadata["assets_paths"].update({k: str(v) for k, v in paths.items()})
         except Exception as e:
             logger.debug("Failed to get assets paths: %s", e)
 
-        return envelope
+        payload["metadata"] = metadata
+        unit.payload = payload
+
+        return unit
 
 
 __all__ = ["build_taxonomy_from_clean_text", "TaxonomyTransformer"]

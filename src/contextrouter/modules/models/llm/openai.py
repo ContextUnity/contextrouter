@@ -11,7 +11,7 @@ import logging
 from typing import AsyncIterator
 
 from contextrouter.core import Config
-from contextrouter.core.tokens import BiscuitToken
+from contextrouter.core.tokens import ContextToken
 
 from ..base import BaseModel
 from ..registry import model_registry
@@ -72,7 +72,7 @@ class OpenAILLM(BaseModel):
         return self._capabilities
 
     async def generate(
-        self, request: ModelRequest, *, token: BiscuitToken | None = None
+        self, request: ModelRequest, *, token: ContextToken | None = None
     ) -> ModelResponse:
         _ = token
         if any(isinstance(p, AudioPart) for p in request.parts):
@@ -106,7 +106,7 @@ class OpenAILLM(BaseModel):
         )
 
     async def stream(
-        self, request: ModelRequest, *, token: BiscuitToken | None = None
+        self, request: ModelRequest, *, token: ContextToken | None = None
     ) -> AsyncIterator[ModelStreamEvent]:
         _ = token
         messages = build_openai_messages(request)

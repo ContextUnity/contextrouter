@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
+from contextcore import ContextUnit
 from pydantic import BaseModel, ConfigDict
-
-from contextrouter.core.bisquit import BisquitEnvelope
 
 
 class A2UIWidget(BaseModel):
@@ -13,7 +12,7 @@ class A2UIWidget(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     widget_type: str
-    data: BisquitEnvelope
+    data: ContextUnit
     token_id: str
 
 

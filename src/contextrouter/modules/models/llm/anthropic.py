@@ -12,7 +12,7 @@ import logging
 from typing import AsyncIterator
 
 from contextrouter.core import Config, set_env_default
-from contextrouter.core.tokens import BiscuitToken
+from contextrouter.core.tokens import ContextToken
 
 from ..base import BaseModel
 from ..registry import model_registry
@@ -140,7 +140,7 @@ class AnthropicLLM(BaseModel):
         self,
         request: ModelRequest,
         *,
-        token: BiscuitToken | None = None,
+        token: ContextToken | None = None,
     ) -> ModelResponse:
         _ = token
         system, user_messages = _build_anthropic_messages(request)
@@ -174,7 +174,7 @@ class AnthropicLLM(BaseModel):
         self,
         request: ModelRequest,
         *,
-        token: BiscuitToken | None = None,
+        token: ContextToken | None = None,
     ) -> AsyncIterator[ModelStreamEvent]:
         _ = token
         system, user_messages = _build_anthropic_messages(request)

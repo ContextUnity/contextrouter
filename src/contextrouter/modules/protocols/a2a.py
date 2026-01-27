@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
+from contextcore import ContextUnit
 from pydantic import BaseModel, ConfigDict
-
-from contextrouter.core.bisquit import BisquitEnvelope
 
 
 class A2AMessage(BaseModel):
@@ -14,7 +13,7 @@ class A2AMessage(BaseModel):
 
     from_agent: str
     to_agent: str
-    payload: BisquitEnvelope
+    payload: ContextUnit
     token_id: str
     delegation_type: str
 

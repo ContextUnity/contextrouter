@@ -16,10 +16,10 @@ import json
 import logging
 from typing import NotRequired, TypedDict
 
+from contextcore import ContextUnit
 from pydantic import BaseModel, ConfigDict, Field
 
 from contextrouter.core import Config
-from contextrouter.core.bisquit import BisquitEnvelope
 from contextrouter.core.registry import register_transformer
 from contextrouter.modules.models import model_registry
 from contextrouter.modules.models.types import ModelRequest, TextPart
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 class Keyphrase(TypedDict):
-    """JSON-serializable keyphrase record stored in envelope.metadata / struct_data."""
+    """JSON-serializable keyphrase record stored in metadata / struct_data."""
 
     text: str
     score: float
@@ -187,34 +187,37 @@ TEXT:
             logger.exception("Keyphrase extraction failed")
             return []
 
-    async def transform(self, envelope: BisquitEnvelope) -> BisquitEnvelope:
-        envelope = self._with_provenance(envelope, self.name)
+    async def transform(self, unit: ContextUnit) -> ContextUnit:
+        payload = unit.payload or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        metadata = payload.get("metadata", {}) if isinstance(payload.get("metadata"), dict) else {}
 
-        content = envelope.content
+        unit = self._with_provenance(unit, self.name)
+
+        content = payload.get("content")
         if isinstance(content, dict):
             text = content.get("content") or content.get("text") or ""
         elif isinstance(content, str):
             text = content
         else:
             logger.warning("keyphrases: unsupported content type %s", type(content))
-            return envelope
+            return unit
 
         if not text or len(text.strip()) < 20:
-            return envelope
+            return unit
 
         if self.mode != "llm":
             logger.warning("keyphrases: unsupported mode=%s; falling back to llm", self.mode)
 
         phrases = await self._extract_with_llm(text)
         if not phrases:
-            return envelope
+            return unit
 
-        metadata = dict(envelope.metadata or {})
         metadata["keyphrases"] = phrases
         metadata["keyphrase_texts"] = [p["text"] for p in phrases]
         metadata["keyphrase_count"] = len(phrases)
         metadata["keyphrase_mode"] = "llm"
-        envelope.metadata = metadata
 
         if "struct_data" in metadata and isinstance(metadata["struct_data"], dict):
             struct_data = dict(metadata["struct_data"])
@@ -222,9 +225,10 @@ TEXT:
             struct_data["keyphrase_texts"] = [p["text"] for p in phrases]
             struct_data["keyphrase_count"] = len(phrases)
             metadata["struct_data"] = struct_data
-            envelope.metadata = metadata
 
-        return envelope
+        payload["metadata"] = metadata
+        unit.payload = payload
+        return unit
 
 
 __all__ = ["Keyphrase", "KeyphraseTransformer"]

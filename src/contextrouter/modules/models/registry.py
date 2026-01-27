@@ -21,7 +21,7 @@ except ImportError:
 
 
 from contextrouter.core import Config, get_core_config
-from contextrouter.core.tokens import BiscuitToken
+from contextrouter.core.tokens import ContextToken
 
 from .base import BaseEmbeddings
 from .types import (
@@ -335,7 +335,7 @@ class FallbackModel(BaseModel):
         self,
         request: ModelRequest,
         *,
-        token: BiscuitToken | None = None,
+        token: ContextToken | None = None,
     ) -> ModelResponse:
         required = request.required_modalities()
         candidates = self._filter_candidates(required)
@@ -349,7 +349,7 @@ class FallbackModel(BaseModel):
         self,
         candidates: list[tuple[str, BaseModel]],
         request: ModelRequest,
-        token: BiscuitToken | None,
+        token: ContextToken | None,
     ) -> ModelResponse:
         """Sequential fallback: try models in order until success."""
         last_error = None
@@ -382,7 +382,7 @@ class FallbackModel(BaseModel):
         self,
         candidates: list[tuple[str, BaseModel]],
         request: ModelRequest,
-        token: BiscuitToken | None,
+        token: ContextToken | None,
     ) -> ModelResponse:
         """Parallel fallback: try all models concurrently, return first success."""
 
@@ -414,7 +414,7 @@ class FallbackModel(BaseModel):
         self,
         request: ModelRequest,
         *,
-        token: BiscuitToken | None = None,
+        token: ContextToken | None = None,
     ) -> AsyncIterator[ModelStreamEvent]:
         required = request.required_modalities()
         candidates = self._filter_candidates(required)

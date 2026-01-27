@@ -14,11 +14,12 @@ from dataclasses import dataclass
 from typing import List
 
 from contextrouter.core import (
-    BiscuitToken,
+    ContextToken,
     TokenBuilder,
     get_core_config,
 )
-from contextrouter.cortex import AgentState, get_graph_service, get_last_user_query
+from contextrouter.cortex.services import get_graph_service
+from contextrouter.cortex.state import AgentState, get_last_user_query
 from contextrouter.modules.retrieval import BaseRetrievalPipeline
 
 from .citations import build_citations
@@ -47,9 +48,9 @@ class RetrievalPipeline:
         self.core_cfg = get_core_config()
         self._base = BaseRetrievalPipeline()
 
-    def _token_from_state(self, state: AgentState) -> BiscuitToken:
+    def _token_from_state(self, state: AgentState) -> ContextToken:
         tok = state.get("access_token")
-        if isinstance(tok, BiscuitToken):
+        if isinstance(tok, ContextToken):
             return tok
 
         if self.core_cfg.security.enabled:
@@ -233,7 +234,7 @@ class RetrievalPipeline:
         return {k: v for k, v in out.items() if v > 0}
 
     def _coerce_doc_from_envelope(self, env: object) -> RetrievedDoc | None:
-        """Convert BisquitEnvelope.content into RetrievedDoc when possible."""
+        """Convert ContextUnit.content into RetrievedDoc when possible."""
         try:
             content = getattr(env, "content", None)
         except Exception:
@@ -254,12 +255,12 @@ class RetrievalPipeline:
         """Get active providers list, preferring cfg.provider if set."""
         if cfg.provider and cfg.provider.strip():
             return [cfg.provider.strip()]
-        return list(cfg.providers) if cfg.providers else ["vertex"]
+        return list(cfg.providers) if cfg.providers else ["brain"]
 
     async def _retrieve_from_providers(
         self,
         retrieval_queries: list[str],
-        token: BiscuitToken,
+        token: ContextToken,
         cfg: RagRetrievalSettings,
     ) -> list[RetrievedDoc]:
         docs: list[RetrievedDoc] = []
@@ -290,7 +291,7 @@ class RetrievalPipeline:
                 if isinstance(res, Exception):
                     logger.error("Provider retrieval failed: %s", res)
                     continue
-                for env in getattr(res, "envelopes", []) or []:
+                for env in getattr(res, "units", []) or []:
                     if d := self._coerce_doc_from_envelope(env):
                         docs.append(d)
             return docs
@@ -314,7 +315,7 @@ class RetrievalPipeline:
             if isinstance(res, Exception):
                 logger.error("Provider retrieval failed: %s", res)
                 continue
-            for env in getattr(res, "envelopes", []) or []:
+            for env in getattr(res, "units", []) or []:
                 if d := self._coerce_doc_from_envelope(env):
                     docs.append(d)
 
@@ -343,7 +344,7 @@ class RetrievalPipeline:
                 if isinstance(res, Exception):
                     logger.error("Provider fallback retrieval failed: %s", res)
                     continue
-                for env in getattr(res, "envelopes", []) or []:
+                for env in getattr(res, "units", []) or []:
                     if d := self._coerce_doc_from_envelope(env):
                         docs.append(d)
         return docs
@@ -474,7 +475,7 @@ class RetrievalPipeline:
         *,
         cfg: RagRetrievalSettings,
         query: str,
-        token: BiscuitToken,
+        token: ContextToken,
         primary_docs: list[RetrievedDoc],
         primary_elapsed_ms: float,
     ) -> None:

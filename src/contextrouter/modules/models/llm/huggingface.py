@@ -22,7 +22,7 @@ import tempfile
 from typing import AsyncIterator
 
 from contextrouter.core import Config
-from contextrouter.core.tokens import BiscuitToken
+from contextrouter.core.tokens import ContextToken
 
 from ..base import BaseModel
 from ..registry import model_registry
@@ -138,7 +138,7 @@ class HuggingFaceLLM(BaseModel):
         self,
         request: ModelRequest,
         *,
-        token: BiscuitToken | None = None,
+        token: ContextToken | None = None,
     ) -> ModelResponse:
         if self._task == "automatic-speech-recognition":
             return await self._generate_asr(request, token=token)
@@ -174,7 +174,7 @@ class HuggingFaceLLM(BaseModel):
         )
 
     async def _generate_text_classification(
-        self, request: ModelRequest, *, token: BiscuitToken | None
+        self, request: ModelRequest, *, token: ContextToken | None
     ) -> ModelResponse:
         _ = token
         prompt = request.to_text_prompt(include_system=True)
@@ -206,7 +206,7 @@ class HuggingFaceLLM(BaseModel):
         )
 
     async def _generate_asr(
-        self, request: ModelRequest, *, token: BiscuitToken | None
+        self, request: ModelRequest, *, token: ContextToken | None
     ) -> ModelResponse:
         _ = token
         audio_parts = [p for p in request.parts if isinstance(p, AudioPart)]
@@ -248,7 +248,7 @@ class HuggingFaceLLM(BaseModel):
         )
 
     async def _generate_vision_task(
-        self, request: ModelRequest, *, token: BiscuitToken | None
+        self, request: ModelRequest, *, token: ContextToken | None
     ) -> ModelResponse:
         _ = token
         image_parts = [p for p in request.parts if isinstance(p, ImagePart)]
@@ -313,7 +313,7 @@ class HuggingFaceLLM(BaseModel):
         self,
         request: ModelRequest,
         *,
-        token: BiscuitToken | None = None,
+        token: ContextToken | None = None,
     ) -> AsyncIterator[ModelStreamEvent]:
         """Basic streaming by yielding the full result at once.
 

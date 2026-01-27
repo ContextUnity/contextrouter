@@ -6,7 +6,7 @@ import logging
 import time
 from typing import Any
 
-from contextrouter.core import BaseTransformer, BisquitEnvelope, Config
+from contextrouter.core import BaseTransformer, Config, ContextUnit
 from contextrouter.modules.ingestion.rag.config import get_assets_paths, load_config
 from contextrouter.modules.ingestion.rag.core import get_all_plugins
 from contextrouter.modules.ingestion.rag.core.utils import parallel_map, resolve_workers
@@ -103,22 +103,29 @@ class ShadowTransformer(BaseTransformer):
         cc = (params or {}).get("core_cfg")
         self._core_cfg = cc if isinstance(cc, Config) else None
 
-    async def transform(self, envelope: BisquitEnvelope) -> BisquitEnvelope:
-        envelope.add_trace(self.name)
+    async def transform(self, unit: ContextUnit) -> ContextUnit:
+        unit.provenance.append(self.name)
+
+        payload = unit.payload or {}
+        if not isinstance(payload, dict):
+            payload = {}
 
         cfg = None
-        if isinstance(envelope.content, RagIngestionConfig):
-            cfg = envelope.content
-        elif isinstance(envelope.content, dict):
-            cfg = RagIngestionConfig.model_validate(envelope.content)
-        elif isinstance(envelope.metadata.get("ingestion_config"), RagIngestionConfig):
-            cfg = envelope.metadata["ingestion_config"]
-        elif isinstance(envelope.metadata.get("ingestion_config"), dict):
-            cfg = RagIngestionConfig.model_validate(envelope.metadata["ingestion_config"])
-        elif isinstance(envelope.metadata.get("config"), RagIngestionConfig):
-            cfg = envelope.metadata["config"]
-        elif isinstance(envelope.metadata.get("config"), dict):
-            cfg = RagIngestionConfig.model_validate(envelope.metadata["config"])
+        content = payload.get("content")
+        metadata = payload.get("metadata", {}) if isinstance(payload.get("metadata"), dict) else {}
+
+        if isinstance(content, RagIngestionConfig):
+            cfg = content
+        elif isinstance(content, dict):
+            cfg = RagIngestionConfig.model_validate(content)
+        elif isinstance(metadata.get("ingestion_config"), RagIngestionConfig):
+            cfg = metadata["ingestion_config"]
+        elif isinstance(metadata.get("ingestion_config"), dict):
+            cfg = RagIngestionConfig.model_validate(metadata["ingestion_config"])
+        elif isinstance(metadata.get("config"), RagIngestionConfig):
+            cfg = metadata["config"]
+        elif isinstance(metadata.get("config"), dict):
+            cfg = RagIngestionConfig.model_validate(metadata["config"])
         if cfg is None and self._config is not None:
             cfg = self._config
         if cfg is None:
@@ -128,13 +135,13 @@ class ShadowTransformer(BaseTransformer):
                 "ShadowTransformer requires core_cfg (Config) via configure(params={'core_cfg': ...})"
             )
 
-        only_types = envelope.metadata.get("only_types")
+        only_types = metadata.get("only_types")
         if not isinstance(only_types, list) or not only_types:
             only_types = ["video", "book", "qa", "web", "knowledge"]
         only_types = [t for t in only_types if isinstance(t, str) and t.strip()]
 
-        overwrite = bool(envelope.metadata.get("overwrite", self.params.get("overwrite", True)))
-        workers = int(envelope.metadata.get("workers", self.params.get("workers", 1)))
+        overwrite = bool(metadata.get("overwrite", self.params.get("overwrite", True)))
+        workers = int(metadata.get("workers", self.params.get("workers", 1)))
 
         out = build_shadow_records(
             config=cfg,
@@ -143,8 +150,10 @@ class ShadowTransformer(BaseTransformer):
             overwrite=overwrite,
             workers=workers,
         )
-        envelope.metadata["shadow_paths"] = out
-        return envelope
+        metadata["shadow_paths"] = out
+        payload["metadata"] = metadata
+        unit.payload = payload
+        return unit
 
 
 __all__ = ["build_shadow_records", "ShadowTransformer"]

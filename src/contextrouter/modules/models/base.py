@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import AsyncIterator
 
-from contextrouter.core.tokens import BiscuitToken
+from contextrouter.core.tokens import ContextToken
 
 from .types import (
     ModelCapabilities,
@@ -38,7 +38,7 @@ class BaseModel(ABC):
         self,
         request: ModelRequest,
         *,
-        token: BiscuitToken | None = None,
+        token: ContextToken | None = None,
     ) -> ModelResponse:
         """Generate a response from the model."""
         raise NotImplementedError
@@ -48,7 +48,7 @@ class BaseModel(ABC):
         self,
         request: ModelRequest,
         *,
-        token: BiscuitToken | None = None,
+        token: ContextToken | None = None,
     ) -> AsyncIterator[ModelStreamEvent]:
         """Stream tokens from the model."""
         raise NotImplementedError
@@ -68,12 +68,12 @@ class BaseEmbeddings(ABC):
     """Vectorization model interface."""
 
     @abstractmethod
-    async def embed_query(self, text: str, *, token: BiscuitToken | None = None) -> list[float]:
+    async def embed_query(self, text: str, *, token: ContextToken | None = None) -> list[float]:
         raise NotImplementedError
 
     @abstractmethod
     async def embed_documents(
-        self, texts: list[str], *, token: BiscuitToken | None = None
+        self, texts: list[str], *, token: ContextToken | None = None
     ) -> list[list[float]]:
         raise NotImplementedError
 

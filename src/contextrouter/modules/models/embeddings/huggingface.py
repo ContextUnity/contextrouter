@@ -11,7 +11,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from contextrouter.core import Config
-from contextrouter.core.tokens import BiscuitToken
+from contextrouter.core.tokens import ContextToken
 
 from ..base import BaseEmbeddings
 from ..registry import model_registry
@@ -32,7 +32,7 @@ class HuggingFaceEmbeddings(BaseEmbeddings):
         self._model = None
         self._model_name = (model_name or "").strip() or "all-mpnet-base-v2"
 
-    async def embed_query(self, text: str, *, token: BiscuitToken | None = None) -> list[float]:
+    async def embed_query(self, text: str, *, token: ContextToken | None = None) -> list[float]:
         _ = token
         if not text:
             return []
@@ -42,7 +42,7 @@ class HuggingFaceEmbeddings(BaseEmbeddings):
         return [float(x) for x in vec.tolist()]
 
     async def embed_documents(
-        self, texts: list[str], *, token: BiscuitToken | None = None
+        self, texts: list[str], *, token: ContextToken | None = None
     ) -> list[list[float]]:
         _ = token
         if not texts:

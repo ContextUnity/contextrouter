@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from .bisquit_mapper import (
-    bisquit_envelope_to_agui_event,
+from .context_unit_mapper import (
+    context_unit_to_agui_event,
 )
 from .events import (
     ToolCallArgs,
@@ -15,7 +15,7 @@ from .mapper import AguiMapper
 
 __all__ = [
     "AguiMapper",
-    "bisquit_envelope_to_agui_event",
+    "context_unit_to_agui_event",
     "ToolCallStart",
     "ToolCallArgs",
     "ToolCallEnd",

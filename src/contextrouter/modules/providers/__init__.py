@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
-from .storage.gcs import GCSProvider
-from .storage.postgres.provider import PostgresProvider
-from .storage.vertex import VertexProvider
+from .storage import (
+    BrainStorageProvider,
+    GCSProvider,
+    PostgresProvider,
+    VertexProvider,
+    VertexSearchProvider,
+)
 
 __all__ = [
+    "BrainStorageProvider",
     "GCSProvider",
     "PostgresProvider",
     "VertexProvider",
+    "VertexSearchProvider",
 ]

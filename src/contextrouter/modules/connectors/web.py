@@ -2,7 +2,7 @@
 
 Per `.cursorrules` ALL web-fetching/searching code belongs under connectors.
 
-- `WebSearchConnector` (key: "web"): Google CSE site-limited search → RetrievedDoc envelopes
+- `WebSearchConnector` (key: "web"): Google CSE site-limited search → RetrievedDoc units
 - `WebScraperConnector` (key: "web_scraper"): stub for full-page scraping
 """
 
@@ -12,9 +12,10 @@ import logging
 import time
 from typing import AsyncIterator
 
+from contextcore import ContextUnit
+
 from contextrouter.core import (
     BaseConnector,
-    BisquitEnvelope,
     get_bool_env,
     get_core_config,
 )
@@ -64,7 +65,7 @@ def _normalize_http_url(link: object, alt: object) -> str | None:
 
 
 class WebSearchConnector(BaseConnector):
-    """Google CSE connector (site-limited) that yields RetrievedDoc envelopes."""
+    """Google CSE connector (site-limited) that yields RetrievedDoc units."""
 
     def __init__(
         self,
@@ -83,7 +84,7 @@ class WebSearchConnector(BaseConnector):
             q.strip() for q in (retrieval_queries or []) if isinstance(q, str) and q.strip()
         ]
 
-    async def connect(self) -> AsyncIterator[BisquitEnvelope]:
+    async def connect(self) -> AsyncIterator[ContextUnit]:
         if not self._query.strip():
             return
         if not self._allowed_domains:
@@ -213,18 +214,19 @@ class WebSearchConnector(BaseConnector):
                 (time.perf_counter() - t0) * 1000,
             )
             for d in docs:
-                env = BisquitEnvelope(
-                    content=d, provenance=[], metadata={"source": "web", "url": d.url}
+                unit = ContextUnit(
+                    payload={"content": d, "url": d.url},
+                    provenance=["connector:web"],
+                    modality="text",
                 )
-                env.add_trace("connector:web")
-                yield env
+                yield unit
 
 
 class WebScraperConnector(BaseConnector):
     def __init__(self, *, url: str) -> None:
         self._url = url
 
-    async def connect(self) -> AsyncIterator[BisquitEnvelope]:
+    async def connect(self) -> AsyncIterator[ContextUnit]:
         raise NotImplementedError(
             "WebScraperConnector is a stub. Implement scraping (e.g. trafilatura)."
         )

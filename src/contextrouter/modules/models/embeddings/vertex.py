@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from contextrouter.core import Config
-from contextrouter.core.tokens import BiscuitToken
+from contextrouter.core.tokens import ContextToken
 
 from ..base import BaseEmbeddings
 from ..registry import model_registry
@@ -18,7 +18,7 @@ class VertexEmbeddings(BaseEmbeddings):
         self._model_name = (model_name or "").strip() or "textembedding-gecko@003"
         self._model = None
 
-    async def embed_query(self, text: str, *, token: BiscuitToken | None = None) -> list[float]:
+    async def embed_query(self, text: str, *, token: ContextToken | None = None) -> list[float]:
         _ = token
         if not text:
             return []
@@ -28,7 +28,7 @@ class VertexEmbeddings(BaseEmbeddings):
         return [float(x) for x in vec]
 
     async def embed_documents(
-        self, texts: list[str], *, token: BiscuitToken | None = None
+        self, texts: list[str], *, token: ContextToken | None = None
     ) -> list[list[float]]:
         _ = token
         if not texts:

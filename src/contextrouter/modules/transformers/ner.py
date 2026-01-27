@@ -15,10 +15,10 @@ import json
 import logging
 from typing import NotRequired, TypedDict
 
+from contextcore import ContextUnit
 from pydantic import BaseModel, ConfigDict
 
 from contextrouter.core import Config
-from contextrouter.core.bisquit import BisquitEnvelope
 from contextrouter.core.registry import register_transformer
 from contextrouter.modules.models import model_registry
 from contextrouter.modules.models.types import ModelRequest, TextPart
@@ -71,7 +71,7 @@ _ENTITY_TYPE_ALIASES: dict[str, str] = {
 
 
 class NEREntity(TypedDict):
-    """JSON-serializable NER entity record stored in envelope.metadata / struct_data."""
+    """JSON-serializable NER entity record stored in metadata / struct_data."""
 
     text: str
     entity_type: str
@@ -338,23 +338,28 @@ Return only valid JSON array, no markdown formatting."""
             logger.error(f"LLM NER extraction failed: {e}")
             return []
 
-    async def transform(self, envelope: BisquitEnvelope) -> BisquitEnvelope:
-        """Extract named entities from envelope content and enrich metadata."""
-        envelope = self._with_provenance(envelope, self.name)
+    async def transform(self, unit: ContextUnit) -> ContextUnit:
+        """Extract named entities from unit content and enrich metadata."""
+        payload = unit.payload or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        metadata = payload.get("metadata", {}) if isinstance(payload.get("metadata"), dict) else {}
 
-        # Extract text from envelope
-        content = envelope.content
+        unit = self._with_provenance(unit, self.name)
+
+        # Extract text from unit
+        content = payload.get("content")
         if isinstance(content, dict):
             text = content.get("content") or content.get("text") or ""
         elif isinstance(content, str):
             text = content
         else:
             logger.warning(f"NER: unsupported content type {type(content)}")
-            return envelope
+            return unit
 
         if not text or len(text.strip()) < 10:
             logger.debug("NER: skipping short or empty content")
-            return envelope
+            return unit
 
         # Extract entities based on mode
         entities: list[NEREntity] = []
@@ -367,7 +372,7 @@ Return only valid JSON array, no markdown formatting."""
 
         if not entities:
             logger.debug("NER: no entities extracted")
-            return envelope
+            return unit
 
         # Group entities by type for easier access
         entities_by_type: dict[str, list[NEREntity]] = {}
@@ -378,7 +383,6 @@ Return only valid JSON array, no markdown formatting."""
             entities_by_type[entity_type].append(ent)
 
         # Store in metadata
-        metadata = dict(envelope.metadata or {})
         metadata["ner_entities"] = entities
         metadata["ner_entities_by_type"] = entities_by_type
         metadata["ner_entity_count"] = len(entities)
@@ -389,15 +393,15 @@ Return only valid JSON array, no markdown formatting."""
             struct_data = dict(metadata["struct_data"])
             struct_data["ner_entities"] = entities
             metadata["struct_data"] = struct_data
-            envelope.struct_data = struct_data
 
-        envelope.metadata = metadata
+        payload["metadata"] = metadata
+        unit.payload = payload
 
         logger.debug(
             f"NER: extracted {len(entities)} entities ({len(entities_by_type)} types) using {self.mode}"
         )
 
-        return envelope
+        return unit
 
 
 __all__ = ["NEREntity", "NERTransformer", "STANDARD_ENTITY_TYPES"]

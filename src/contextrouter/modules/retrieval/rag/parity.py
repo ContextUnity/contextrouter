@@ -9,7 +9,7 @@ import random
 import time
 from dataclasses import dataclass
 
-from contextrouter.core import BiscuitToken
+from contextrouter.core import ContextToken
 from contextrouter.modules.retrieval import BaseRetrievalPipeline
 
 from .models import RetrievedDoc
@@ -72,7 +72,7 @@ class DualReadHarness:
         self,
         *,
         query: str,
-        token: BiscuitToken,
+        token: ContextToken,
         limit: int,
     ) -> tuple[list[RetrievedDoc], float]:
         t0 = time.perf_counter()
@@ -84,7 +84,7 @@ class DualReadHarness:
             providers=[self._cfg.shadow_backend] if self._cfg.shadow_backend else None,
         )
         docs: list[RetrievedDoc] = []
-        for env in getattr(res, "envelopes", []) or []:
+        for env in getattr(res, "units", []) or []:
             content = getattr(env, "content", None)
             if isinstance(content, RetrievedDoc):
                 docs.append(content)
@@ -100,7 +100,7 @@ class DualReadHarness:
         self,
         *,
         query: str,
-        token: BiscuitToken,
+        token: ContextToken,
         primary_docs: list[RetrievedDoc],
         primary_ms: float,
         limit: int,

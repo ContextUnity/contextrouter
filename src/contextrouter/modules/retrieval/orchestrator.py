@@ -10,10 +10,11 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
+from contextcore import ContextUnit
+
 from contextrouter.core import (
     AccessManager,
-    BiscuitToken,
-    BisquitEnvelope,
+    ContextToken,
     IRead,
 )
 from contextrouter.core.registry import ComponentFactory
@@ -22,7 +23,7 @@ from contextrouter.core.types import QueryLike, normalize_query
 
 @dataclass(frozen=True)
 class RetrievalResult:
-    envelopes: list[BisquitEnvelope]
+    units: list[ContextUnit]
 
 
 class RetrievalOrchestrator:
@@ -37,7 +38,7 @@ class RetrievalOrchestrator:
         *,
         limit: int = 5,
         filters: dict[str, Any] | None = None,
-        token: BiscuitToken,
+        token: ContextToken,
         providers: list[str] | None = None,
     ) -> RetrievalResult:
         self._access.verify_read(token)
@@ -68,10 +69,10 @@ class RetrievalOrchestrator:
                 )
 
         if not calls:
-            return RetrievalResult(envelopes=[])
+            return RetrievalResult(units=[])
 
         results = await asyncio.gather(*(coro for _, coro in calls), return_exceptions=True)
-        merged: list[BisquitEnvelope] = []
+        merged: list[ContextUnit] = []
         for (key, _), r in zip(calls, results):
             if isinstance(r, Exception):
                 # Do not silently swallow provider failures; they explain "0 docs" cases.
@@ -87,8 +88,8 @@ class RetrievalOrchestrator:
                 logging.getLogger(__name__).warning("Provider '%s' failed: %s", key, r)
                 continue
             if isinstance(r, list):
-                merged.extend([x for x in r if isinstance(x, BisquitEnvelope)])
-        return RetrievalResult(envelopes=merged)
+                merged.extend([x for x in r if isinstance(x, ContextUnit)])
+        return RetrievalResult(units=merged)
 
 
 __all__ = ["RetrievalOrchestrator", "RetrievalResult"]

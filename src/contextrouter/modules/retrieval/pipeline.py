@@ -1,6 +1,6 @@
 """Generic retrieval pipeline (non-RAG).
 
-This is a capability-agnostic pipeline that returns BisquitEnvelopes from providers.
+This is a capability-agnostic pipeline that returns ContextUnit from providers.
 It does NOT know about citations, reranking, or RAG-type limits.
 
 Specialized pipelines (e.g. RAG) should compose this and add their own steps.
@@ -11,7 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from contextrouter.core import BiscuitToken, BisquitEnvelope
+from contextcore import ContextUnit
+
+from contextrouter.core import ContextToken
 from contextrouter.core.types import QueryLike
 
 from .orchestrator import RetrievalOrchestrator
@@ -19,7 +21,7 @@ from .orchestrator import RetrievalOrchestrator
 
 @dataclass(frozen=True)
 class PipelineResult:
-    envelopes: list[BisquitEnvelope]
+    units: list[ContextUnit]
 
 
 class BaseRetrievalPipeline:
@@ -32,7 +34,7 @@ class BaseRetrievalPipeline:
         self,
         query: QueryLike,
         *,
-        token: BiscuitToken,
+        token: ContextToken,
         limit: int = 5,
         filters: dict[str, Any] | None = None,
         providers: list[str] | None = None,
@@ -44,7 +46,7 @@ class BaseRetrievalPipeline:
             token=token,
             providers=providers,
         )
-        return PipelineResult(envelopes=res.envelopes)
+        return PipelineResult(units=res.units)
 
 
 __all__ = ["BaseRetrievalPipeline", "PipelineResult"]

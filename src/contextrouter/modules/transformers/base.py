@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from abc import abstractmethod
 
-from contextrouter.core.bisquit import BisquitEnvelope
+from contextcore import ContextUnit
+
 from contextrouter.core.interfaces import BaseTransformer
 
 
@@ -13,13 +14,14 @@ class Transformer(BaseTransformer):
 
     name: str = "transformer"
 
-    def _with_provenance(self, envelope: BisquitEnvelope, step: str) -> BisquitEnvelope:
-        # Single source-of-truth: BisquitEnvelope.add_trace appends to provenance.
-        envelope.add_trace(step)
-        return envelope
+    def _with_provenance(self, unit: ContextUnit, step: str) -> ContextUnit:
+        # Single source-of-truth: append to provenance list.
+        if step.strip():
+            unit.provenance.append(step.strip())
+        return unit
 
     @abstractmethod
-    async def transform(self, envelope: BisquitEnvelope) -> BisquitEnvelope: ...
+    async def transform(self, envelope: ContextUnit) -> ContextUnit: ...
 
 
 __all__ = ["Transformer"]

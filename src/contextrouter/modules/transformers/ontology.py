@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from contextrouter.core import BaseTransformer, BisquitEnvelope
+from contextrouter.core import BaseTransformer, ContextUnit
 from contextrouter.modules.ingestion.rag.config import get_assets_paths, load_config
 from contextrouter.modules.ingestion.rag.graph.builder import ALLOWED_RELATION_LABELS
 from contextrouter.modules.ingestion.rag.settings import RagIngestionConfig
@@ -98,31 +98,38 @@ class OntologyTransformer(BaseTransformer):
         else:
             self._config = None
 
-    async def transform(self, envelope: BisquitEnvelope) -> BisquitEnvelope:
-        envelope.add_trace(self.name)
+    async def transform(self, unit: ContextUnit) -> ContextUnit:
+        unit.provenance.append(self.name)
+
+        payload = unit.payload or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        metadata = payload.get("metadata", {}) if isinstance(payload.get("metadata"), dict) else {}
 
         cfg = None
-        if isinstance(envelope.content, RagIngestionConfig):
-            cfg = envelope.content
-        elif isinstance(envelope.content, dict):
-            cfg = RagIngestionConfig.model_validate(envelope.content)
-        elif isinstance(envelope.metadata.get("ingestion_config"), RagIngestionConfig):
-            cfg = envelope.metadata["ingestion_config"]
-        elif isinstance(envelope.metadata.get("ingestion_config"), dict):
-            cfg = RagIngestionConfig.model_validate(envelope.metadata["ingestion_config"])
-        elif isinstance(envelope.metadata.get("config"), RagIngestionConfig):
-            cfg = envelope.metadata["config"]
-        elif isinstance(envelope.metadata.get("config"), dict):
-            cfg = RagIngestionConfig.model_validate(envelope.metadata["config"])
+        if isinstance(payload.get("content"), RagIngestionConfig):
+            cfg = payload.get("content")
+        elif isinstance(payload.get("content"), dict):
+            cfg = RagIngestionConfig.model_validate(payload.get("content"))
+        elif isinstance(metadata.get("ingestion_config"), RagIngestionConfig):
+            cfg = metadata["ingestion_config"]
+        elif isinstance(metadata.get("ingestion_config"), dict):
+            cfg = RagIngestionConfig.model_validate(metadata["ingestion_config"])
+        elif isinstance(metadata.get("config"), RagIngestionConfig):
+            cfg = metadata["config"]
+        elif isinstance(metadata.get("config"), dict):
+            cfg = RagIngestionConfig.model_validate(metadata["config"])
         if cfg is None and self._config is not None:
             cfg = self._config
         if cfg is None:
             cfg = load_config()
 
-        overwrite = bool(envelope.metadata.get("overwrite", self.params.get("overwrite", True)))
+        overwrite = bool(metadata.get("overwrite", self.params.get("overwrite", True)))
         out = build_ontology_from_taxonomy(config=cfg, overwrite=overwrite)
-        envelope.metadata["ontology_path"] = str(out)
-        return envelope
+        metadata["ontology_path"] = str(out)
+        payload["metadata"] = metadata
+        unit.payload = payload
+        return unit
 
 
 __all__ = ["build_ontology_from_taxonomy", "OntologyTransformer"]

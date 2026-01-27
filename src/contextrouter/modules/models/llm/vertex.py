@@ -8,7 +8,7 @@ from typing import AsyncIterator
 from langchain_core.messages import SystemMessage
 
 from contextrouter.core import Config
-from contextrouter.core.tokens import BiscuitToken
+from contextrouter.core.tokens import ContextToken
 
 from ..base import BaseModel
 from ..registry import model_registry
@@ -54,28 +54,35 @@ class VertexLLM(BaseModel):
         self._cfg = config
         self._credentials = None
 
-        # Initialize Google ADC credentials once per instance.
+        # Initialize Google credentials.
         try:
             import google.auth
             import google.auth.transport.requests
+            from google.oauth2 import service_account
         except Exception as e:  # pragma: no cover
             logger.warning("VertexLLM: google-auth not available: %s", e)
             self._credentials = None
         else:
             try:
-                self._credentials, _project = google.auth.default(
-                    scopes=["https://www.googleapis.com/auth/cloud-platform"]
-                )
-                if hasattr(self._credentials, "refresh"):
+                # 1. Try explicit path from config
+                if config.vertex.credentials_path:
+                    logger.debug(
+                        "VertexLLM: Loading credentials from %s", config.vertex.credentials_path
+                    )
+                    self._credentials = service_account.Credentials.from_service_account_file(
+                        config.vertex.credentials_path,
+                        scopes=["https://www.googleapis.com/auth/cloud-platform"],
+                    )
+                else:
+                    # 2. Fallback to ADC (Application Default Credentials)
+                    self._credentials, _project = google.auth.default(
+                        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                    )
+
+                if self._credentials and hasattr(self._credentials, "refresh"):
                     self._credentials.refresh(google.auth.transport.requests.Request())
-            except (
-                google.auth.exceptions.DefaultCredentialsError,
-                Exception,  # Catch any network/auth related errors during credential refresh
-            ) as e:  # pragma: no cover
-                logger.warning("VertexLLM: Failed to initialize credentials: %s", e)
-                self._credentials = None
             except Exception as e:  # pragma: no cover
-                logger.warning("VertexLLM: Unexpected credential error: %s", e)
+                logger.warning("VertexLLM: Failed to initialize credentials: %s", e)
                 self._credentials = None
 
         chosen_model = (model_name or "").strip() or "gemini-2.5-flash"
@@ -149,7 +156,7 @@ class VertexLLM(BaseModel):
         self,
         request: ModelRequest,
         *,
-        token: BiscuitToken | None = None,
+        token: ContextToken | None = None,
     ) -> ModelResponse:
         _ = token
         if not request.parts:
@@ -172,7 +179,7 @@ class VertexLLM(BaseModel):
         self,
         request: ModelRequest,
         *,
-        token: BiscuitToken | None = None,
+        token: ContextToken | None = None,
     ) -> AsyncIterator[ModelStreamEvent]:
         _ = token
         if not request.parts:

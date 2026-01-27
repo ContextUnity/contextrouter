@@ -6,7 +6,8 @@ summary field in `envelope.metadata`.
 
 from __future__ import annotations
 
-from contextrouter.core.bisquit import BisquitEnvelope
+from contextcore import ContextUnit
+
 from contextrouter.core.registry import register_transformer
 
 from .base import Transformer
@@ -16,7 +17,7 @@ from .base import Transformer
 class SummarizationTransformer(Transformer):
     name = "summarizer"
 
-    async def transform(self, envelope: BisquitEnvelope) -> BisquitEnvelope:
+    async def transform(self, envelope: ContextUnit) -> ContextUnit:
         # Placeholder: do not invent summarization logic here.
         return self._with_provenance(envelope, self.name)
 

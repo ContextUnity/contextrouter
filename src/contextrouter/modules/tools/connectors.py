@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from contextrouter.core.bisquit import BisquitEnvelope
+from contextcore import ContextUnit
+
 from contextrouter.core.interfaces import BaseConnector
 
 
@@ -18,8 +19,8 @@ class ConnectorTool:
     name: str
     connector: BaseConnector
 
-    async def run(self) -> list[BisquitEnvelope]:
-        out: list[BisquitEnvelope] = []
+    async def run(self) -> list[ContextUnit]:
+        out: list[ContextUnit] = []
         async for env in self.connector.connect():
             out.append(env)
         return out
