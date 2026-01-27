@@ -7,7 +7,7 @@ from typing import Callable, cast
 
 from contextrouter.core import get_core_config
 from contextrouter.core.registry import graph_registry
-from contextrouter.cortex.graphs import rag_ingestion, rag_retrieval
+from contextrouter.cortex.graphs import rag_retrieval
 
 _compiled_graph: object | None = None
 
@@ -41,7 +41,6 @@ def build_graph():
     # Fallback to built-in graphs
     builtin_graphs: dict[str, Callable[[], object]] = {
         "rag_retrieval": rag_retrieval.build_graph,
-        "rag_ingestion": rag_ingestion.build_graph,
     }
 
     if key not in builtin_graphs:

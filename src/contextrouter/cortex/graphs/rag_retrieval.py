@@ -104,28 +104,39 @@ def build_graph() -> StateGraph:
             generate_search_suggestions,
             retrieve_documents,
         )
+        from contextrouter.cortex.steps.rag_retrieval.memory import fetch_memory
+        from contextrouter.cortex.steps.rag_retrieval.reflect import reflect_interaction
 
         workflow.add_node("extract_query", extract_user_query)
+        workflow.add_node("fetch_memory", fetch_memory)
         workflow.add_node("detect_intent", detect_intent)
         workflow.add_node("retrieve", retrieve_documents)
         workflow.add_node("suggest", generate_search_suggestions)
         workflow.add_node("generate", generate_response)
+        workflow.add_node("reflect", reflect_interaction)
     else:
         # Agent-mode: assemble graph dynamically from registry (class-based nodes).
         extract_cls = agent_registry.get("extract_query")
+        # Memory fetch might not be in registry yet, using direct import for now
+        from contextrouter.cortex.steps.rag_retrieval.memory import fetch_memory
+        from contextrouter.cortex.steps.rag_retrieval.reflect import reflect_interaction
+
         intent_cls = agent_registry.get("detect_intent")
         retrieve_cls = agent_registry.get("retrieve")
         suggest_cls = agent_registry.get("suggest")
         generate_cls = agent_registry.get("generate")
 
         workflow.add_node("extract_query", extract_cls(core_registry_module))
+        workflow.add_node("fetch_memory", fetch_memory)
         workflow.add_node("detect_intent", intent_cls(core_registry_module))
         workflow.add_node("retrieve", retrieve_cls(core_registry_module))
         workflow.add_node("suggest", suggest_cls(core_registry_module))
         workflow.add_node("generate", generate_cls(core_registry_module))
+        workflow.add_node("reflect", reflect_interaction)
 
     workflow.add_edge(START, "extract_query")
-    workflow.add_edge("extract_query", "detect_intent")
+    workflow.add_edge("extract_query", "fetch_memory")
+    workflow.add_edge("fetch_memory", "detect_intent")
 
     workflow.add_conditional_edges(
         "detect_intent",
@@ -140,11 +151,12 @@ def build_graph() -> StateGraph:
     workflow.add_edge("retrieve", "suggest")
     workflow.add_edge("retrieve", "generate")
 
-    # Suggest goes to END (runs in parallel with generate after retrieve)
-    workflow.add_edge("suggest", END)
+    # Both parallel branches lead to reflection before finishing
+    workflow.add_edge("suggest", "reflect")
+    workflow.add_edge("generate", "reflect")
 
-    # Generate converges to END
-    workflow.add_edge("generate", END)
+    # Reflection is the final step
+    workflow.add_edge("reflect", END)
 
     return workflow
 

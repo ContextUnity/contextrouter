@@ -16,9 +16,6 @@ __all__ = [
     "invoke_agent",
     "invoke_agent_sync",
     "stream_agent",
-    # Ingestion runner
-    "invoke_ingestion",
-    "stream_ingestion",
 ]
 
 
@@ -28,9 +25,6 @@ _EXPORTS: dict[str, str] = {
     "invoke_agent": "contextrouter.cortex.runners.chat.invoke_agent",
     "invoke_agent_sync": "contextrouter.cortex.runners.chat.invoke_agent_sync",
     "stream_agent": "contextrouter.cortex.runners.chat.stream_agent",
-    # Ingestion
-    "invoke_ingestion": "contextrouter.cortex.runners.ingestion.invoke_ingestion",
-    "stream_ingestion": "contextrouter.cortex.runners.ingestion.stream_ingestion",
 }
 
 

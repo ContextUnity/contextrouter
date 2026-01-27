@@ -21,11 +21,22 @@ import json
 import logging
 import threading
 from pathlib import Path
+from typing import Any
 
+import joblib
 from psycopg_pool import ConnectionPool
 
 from contextrouter.core import get_core_config, get_env
-from contextrouter.modules.ingestion.rag.graph.serialization import load_graph_secure
+
+try:
+    from contextbrain.ingestion.rag.graph.serialization import load_graph_secure
+except ImportError:
+    # Fallback if contextbrain is not available
+
+    def load_graph_secure(file_path: Path, hash_file_path: Path | None = None) -> Any:
+        """Fallback implementation if contextbrain is not available."""
+        return joblib.load(file_path)
+
 
 logger = logging.getLogger(__name__)
 
@@ -476,7 +487,7 @@ def get_graph_service(
         # Determine default paths if not provided
         if graph_path is None or taxonomy_path is None or ontology_path is None:
             try:
-                from contextrouter.modules.ingestion.rag import (
+                from contextbrain.ingestion.rag import (
                     get_assets_paths,
                     load_config,
                 )
@@ -490,7 +501,9 @@ def get_graph_service(
                 if ontology_path is None:
                     ontology_path = paths.get("ontology")
             except ImportError:
-                logger.warning("Could not load config for default paths")
+                logger.warning(
+                    "Could not load config for default paths (contextbrain not available)"
+                )
 
         # Back-compat: some repos store graph as knowledge_graph.gpickle
         if graph_path is not None and not graph_path.exists():

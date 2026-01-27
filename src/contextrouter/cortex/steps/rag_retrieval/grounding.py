@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import logging
 
+from contextbrain.storage.vertex_grounding import generate_with_grounding
 from langchain_core.messages import AIMessage
 
 from contextrouter.cortex import AgentState
 from contextrouter.cortex.models import Citation
 from contextrouter.cortex.prompting import RAG_SYSTEM_PROMPT
 from contextrouter.cortex.services import get_graph_service
-from contextrouter.modules.providers.storage.vertex_grounding import generate_with_grounding
 
 logger = logging.getLogger(__name__)
 

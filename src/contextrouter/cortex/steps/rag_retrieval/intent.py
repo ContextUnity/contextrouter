@@ -10,7 +10,8 @@ import logging
 import re
 import time
 
-from contextrouter.cortex import AgentState, get_graph_service, get_last_user_query
+from contextrouter.cortex.services import get_graph_service
+from contextrouter.cortex.state import AgentState, get_last_user_query
 from contextrouter.modules.observability import retrieval_span
 
 from ...nodes.utils import pipeline_log
