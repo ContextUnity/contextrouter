@@ -15,7 +15,8 @@ import importlib
 import types
 
 # Note: registry is imported dynamically via __getattr__ to avoid circular imports
-from contextrouter.core.bisquit import BisquitEnvelope
+from contextcore import ContextUnit
+
 from contextrouter.core.config import (
     Config,
     FlowConfig,
@@ -35,12 +36,12 @@ from contextrouter.core.interfaces import (
     IWrite,
 )
 from contextrouter.core.registry import agent_registry, graph_registry
-from contextrouter.core.tokens import AccessManager, BiscuitToken, TokenBuilder
+from contextrouter.core.tokens import AccessManager, ContextToken, TokenBuilder
 from contextrouter.core.types import UserCtx
 
 __all__ = [
     # Kernel
-    "BisquitEnvelope",
+    "ContextUnit",
     "Config",
     "FlowConfig",
     "get_core_config",
@@ -62,7 +63,7 @@ __all__ = [
     "registry",  # Access via contextrouter.core.registry
     # Security
     "AccessManager",
-    "BiscuitToken",
+    "ContextToken",
     "TokenBuilder",
     # Types
     "UserCtx",

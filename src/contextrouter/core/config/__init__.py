@@ -6,9 +6,9 @@ from .base import (
     get_bool_env,
     get_env,
 )
-from .ingestion import (
-    RAGConfig,
-)
+
+# RAGConfig moved - check if still needed for retrieval
+# from .ingestion import RAGConfig
 from .main import (
     Config,
     ConfigPaths,
@@ -17,6 +17,7 @@ from .main import (
     set_core_config,
 )
 from .models import (
+    GardenerConfig,
     LLMConfig,
     ModelsConfig,
     RouterConfig,
@@ -57,6 +58,7 @@ __all__ = [
     "ModelsConfig",
     "LLMConfig",
     "RouterConfig",
+    "GardenerConfig",
     # Provider configs
     "VertexConfig",
     "OpenAIConfig",
@@ -67,8 +69,8 @@ __all__ = [
     "LangfuseConfig",
     "PluginsConfig",
     "PostgresConfig",
-    # Ingestion configs
-    "RAGConfig",
+    # Ingestion configs removed - moved to contextbrain
+    # "RAGConfig",
     # Security configs
     "SecurityConfig",
     "SecurityPoliciesConfig",

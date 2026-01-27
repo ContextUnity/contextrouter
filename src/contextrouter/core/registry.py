@@ -63,15 +63,7 @@ class ComponentFactory:
 
         # Fallback to built-in providers
         providers = {
-            "vertex": (
-                "contextrouter.modules.providers.storage.vertex",
-                "VertexProvider",
-            ),
-            "postgres": (
-                "contextrouter.modules.providers.storage.postgres.provider",
-                "PostgresProvider",
-            ),
-            "gcs": ("contextrouter.modules.providers.storage.gcs", "GCSProvider"),
+            "brain": ("contextrouter.modules.providers.storage.brain", "BrainProvider"),
         }
 
         if name not in providers:

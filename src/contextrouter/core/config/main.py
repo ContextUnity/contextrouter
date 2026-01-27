@@ -9,11 +9,14 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
 
 from .base import get_bool_env, get_env, set_env_default
-from .ingestion import RAGConfig
-from .models import LLMConfig, ModelsConfig, RouterConfig
+
+# RAGConfig removed - ingestion moved to contextbrain
+# from .ingestion import RAGConfig
+from .models import GardenerConfig, LLMConfig, ModelsConfig, RouterConfig
 from .paths import ConfigPaths
 from .providers import (
     AnthropicConfig,
+    BrainConfig,
     GoogleCSEConfig,
     GroqConfig,
     HuggingFaceHubConfig,
@@ -23,6 +26,7 @@ from .providers import (
     OpenRouterConfig,
     PluginsConfig,
     PostgresConfig,
+    RedisConfig,
     RunPodConfig,
     VertexConfig,
 )
@@ -78,10 +82,12 @@ class Config(BaseModel):
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)
-    rag: RAGConfig = Field(default_factory=RAGConfig)
+    gardener: GardenerConfig = Field(default_factory=GardenerConfig)  # Commerce enrichment
+    # rag and ingestion removed - moved to contextbrain
+    # rag: RAGConfig = Field(default_factory=RAGConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
-    ingestion: RAGConfig = Field(default_factory=RAGConfig)
+    # ingestion: RAGConfig = Field(default_factory=RAGConfig)
 
     # Provider configurations
     vertex: VertexConfig = Field(default_factory=VertexConfig)
@@ -95,6 +101,8 @@ class Config(BaseModel):
     local: LocalOpenAIConfig = Field(default_factory=LocalOpenAIConfig)
     google_cse: GoogleCSEConfig = Field(default_factory=GoogleCSEConfig)
     langfuse: LangfuseConfig = Field(default_factory=LangfuseConfig)
+    redis: RedisConfig = Field(default_factory=RedisConfig)
+    brain: BrainConfig = Field(default_factory=BrainConfig)
 
     # Internal state
     paths_cache: ConfigPaths | None = None
@@ -211,7 +219,9 @@ class Config(BaseModel):
         ):
             self.vertex.data_store_location = v
         if credentials_path := (
-            get_env("VERTEX_CREDENTIALS_PATH") or get_env("CONTEXTROUTER_VERTEX_CREDENTIALS_PATH")
+            get_env("VERTEX_CREDENTIALS_PATH")
+            or get_env("CONTEXTROUTER_VERTEX_CREDENTIALS_PATH")
+            or get_env("GOOGLE_APPLICATION_CREDENTIALS")
         ):
             self.vertex.credentials_path = credentials_path
 
@@ -235,6 +245,12 @@ class Config(BaseModel):
                 self.postgres.vector_dim = max(1, int(v))
             except ValueError:
                 pass
+
+        # Brain configuration
+        if v := get_env("BRAIN_MODE"):
+            self.brain.mode = v.lower()
+        if v := get_env("BRAIN_GRPC_ENDPOINT"):
+            self.brain.grpc_endpoint = v
 
         # OpenAI configuration
         if openai_key := get_env("OPENAI_API_KEY"):
@@ -301,6 +317,22 @@ class Config(BaseModel):
             self.security.enabled = security_enabled
         if private_key_path := get_env("CONTEXTROUTER_PRIVATE_KEY_PATH"):
             self.security.private_key_path = private_key_path
+
+        # Redis configuration
+        if v := get_env("REDIS_HOST"):
+            self.redis.host = v
+        if v := get_env("REDIS_PORT"):
+            try:
+                self.redis.port = int(v)
+            except ValueError:
+                pass
+        if v := get_env("REDIS_DB"):
+            try:
+                self.redis.db = int(v)
+            except ValueError:
+                pass
+        if v := get_env("REDIS_PASSWORD"):
+            self.redis.password = v
 
         # Debug/Logging
         if debug_val := get_bool_env("CONTEXTROUTER_DEBUG"):

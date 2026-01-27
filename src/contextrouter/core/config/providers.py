@@ -111,8 +111,28 @@ class LangfuseConfig(BaseModel):
     service_name: str = "contextrouter"
 
 
+class RedisConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    host: str = "localhost"
+    port: int = 6379
+    db: int = 0
+    password: str | None = None
+
+
 class PluginsConfig(BaseModel):
     """User plugin directories to scan eagerly (explicit opt-in)."""
 
     model_config = ConfigDict(extra="ignore")
     paths: list[str] = Field(default_factory=list)
+
+
+class BrainConfig(BaseModel):
+    """Configuration for ContextBrain delegation."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    # "local" (direct library import) or "grpc" (network call)
+    mode: str = "local"
+    # gRPC endpoint for mode="grpc"
+    grpc_endpoint: str = "localhost:50051"

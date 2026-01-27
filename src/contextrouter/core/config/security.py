@@ -26,5 +26,5 @@ class SecurityConfig(BaseModel):
     token_ttl_seconds: int = 3600  # 1 hour
     token_issuer: str = "contextrouter"
 
-    # Biscuit token settings
+    # ContextUnit protocol token settings
     private_key_path: str = ""  # Path to private key for token signing

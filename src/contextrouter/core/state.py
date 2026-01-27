@@ -36,7 +36,7 @@ class _BaseState(BaseModel):
     # Vendor-agnostic scratchpad for agent-specific fields.
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    # Optional internal auth context (Biscuit token or compatible object).
+    # Optional internal auth context (ContextToken or compatible object).
     access_token: Any | None = None
 
 
@@ -87,6 +87,7 @@ class AgentState(InputState):
     taxonomy_categories: list[str] = Field(default_factory=list)
     taxonomy_concepts: list[str] = Field(default_factory=list)
     graph_facts: list[str] = Field(default_factory=list)
+    memory_context: str = ""
 
 
 class OutputState(_BaseState):

@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import partial
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RagConfig(BaseModel):
@@ -65,29 +65,6 @@ class RagModelsConfig(_ModelsGroup):
     )
 
 
-class IngestionModelsConfig(_ModelsGroup):
-    """Per-ingestion-stage model configuration (canonical).
-
-    Keep ingestion model choices in core config so ingestion TOML stays about ingestion behavior
-    (paths/workers/filters), not model selection.
-    """
-
-    taxonomy: ModelSelector = Field(default_factory=_selector_factory("vertex/gemini-2.5-flash"))
-    preprocess: ModelSelector = Field(
-        default_factory=_selector_factory("vertex/gemini-2.5-flash-lite")
-    )
-    graph: ModelSelector = Field(default_factory=_selector_factory("vertex/gemini-2.5-pro"))
-    persona: ModelSelector = Field(default_factory=_selector_factory("vertex/gemini-2.5-flash"))
-    json_model: ModelSelector = Field(default_factory=_selector_factory("vertex/gemini-2.5-flash"))
-
-    @field_validator("json_model")
-    @classmethod
-    def _require_json_model(cls, v: ModelSelector) -> ModelSelector:
-        if not isinstance(v, ModelSelector) or not v.model.strip():
-            raise ValueError("models.ingestion.json_model.model must be set")
-        return v
-
-
 class ModelsConfig(BaseModel):
     # Accept both `default_llm` and canonical `default` from TOML/env.
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
@@ -97,7 +74,6 @@ class ModelsConfig(BaseModel):
 
     # Canonical per-component configuration:
     rag: RagModelsConfig = Field(default_factory=RagModelsConfig)
-    ingestion: IngestionModelsConfig = Field(default_factory=IngestionModelsConfig)
 
 
 class LLMConfig(BaseModel):
@@ -127,3 +103,28 @@ class RouterConfig(BaseModel):
     # - "agent": class-based nodes registered in `agent_registry` (default)
     # - "direct": function-based nodes (simple flows, no agent instantiation)
     mode: Literal["agent", "direct"] = "agent"
+
+
+class GardenerConfig(BaseModel):
+    """Configuration for Gardener enrichment agent.
+
+    Gardener processes DealerProduct enrichment:
+    - taxonomy classification
+    - NER extraction (product_type, brand, model)
+    - Knowledge Graph updates
+
+    Note: Paths to prompts/ontology are commerce-specific.
+    They should be passed from Worker config, not stored here.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    # Processing
+    batch_size: int = 50
+    poll_interval_sec: int = 900  # 15 min default
+
+    # LLM settings
+    llm_model: str = "vertex/gemini-2.5-flash-lite"
+
+    # Tenant - MUST be set via env/config
+    tenant_id: str = ""

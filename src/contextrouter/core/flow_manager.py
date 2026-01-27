@@ -14,7 +14,7 @@ from typing import Any
 from contextrouter.core.config import Config, FlowConfig, get_core_config
 from contextrouter.core.interfaces import BaseConnector, BaseProvider, BaseTransformer
 from contextrouter.core.registry import ComponentFactory, Registry
-from contextrouter.core.tokens import AccessManager, BiscuitToken, TokenBuilder
+from contextrouter.core.tokens import AccessManager, ContextToken, TokenBuilder
 
 
 @dataclass(frozen=True)
@@ -48,7 +48,7 @@ class FlowManager:
             config=self._config, token_builder=self._token_builder
         )
 
-    async def run(self, flow: FlowConfig, *, token: BiscuitToken) -> FlowResult:
+    async def run(self, flow: FlowConfig, *, token: ContextToken) -> FlowResult:
         connector = ComponentFactory.create_connector(flow.source, **(flow.source_params or {}))
         transformers = [
             ComponentFactory.create_transformer(
@@ -64,7 +64,7 @@ class FlowManager:
 
         sink_key = flow.sink.strip()
         # Reserved core sinks (not external providers):
-        # - "context"/"agent_context": return the BisquitEnvelope to the caller to attach to state
+        # - "context"/"agent_context": return the ContextUnit to the caller to attach to state
         # - "response": return envelope.content (synced with legacy envelope.data)
         is_context_sink = sink_key in {"context", "agent_context"}
         is_response_sink = sink_key == "response"
@@ -76,12 +76,14 @@ class FlowManager:
         processed = 0
         results: list[Any] = []
 
-        async for envelope in connector.connect():
+        async for unit in connector.connect():
             # Audit hook: ensure token_id is attached if caller provided token.
             if getattr(token, "token_id", None):
-                envelope.sign(token.token_id)
+                if unit.payload is None:
+                    unit.payload = {}
+                unit.payload["token_id"] = token.token_id
 
-            cur = envelope
+            cur = unit
             for t in transformers:
                 cur = await t.transform(cur)
 
@@ -89,13 +91,13 @@ class FlowManager:
                 # Core handles it: caller decides how to persist to state.
                 results.append(cur)
             elif is_response_sink:
-                # Core handles it: return content (legacy callers may still read .data).
-                results.append(cur.content)
+                # Core handles it: return content from payload.
+                results.append(cur.payload.get("content") if cur.payload else None)
             else:
                 if provider is None:
                     raise ValueError("Provider must be initialized for sink operations")
-                # Enforce write permission + envelope token_id consistency at external sink boundary.
-                self._access.verify_envelope_write(cur, token)
+                # Enforce write permission + unit token_id consistency at external sink boundary.
+                self._access.verify_unit_write(cur, token)
                 results.append(await provider.sink(cur, token=token))
             processed += 1
 

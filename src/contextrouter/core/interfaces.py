@@ -19,19 +19,20 @@ from typing import (
 )
 
 if TYPE_CHECKING:
-    from contextrouter.core.bisquit import BisquitEnvelope
+    from contextcore import ContextUnit
+
     from contextrouter.core.state import AgentState
-    from contextrouter.core.tokens import BiscuitToken
+    from contextrouter.core.tokens import ContextToken
 else:
-    BisquitEnvelope = Any  # type: ignore[misc,assignment]
-    BiscuitToken = Any  # type: ignore[misc,assignment]
+    ContextUnit = Any  # type: ignore[misc,assignment]
+    ContextToken = Any  # type: ignore[misc,assignment]
     AgentState = Any  # type: ignore[misc,assignment]
 
 logger = logging.getLogger(__name__)
 
 
 def secured(permission: str | None = None) -> Callable:
-    """Decorator to enforce Biscuit security on IRead/IWrite methods.
+    """Decorator to enforce ContextUnit protocol security on IRead/IWrite methods.
 
     If permission is None, it uses the default permission from core config.
     """
@@ -48,9 +49,9 @@ def secured(permission: str | None = None) -> Callable:
                 # (Assumes standard signature: read(query, limit, filters, token))
                 # or write(data, token)
                 for arg in args:
-                    from contextrouter.core.tokens import BiscuitToken
+                    from contextrouter.core.tokens import ContextToken
 
-                    if isinstance(arg, BiscuitToken):
+                    if isinstance(arg, ContextToken):
                         token = arg
                         break
 
@@ -103,27 +104,27 @@ class IRead(Protocol):
         *,
         limit: int = 5,
         filters: dict[str, Any] | None = None,
-        token: BiscuitToken,
-    ) -> list[BisquitEnvelope]: ...
+        token: ContextToken,
+    ) -> list[ContextUnit]: ...
 
 
 @runtime_checkable
 class IWrite(Protocol):
     """Write interface (optionally secured; enforced when security enabled)."""
 
-    async def write(self, data: BisquitEnvelope, *, token: BiscuitToken) -> None: ...
+    async def write(self, data: ContextUnit, *, token: ContextToken) -> None: ...
 
 
 class BaseConnector(ABC):
-    """Sources: produce raw data wrapped in BisquitEnvelope."""
+    """Sources: produce raw data wrapped in ContextUnit."""
 
     @abstractmethod
-    async def connect(self) -> AsyncIterator[BisquitEnvelope]:
+    async def connect(self) -> AsyncIterator[ContextUnit]:
         raise NotImplementedError
 
 
 class BaseTransformer(ABC):
-    """Logic pipes: pure-ish transformation over BisquitEnvelope."""
+    """Logic pipes: pure-ish transformation over ContextUnit."""
 
     def __init__(self) -> None:
         self._params: dict[str, Any] = {}
@@ -141,15 +142,15 @@ class BaseTransformer(ABC):
         return dict(self._params)
 
     @abstractmethod
-    async def transform(self, envelope: BisquitEnvelope) -> BisquitEnvelope:
+    async def transform(self, envelope: ContextUnit) -> ContextUnit:
         raise NotImplementedError
 
 
 class BaseProvider(ABC):
-    """Sinks: accept BisquitEnvelope and persist/return it somewhere."""
+    """Sinks: accept ContextUnit and persist/return it somewhere."""
 
     @abstractmethod
-    async def sink(self, envelope: BisquitEnvelope, *, token: BiscuitToken) -> Any:
+    async def sink(self, envelope: ContextUnit, *, token: ContextToken) -> Any:
         raise NotImplementedError
 
 
