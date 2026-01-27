@@ -6,7 +6,7 @@ This directory contains examples demonstrating various ContextRouter features an
 
 ### Core Features
 - **[01_basic_agent.py](01_basic_agent.py)** - Basic agent usage with streaming
-- **[02_custom_connector.py](02_custom_connector.py)** - Custom data connector implementation
+- **[02_custom_connector.py](02_custom_connector.py)** - Custom data connector implementation (uses ContextUnit)
 - **[03_standalone_retrieval.py](03_standalone_retrieval.py)** - Standalone RAG retrieval without full agent
 - **[04_custom_graph_tracing.py](04_custom_graph_tracing.py)** - Custom graphs with full Langfuse tracing
 - **[05_custom_errors.py](05_custom_errors.py)** - Custom error handling and recovery

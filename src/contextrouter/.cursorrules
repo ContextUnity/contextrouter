@@ -14,7 +14,7 @@ Enforce this exact structure.
 
 ```text
 src/contextrouter/
-├── core/                # Kernel: registry, bisquit, tokens, config
+├── core/                # Kernel: registry, ContextUnit, ContextToken, config
 ├── cortex/              # AI Agents & Graph Orchestration
 ├── modules/
 │   ├── providers/       # INFRASTRUCTURE (The "Hardware")
@@ -40,10 +40,11 @@ src/contextrouter/
 
 ## 3. COMPONENT RULES
 
-### A. Bisquit & Security (Mandatory)
-- **Wrapper**: Every single data object passed between modules must be a `BisquitEnvelope`.
-- **Provenance**: `envelope.provenance` must trace the path (e.g., `["connector:web", "transformer:summary"]`).
-- **Tokens**: `IWrite` and `IRead` in Providers MUST accept and verify `token_id` if security is enabled.
+### A. ContextUnit Protocol & Security (Mandatory)
+- **Wrapper**: Every single data object passed between modules must be a `ContextUnit` from `contextcore`.
+- **Provenance**: `unit.provenance` must trace the path (e.g., `["connector:web", "transformer:summary"]`).
+- **Authorization**: `ContextToken` validates against `ContextUnit.security` scopes for capability-based access control.
+- **Tokens**: `IWrite` and `IRead` in Providers MUST accept and verify `ContextToken` if security is enabled.
 
 ### B. No os.environ Policy
 - **Config**: ALWAYS use `contextrouter.core.config.get_core_config()` for settings.

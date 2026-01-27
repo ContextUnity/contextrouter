@@ -7,7 +7,7 @@ ContextRouter is a modular, LangGraph-powered "shared brain" designed for high-p
 - **Knowledge Agnostic**: While RAG is a core capability, the brain is designed to orchestrate data from any source (Web, SQL, Vector, RSS) through bidirectional pipelines (Read/Write).
 - **Platform Agnostic**: The brain should not know about HTTP, Telegram, or Web. It consumes messages and emits events.
 - **Strict Separation**: Logic (cortex) vs. Infrastructure (modules/providers) vs. Raw Data (modules/connectors).
-- **Bisquit Protocol**: All data passing through the pipeline is wrapped in `BisquitEnvelope` for provenance and security.
+- **ContextUnit Protocol**: All data passing through the pipeline uses `ContextUnit` from `contextcore` for provenance and security. Authorization is handled via `ContextToken` which integrates with `ContextUnit.security` scopes.
 - **Registry-First**: Components are registered via decorators and loaded lazily.
 
 ## Architecture Guidelines
@@ -62,7 +62,7 @@ as the return type for the formatter in `modules/retrieval/formatting/`.
 
 ## Key Directories
 
-- `core/`: Framework kernel (Config, Registry, Bisquit).
+- `core/`: Framework kernel (Config, Registry, ContextUnit, ContextToken).
 - `cortex/`: Graph orchestration and state nodes.
 - `modules/retrieval/`: Search business logic (Orchestrator, Reranker, Formatter).
 - `modules/protocols/agui/`: Unified UI event mapping.

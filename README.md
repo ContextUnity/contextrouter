@@ -10,75 +10,79 @@
 
 ## What is ContextRouter?
 
-ContextRouter is a modular framework for building intelligent AI agents based on LangGraph. It acts as a "shared brain" that can handle complex tasks by combining information retrieval, text generation, and tool execution.
+ContextRouter is a modular AI agent framework designed for building production-ready agent orchestration systems. It's built on top of LangGraph and provides a clean separation between your agent's decision logic and the technical implementation details.
 
-Unlike simple chatbots, ContextRouter can perform multi-step tasks: analyze queries, search for relevant information, apply logic, and provide structured responses.
+Think of it as an **AI Gateway** that can:
+- **Orchestrate multiple LLM providers** (OpenAI, Anthropic, Vertex AI, Groq, local models)
+- **Route requests intelligently** based on latency, cost, and user tier
+- **Manage agent workflows** using LangGraph state machines
+- **Handle voice I/O** for speech-to-text and text-to-speech
+- **Scale across instances** with shared state management
 
 ## What is it for?
 
 ContextRouter is designed for developers and companies who want to:
 
 - **Build complex AI agents** — from simple Q&A systems to sophisticated workflows
-- **Integrate RAG (Retrieval-Augmented Generation)** — search and generate responses based on your data
+- **Orchestrate agent workflows** — multi-step tasks with state management and conditional routing
 - **Create platform-independent solutions** — works with web, Telegram, API, or any other platform
-- **Ensure security and traceability** — every piece of data has a provenance history
+- **Ensure security and traceability** — every piece of data uses ContextUnit protocol for full provenance tracking
 
 ### Typical use cases:
-- Corporate chatbots with knowledge bases
-- AI assistants for document analysis
-- Search-based recommendation systems
-- Intelligent agents for business process automation
+- AI Gateway and load balancing for LLM providers
+- Agent orchestration for complex business workflows
+- Voice-enabled personal assistants
+- Multi-instance production deployments
 
 ## Key Features
 
-- **🧩 Fully Modular** — swap any component: LLM models, data stores, connectors, agents, and even entire processing graphs
-- **🧠 Intelligent Orchestration** — sophisticated state management and conditional routing based on LangGraph
-- **🛡️ Security and Tracing** — built-in Bisquit protocol for tracking data provenance
-- **📡 Streaming-Oriented** — optimized for real-time and event-driven interfaces
-- **🌍 Flexible Data Sources** — support for various storage solutions: Vertex AI Search, upcoming Postgres and local models support
+- **🧩 Truly Modular** — every component can be swapped without changing your agent logic
+- **🎯 Agent Orchestration** — build sophisticated agent workflows with LangGraph state machines
+- **🛡️ Production Ready** — ContextUnit protocol for data provenance and audit trails, multi-instance safe state
+- **🌐 Universal Model Support** — use any LLM provider: commercial (OpenAI, Anthropic, Vertex AI, Groq), aggregators (OpenRouter), or local (Ollama, vLLM)
 - **🔧 Extensible by Design** — build custom agents, processing graphs, and integrations without touching core code
 
 ## Modules Overview
 
 ContextRouter's architecture is built around specialized modules:
 
-- **`modules/providers/`** — Data storage implementations (Vertex AI Search, Postgres, GCS)
-- **`modules/connectors/`** — Raw data fetchers (Web search, RSS feeds, APIs, local files)
-- **`modules/ingestion/`** — Data ingestion pipelines (ETL, indexing, RAG processing, deployment)
-- **`modules/retrieval/`** — Search and RAG orchestration (pipelines, reranking, formatting)
-- **`modules/models/`** — LLM and embedding model abstractions (Gemini, GPT, local models)
+- **`modules/models/`** — LLM and embedding model abstractions (OpenAI, Anthropic, Vertex AI, Groq, local models)
 - **`modules/protocols/`** — Platform adapters (AG-UI events, A2A/A2UI protocols)
+- **`cortex/`** — LangGraph-based agent orchestration and workflow management
+- **`core/`** — ContextUnit protocol, token management, and core interfaces
 
-## RAG Capabilities
+## Integration with ContextUnity
 
-ContextRouter provides a complete RAG (Retrieval-Augmented Generation) pipeline powered by Vertex AI and Gemini:
+ContextRouter is part of the ContextUnity ecosystem:
 
-### Ingestion Pipeline
-- **Supported Content Types**: Books, articles, videos, Q&A pairs, web content, and custom structured data
-- **Taxonomy & Ontology**: Automatic categorization and relationship mapping using AI-powered taxonomy builders
-- **Knowledge Graph**: Semantic relationships and entity connections between ingested content
-- **Citation System**: Precise source attribution with page numbers, timestamps, and context preservation
+- **ContextCore** — Shared types and ContextUnit protocol
+- **ContextCore** — Shared types and ContextUnit protocol
+- **ContextBrain** — RAG retrieval and knowledge storage (**Centralized Brain**)
+- **ContextWorker** — Background task execution
+- **ContextCommerce** — E-commerce platform with agent integration
 
-### Retrieval & Generation
-- **Multi-stage Retrieval**: Initial search → reranking → context assembly
-- **Citation Formatting**: Rich citations with source verification and confidence scores
-- **Streaming Responses**: Real-time generation with source citations and reasoning traces
+### Memory & Retrieval (The Brain)
 
-### Vertex AI + Gemini Integration
-The RAG system runs on Google Cloud's Vertex AI Search for scalable vector storage and Gemini models for intelligent processing, ensuring enterprise-grade performance and security.
+ContextRouter no longer manages vector databases directly. It delegates all memory operations to **ContextBrain** via the `BrainProvider`.
 
-### Quick RAG Implementation
-Build a production-ready RAG system in hours, not months. For custom integrations, enterprise deployments, or specialized RAG solutions, visit [contextrouter.dev](https://contextrouter.dev) to discuss your requirements.
+| Mode | Description | Requirements |
+|------|-------------|--------------|
+| **Local** | Direct library import | `pip install contextbrain` |
+| **gRPC** | Network call to remote service | `contextbrain` service running |
+
+Set your mode via `BRAIN_MODE=local` or `BRAIN_MODE=grpc`. See [Storage Provider Docs](./src/contextrouter/modules/providers/storage/README.md) for details.
+
+For RAG capabilities, knowledge storage, and ingestion pipelines, see [ContextBrain](https://contextbrain.dev).
 
 ## Roadmap
 
-We're actively developing ContextRouter with focus on expanding data source support and improving developer experience:
+We're actively developing ContextRouter with focus on improving agent orchestration and developer experience:
 
 ### Near-term priorities:
-- **PostgreSQL Integration** — native support for Postgres with pgvector for knowledge storage
-- **Cognee Memory Integration** — advanced memory and knowledge graph capabilities
-- **Local Model Support** — run AI models locally without cloud dependencies
-- **Plugin System & Library** — comprehensive plugin architecture for extending functionality
+- **Enhanced Voice I/O** — improved speech-to-text and text-to-speech capabilities
+- **Advanced Routing** — smarter provider selection based on cost, latency, and quality
+- **Plugin System** — comprehensive plugin architecture for extending functionality
+- **Multi-instance Improvements** — better state synchronization and leader election
 
 ## Quick Start
 

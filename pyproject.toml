@@ -1,6 +1,6 @@
 [project]
 name = "contextrouter"
-version = "0.11.1"
+version = "0.12.0"
 description = "Modular LangGraph-powered agentic brain for multi-source knowledge orchestration and RAG"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -25,7 +25,7 @@ dependencies = [
     "typer>=0.12.0",
     "rich>=13.0.0",
     "tomli>=2.0.0",
-    "joblib>=1.5.3",
+    "storage>=0.0.4.3",
 ]
 
 [project.urls]
@@ -68,14 +68,7 @@ integrations = [
     "google-auth>=2.25.0,<3.0.0",
     "google-auth-oauthlib>=1.2.0,<2.0.0",
 ]
-# Ingestion capabilities
-ingestion = [
-    "networkx>=3.0",
-    "trafilatura>=1.6.0",
-    "pymupdf4llm>=0.0.10",
-    "pymupdf-layout>=0.0.0",
-    "beautifulsoup4>=4.12.0",
-]
+# Ingestion capabilities moved to ContextBrain
 # Observability
 observability = [
     "langfuse>=2.0.0",
@@ -106,7 +99,7 @@ hf-embeddings = [
 ]
 # Everything (for development/testing)
 all = [
-    "contextrouter[vertex,storage,integrations,ingestion,observability]"
+    "contextrouter[vertex,integrations,observability]"
 ]
 
 # Experimental / optional bundle (may be unsatisfiable depending on resolver + platform)
@@ -141,4 +134,24 @@ dev = [
     "pytest-cov>=4.0.0",
     "ruff>=0.14.0",
     "alembic>=1.13.0",
+    "contextcore",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow running tests",
+]
+
+[tool.uv.sources]
+contextcore = { path = "../contextcore" }

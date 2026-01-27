@@ -8,16 +8,16 @@ _.file = { path = ".env", tools = true }
 PYTHON = "$(mise which python)"
 
 [tasks.sync]
-description = "Install all dependencies (dev + vertex + ingestion + observability)"
-run = "uv sync --dev --extra vertex --extra ingestion --extra observability"
+description = "Install all dependencies (dev + vertex + observability)"
+run = "uv sync --dev --extra vertex --extra observability"
 
 [tasks.lint]
 description = "Lint + format-check all code (Ruff)"
-run = "uv run ruff check src/contextrouter && uv run ruff format --check src/contextrouter"
+run = "uv run ruff check src/ && uv run ruff format --check src/"
 
 [tasks.format]
 description = "Format all code (Ruff)"
-run = "uv run ruff check --fix src/contextrouter && uv run ruff format src/contextrouter"
+run = "uv run ruff check --fix src/ && uv run ruff format src/"
 
 [tasks.test]
 description = "Run all tests"
@@ -29,65 +29,27 @@ run = "uv run python -m pytest tests/unit/ -v"
 
 [tasks.security]
 description = "Run security scan (Bandit)"
-run = "uv run bandit -c .bandit -r src/contextrouter"
+run = "uv run python -m bandit -c .bandit -r src/"
 
 [tasks.check]
 description = "Run all checks (lint + security + test)"
-run = "mise run lint && mise run security && mise run test-unit"
+run = "uv sync --extra storage && uv pip install -e ../contextcore && mise run lint && mise run security && mise run test-unit"
 
-[tasks.ingest]
-description = "Show available ingestion commands"
-run = '''
-echo "Available ingestion commands:"
-echo ""
-echo "  mise run ingest-preprocess       - Stage 1: Raw -> CleanText (LLM-assisted optional)"
-echo "  mise run ingest-persona         - Stage 2: Build persona artifacts"
-echo "  mise run ingest-structure       - Stage 3: CleanText -> taxonomy.json + ontology.json"
-echo "  mise run ingest-structure-force - Rebuild taxonomy + ontology from scratch"
-echo "  mise run ingest-enrich          - Stage 3b: CleanText -> NER + keyphrases"
-echo "  mise run ingest-index           - Stage 4: CleanText + taxonomy + ontology -> knowledge_graph.pickle + ShadowRecords"
-echo "  mise run ingest-deploy          - Stage 5: Export + deploy to storage + generate reports"
-echo "  mise run ingest-report          - Generate ingestion reports (standalone)"
-echo "  mise run ingest-run             - Run full pipeline: preprocess -> persona -> structure -> enrich -> index -> deploy"
-echo ""
-echo "Or use: uv run contextrouter ingest --help"
-'''
+# =============================================================================
+# Server Commands
+# =============================================================================
 
-[tasks.ingest-preprocess]
-description = "Stage 1: Raw -> CleanText"
-run = "uv run contextrouter ingest preprocess"
+[tasks.serve]
+description = "Start Router server"
+run = "uv run contextrouter serve"
 
-[tasks.ingest-persona]
-description = "Stage 2: Build persona artifacts"
-run = "uv run contextrouter ingest persona"
+[tasks.dev]
+description = "Start Router in development mode"
+run = "uv run contextrouter serve --reload"
 
-[tasks.ingest-structure]
-description = "Stage 3: CleanText -> taxonomy.json + ontology.json"
-run = "uv run contextrouter ingest structure"
-
-[tasks.ingest-structure-force]
-description = "Rebuild taxonomy + ontology from scratch"
-run = "uv run contextrouter ingest structure --force"
-
-[tasks.ingest-enrich]
-description = "Stage 3b: CleanText -> NER + keyphrases"
-run = "uv run contextrouter ingest enrich"
-
-[tasks.ingest-index]
-description = "Stage 4: CleanText + taxonomy + ontology -> knowledge_graph.pickle + ShadowRecords"
-run = "uv run contextrouter ingest index"
-
-[tasks.ingest-deploy]
-description = "Stage 5: Export + deploy to storage + generate reports"
-run = "uv run contextrouter ingest deploy"
-
-[tasks.ingest-report]
-description = "Generate ingestion reports (standalone)"
-run = "uv run contextrouter ingest report"
-
-[tasks.ingest-run]
-description = "Run full pipeline: preprocess -> persona -> structure -> index -> deploy"
-run = "uv run contextrouter ingest run"
+# =============================================================================
+# RAG Commands
+# =============================================================================
 
 [tasks.rag-query]
 description = "Query the RAG system"
@@ -96,6 +58,22 @@ run = "uv run contextrouter rag query"
 [tasks.rag-chat]
 description = "Start interactive RAG chat"
 run = "uv run contextrouter rag chat"
+
+# =============================================================================
+# Enrichment Queue Commands
+# =============================================================================
+
+[tasks.queue-stats]
+description = "Show enrichment queue stats"
+run = "uv run python -c 'from contextrouter.cortex.queue import get_enrichment_queue; import asyncio; print(asyncio.run(get_enrichment_queue().get_queue_stats(\"traverse\")))'"
+
+[tasks.queue-process]
+description = "Process enrichment queue (Gardener)"
+run = "uv run python -m contextrouter.cortex.graphs.gardener --tenant traverse"
+
+# =============================================================================
+# GCloud Commands
+# =============================================================================
 
 [tasks.gcloud-auth]
 description = "Authenticate with GCP"
@@ -124,6 +102,10 @@ mise run gcloud-auth &&
 mise run gcloud-adc &&
 mise run sync
 """
+
+# =============================================================================
+# Utility
+# =============================================================================
 
 [tasks.clean]
 description = "Clean cache files and build artifacts"
