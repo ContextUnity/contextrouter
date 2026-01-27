@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 
-from contextrouter.core.bisquit import BisquitEnvelope
+from contextcore import ContextUnit
 from contextrouter.core.interfaces import IRead
-from contextrouter.cortex.models import Citation, RetrievedDoc
+from contextrouter.modules.retrieval.rag.models import Citation, RetrievedDoc
 from contextrouter.modules.retrieval.rag import RagPipeline
 
 
@@ -18,29 +18,30 @@ def test_retrieval_pipeline_returns_empty_on_empty_query(monkeypatch) -> None:
 
 
 def test_retrieval_pipeline_calls_vertex_and_builds_citations(monkeypatch) -> None:
-    from contextrouter.core.registry import ComponentFactory
+    from contextrouter.modules.retrieval.pipeline import BaseRetrievalPipeline
 
-    calls: list[tuple[str, int, str]] = []
+    calls: list[tuple[str, int]] = []
 
-    class _Provider(IRead):
-        async def read(self, query: str, *, limit: int = 5, filters=None, token=None):
-            st = (filters or {}).get("source_type", "book")
-            calls.append((query, limit, st))
-            return [
-                BisquitEnvelope(
-                    content=RetrievedDoc(source_type=st, content=f"{st}:{query}", title="t")
-                )
-            ]
+    class MockResult:
+        def __init__(self):
+            doc = RetrievedDoc(source_type="book", content="book:hello", title="t")
+            # Create a mock ContextUnit-like object with content attribute
+            class MockUnit:
+                def __init__(self):
+                    self.content = doc
+            self.units = [MockUnit()]
 
-    async def _identity_rerank(**kw):
-        return kw["documents"]
+    async def mock_execute(self, query, *, limit: int = 5, filters=None, token=None, providers=None):
+        calls.append((str(query), limit))
+        from contextrouter.modules.retrieval.pipeline import PipelineResult
+        return PipelineResult(units=MockResult().units)
 
     class MockReranker:
         async def rerank(self, query, documents, top_n=None):
             return documents[:top_n] if top_n else documents
 
-    # Mock ComponentFactory.create_provider to return our test provider
-    monkeypatch.setattr(ComponentFactory, "create_provider", lambda name, **kwargs: _Provider())
+    # Mock BaseRetrievalPipeline.execute to return our test result
+    monkeypatch.setattr(BaseRetrievalPipeline, "execute", mock_execute)
     monkeypatch.setattr(RagPipeline, "_should_run_web", lambda _s, _state: False)
     monkeypatch.setattr(RagPipeline, "_get_graph_facts", lambda _s, _state: ["f1"])
     monkeypatch.setattr(
@@ -54,13 +55,13 @@ def test_retrieval_pipeline_calls_vertex_and_builds_citations(monkeypatch) -> No
         ),
     )
 
-    from contextrouter.core.tokens import BiscuitToken
+    from contextrouter.core.tokens import ContextToken
     from contextrouter.cortex.state import AgentState
 
     state: AgentState = {
         "user_query": "hello",
         "retrieval_queries": ["hello"],
-        "access_token": BiscuitToken(token_id="test-token", permissions=("RAG_READ",)),
+        "access_token": ContextToken(token_id="test-token", permissions=("RAG_READ",)),
     }
     res = asyncio.run(RagPipeline().execute(state))
 

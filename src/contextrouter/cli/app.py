@@ -8,6 +8,7 @@ import warnings
 from pathlib import Path
 
 import click
+from contextcore import get_context_unit_logger, load_shared_config_from_env, setup_logging
 from rich.console import Console
 from rich.traceback import Traceback
 
@@ -17,7 +18,7 @@ from contextrouter.cli.registry import iter_commands
 from contextrouter.core import Config, get_core_config, set_core_config
 from contextrouter.core.registry import scan
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 # Rich console for CLI error output only (not installed globally to avoid affecting runtime traces)
 console = Console(stderr=True)
@@ -35,8 +36,16 @@ console = Console(stderr=True)
 def cli(ctx, verbose, config_path):
     """Contextrouter CLI - LangGraph brain orchestrator and tools."""
     ctx.ensure_object(dict)
-    level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(level=level, format="%(levelname)s %(message)s")
+
+    # Setup logging from SharedConfig (with verbose override)
+    config = load_shared_config_from_env()
+    if verbose:
+        from contextcore import LogLevel
+
+        config.log_level = LogLevel.DEBUG
+
+    # Use plain text format for CLI (more readable than JSON)
+    setup_logging(config=config, json_format=False, service_name="contextrouter")
 
     # Keep CLI output readable: suppress noisy LangChain deprecation warnings by default.
     # This is CLI-only; library/runtime users still get full warnings by default.

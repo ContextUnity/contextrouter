@@ -4,6 +4,9 @@ import inspect
 
 import pytest
 
+# Skip if contextbrain is not installed
+pytest.importorskip("contextbrain", reason="contextbrain not installed")
+
 
 @pytest.mark.anyio
 async def test_agent_wrappers_return_dict_not_coroutine(

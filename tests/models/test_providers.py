@@ -1,5 +1,6 @@
 """Tests for model provider implementations."""
 
+import os
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -22,7 +23,11 @@ from contextrouter.modules.models.types import (  # noqa: E402
     TextPart,
 )
 
+# Skip Vertex tests if no credentials
+SKIP_VERTEX = not os.getenv("GOOGLE_APPLICATION_CREDENTIALS") and not os.getenv("CI")
 
+
+@pytest.mark.skipif(SKIP_VERTEX, reason="Vertex credentials not available")
 class TestVertexLLM:
     """Test VertexLLM provider."""
 
@@ -235,6 +240,7 @@ class TestHuggingFaceLLM:
 class TestProviderCapabilities:
     """Test provider capability declarations."""
 
+    @pytest.mark.skipif(SKIP_VERTEX, reason="Vertex credentials not available")
     def test_vertex_capabilities_by_model(self):
         """Test that Vertex capabilities vary by model."""
         config = MagicMock()
