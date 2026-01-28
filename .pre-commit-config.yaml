@@ -24,3 +24,13 @@ repos:
       - id: bandit
         args: [-c, .bandit, -r, src/contextrouter]
         additional_dependencies: ["tomli; python_version<'3.11'"]
+
+  # Local architecture enforcement
+  - repo: local
+    hooks:
+      - id: architecture-check
+        name: Architecture enforcement
+        entry: python scripts/check_architecture.py
+        language: python
+        pass_filenames: false
+        files: ^src/contextrouter/cortex/graphs/

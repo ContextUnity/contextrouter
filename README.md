@@ -3,8 +3,8 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE.md)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![LangGraph](https://img.shields.io/badge/orchestration-LangGraph-orange.svg)](https://github.com/langchain-ai/langgraph)
-[![GitHub](https://img.shields.io/badge/GitHub-ContextRouter-black.svg)](https://github.com/ContextRouter/contextrouter)
-[![Docs](https://img.shields.io/badge/docs-contextrouter.org-green.svg)](https://contextrouter.org)
+[![GitHub](https://img.shields.io/badge/GitHub-ContextUnity-black.svg)](https://github.com/ContextUnity/contextrouter)
+[![Docs](https://img.shields.io/badge/docs-contextrouter.dev-green.svg)](https://contextrouter.dev)
 
 > ⚠️ **Early Version**: This is an early version of ContextRouter. Documentation is actively being developed, and the API may change.
 
@@ -56,13 +56,14 @@ ContextRouter's architecture is built around specialized modules:
 
 ## Integration with ContextUnity
 
-ContextRouter is part of the ContextUnity ecosystem:
+ContextRouter is part of the [ContextUnity](https://github.com/ContextUnity) ecosystem:
 
-- **ContextCore** — Shared types and ContextUnit protocol
-- **ContextCore** — Shared types and ContextUnit protocol
-- **ContextBrain** — RAG retrieval and knowledge storage (**Centralized Brain**)
-- **ContextWorker** — Background task execution
-- **ContextCommerce** — E-commerce platform with agent integration
+| Service | Role | Documentation |
+|---------|------|---------------|
+| **ContextCore** | Shared types and ContextUnit protocol | [contextcore.dev](https://contextcore.dev) |
+| **ContextBrain** | RAG retrieval and knowledge storage | [contextbrain.dev](https://contextbrain.dev) |
+| **ContextWorker** | Background task execution | [contextworker.dev](https://contextworker.dev) |
+| **ContextCommerce** | E-commerce platform with agent integration | [contextcommerce.dev](https://contextcommerce.dev) |
 
 ### Memory & Retrieval (The Brain)
 
@@ -127,7 +128,8 @@ For more examples, see the [`examples/`](./examples/) directory.
 
 ## Documentation
 
-- [Full Documentation](https://contextrouter.org) — complete guides and API reference
+- [Full Documentation](https://contextrouter.dev) — complete guides and API reference
+- [Technical Reference](./contextrouter-fulldoc.md) — architecture deep-dive
 - [Examples Directory](./examples/) — working code samples
 - [Contributing Guide](./CONTRIBUTING.md) — how to contribute to the project
 

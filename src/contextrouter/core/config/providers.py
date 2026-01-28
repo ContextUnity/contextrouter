@@ -45,6 +45,23 @@ class AnthropicConfig(BaseModel):
     api_key: str = ""
 
 
+class PerplexityConfig(BaseModel):
+    """Perplexity API configuration (LLM with search)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    api_key: str = ""
+    default_model: str = "sonar"
+
+
+class SerperConfig(BaseModel):
+    """Serper API configuration (Google Search)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    api_key: str = ""
+
+
 class OpenRouterConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

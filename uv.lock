@@ -302,6 +302,15 @@ wheels = [
 ]
 
 [[package]]
+name = "cached-property"
+version = "2.0.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/76/4b/3d870836119dbe9a5e3c9a61af8cc1a8b69d75aea564572e385882d5aefb/cached_property-2.0.1.tar.gz", hash = "sha256:484d617105e3ee0e4f1f58725e72a8ef9e93deee462222dbd51cd91230897641", size = 10574, upload-time = "2024-10-25T15:43:55.667Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/11/0e/7d8225aab3bc1a0f5811f8e1b557aa034ac04bdf641925b30d3caf586b28/cached_property-2.0.1-py3-none-any.whl", hash = "sha256:f617d70ab1100b7bcf6e42228f9ddcb78c676ffa167278d9f730d1c2fba69ccb", size = 7428, upload-time = "2024-10-25T15:43:54.711Z" },
+]
+
+[[package]]
 name = "cachetools"
 version = "6.2.4"
 source = { registry = "https://pypi.org/simple" }
@@ -459,7 +468,10 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "ruff", specifier = ">=0.14.14" }]
+dev = [
+    { name = "grpcio-tools", specifier = ">=1.76.0" },
+    { name = "ruff", specifier = ">=0.14.14" },
+]
 
 [[package]]
 name = "contextrouter"
@@ -549,6 +561,9 @@ observability = [
     { name = "langfuse" },
     { name = "opentelemetry-instrumentation-threading" },
 ]
+rlm = [
+    { name = "rlm" },
+]
 storage = [
     { name = "google-cloud-firestore" },
     { name = "google-cloud-storage" },
@@ -617,6 +632,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "python-telegram-bot", marker = "extra == 'integrations'", specifier = ">=21.0" },
     { name = "rich", specifier = ">=13.0.0" },
+    { name = "rlm", marker = "extra == 'rlm'", git = "https://github.com/alexzhang13/rlm.git" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.0" },
     { name = "sentence-transformers", marker = "extra == 'hf-embeddings'", specifier = ">=3.0.0" },
     { name = "sqlalchemy", marker = "extra == 'storage'", specifier = ">=2.0.0" },
@@ -627,7 +643,7 @@ requires-dist = [
     { name = "twine", marker = "extra == 'dev'", specifier = ">=5.0.0" },
     { name = "typer", specifier = ">=0.12.0" },
 ]
-provides-extras = ["dev", "vertex", "storage", "integrations", "observability", "models-openai", "models-anthropic", "models-hf-hub", "models", "hf-transformers", "hf-embeddings", "all", "all-experimental"]
+provides-extras = ["dev", "vertex", "storage", "integrations", "observability", "models-openai", "models-anthropic", "models-hf-hub", "models", "hf-transformers", "hf-embeddings", "all", "all-experimental", "rlm"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2410,7 +2426,7 @@ wheels = [
 
 [[package]]
 name = "openai"
-version = "2.13.0"
+version = "2.16.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2422,9 +2438,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0f/39/8e347e9fda125324d253084bb1b82407e5e3c7777a03dc398f79b2d95626/openai-2.13.0.tar.gz", hash = "sha256:9ff633b07a19469ec476b1e2b5b26c5ef700886524a7a72f65e6f0b5203142d5", size = 626583, upload-time = "2025-12-16T18:19:44.387Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b1/6c/e4c964fcf1d527fdf4739e7cc940c60075a4114d50d03871d5d5b1e13a88/openai-2.16.0.tar.gz", hash = "sha256:42eaa22ca0d8ded4367a77374104d7a2feafee5bd60a107c3c11b5243a11cd12", size = 629649, upload-time = "2026-01-27T23:28:02.579Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bb/d5/eb52edff49d3d5ea116e225538c118699ddeb7c29fa17ec28af14bc10033/openai-2.13.0-py3-none-any.whl", hash = "sha256:746521065fed68df2f9c2d85613bb50844343ea81f60009b60e6a600c9352c79", size = 1066837, upload-time = "2025-12-16T18:19:43.124Z" },
+    { url = "https://files.pythonhosted.org/packages/16/83/0315bf2cfd75a2ce8a7e54188e9456c60cec6c0cf66728ed07bd9859ff26/openai-2.16.0-py3-none-any.whl", hash = "sha256:5f46643a8f42899a84e80c38838135d7038e7718333ce61396994f887b09a59b", size = 1068612, upload-time = "2026-01-27T23:28:00.356Z" },
 ]
 
 [[package]]
@@ -2646,6 +2662,27 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe6ef3fa267035b518369d9511ffab804f839851d2779/pluggy-1.6.0.tar.gz", hash = "sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3", size = 69412, upload-time = "2025-05-15T12:30:07.975Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746", size = 20538, upload-time = "2025-05-15T12:30:06.134Z" },
+]
+
+[[package]]
+name = "portkey-ai"
+version = "2.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "cached-property" },
+    { name = "distro" },
+    { name = "httpx" },
+    { name = "jiter" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "tqdm" },
+    { name = "types-requests" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d4/8a/f5bbaab806ad61d9959cb7c88c639200feacac1b2ba7b455b97a2f216e7c/portkey_ai-2.1.0.tar.gz", hash = "sha256:c2558041c568eef8528737978089301cb9be056f166a683251831cbfa6a623cb", size = 567417, upload-time = "2025-11-25T20:32:43.102Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b7/11/c585b90ac842027e5f4f7f7cee72d3197f58ff24b6d7c5f1243aa8fa96be/portkey_ai-2.1.0-py3-none-any.whl", hash = "sha256:2166033f8e198745947fee5321d0bbcfb005afc35468bd5a948fa83dc16b6767", size = 1181622, upload-time = "2025-11-25T20:32:41.185Z" },
 ]
 
 [[package]]
@@ -3264,6 +3301,21 @@ wheels = [
 ]
 
 [[package]]
+name = "rlm"
+version = "0.1.0"
+source = { git = "https://github.com/alexzhang13/rlm.git#b052ed16b47595f5d5c23d6949996494cf27f21f" }
+dependencies = [
+    { name = "anthropic" },
+    { name = "google-genai" },
+    { name = "openai" },
+    { name = "portkey-ai" },
+    { name = "pytest" },
+    { name = "python-dotenv" },
+    { name = "requests" },
+    { name = "rich" },
+]
+
+[[package]]
 name = "rsa"
 version = "4.9.1"
 source = { registry = "https://pypi.org/simple" }
@@ -3826,6 +3878,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/36/bf/8825b5929afd84d0dabd606c67cd57b8388cb3ec385f7ef19c5cc2202069/typer-0.21.1.tar.gz", hash = "sha256:ea835607cd752343b6b2b7ce676893e5a0324082268b48f27aa058bdb7d2145d", size = 110371, upload-time = "2026-01-06T11:21:10.989Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a0/1d/d9257dd49ff2ca23ea5f132edf1281a0c4f9de8a762b9ae399b670a59235/typer-0.21.1-py3-none-any.whl", hash = "sha256:7985e89081c636b88d172c2ee0cfe33c253160994d47bdfdc302defd7d1f1d01", size = 47381, upload-time = "2026-01-06T11:21:09.824Z" },
+]
+
+[[package]]
+name = "types-requests"
+version = "2.32.4.20260107"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0f/f3/a0663907082280664d745929205a89d41dffb29e89a50f753af7d57d0a96/types_requests-2.32.4.20260107.tar.gz", hash = "sha256:018a11ac158f801bfa84857ddec1650750e393df8a004a8a9ae2a9bec6fcb24f", size = 23165, upload-time = "2026-01-07T03:20:54.091Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1c/12/709ea261f2bf91ef0a26a9eed20f2623227a8ed85610c1e54c5805692ecb/types_requests-2.32.4.20260107-py3-none-any.whl", hash = "sha256:b703fe72f8ce5b31ef031264fe9395cac8f46a04661a79f7ed31a80fb308730d", size = 20676, upload-time = "2026-01-07T03:20:52.929Z" },
 ]
 
 [[package]]

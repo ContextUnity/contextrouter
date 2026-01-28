@@ -24,10 +24,12 @@ from .providers import (
     LocalOpenAIConfig,
     OpenAIConfig,
     OpenRouterConfig,
+    PerplexityConfig,
     PluginsConfig,
     PostgresConfig,
     RedisConfig,
     RunPodConfig,
+    SerperConfig,
     VertexConfig,
 )
 from .security import SecurityConfig
@@ -103,6 +105,8 @@ class Config(BaseModel):
     langfuse: LangfuseConfig = Field(default_factory=LangfuseConfig)
     redis: RedisConfig = Field(default_factory=RedisConfig)
     brain: BrainConfig = Field(default_factory=BrainConfig)
+    perplexity: PerplexityConfig = Field(default_factory=PerplexityConfig)
+    serper: SerperConfig = Field(default_factory=SerperConfig)
 
     # Internal state
     paths_cache: ConfigPaths | None = None
@@ -261,6 +265,14 @@ class Config(BaseModel):
         # Anthropic configuration
         if anthropic_key := get_env("ANTHROPIC_API_KEY"):
             self.anthropic.api_key = anthropic_key
+
+        # Perplexity configuration
+        if perplexity_key := get_env("PERPLEXITY_API_KEY"):
+            self.perplexity.api_key = perplexity_key
+
+        # Serper configuration
+        if serper_key := get_env("SERPER_API_KEY"):
+            self.serper.api_key = serper_key
 
         # OpenRouter configuration
         if openrouter_key := get_env("OPENROUTER_API_KEY"):

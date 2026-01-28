@@ -42,6 +42,9 @@ jobs:
     - name: Run ruff formatting check
       run: uv run ruff format --check src/contextrouter
 
+    - name: Architecture enforcement
+      run: python scripts/check_architecture.py
+
     # Tests temporarily disabled until packages stabilize
     # - name: Run tests
     #   run: uv run python -m pytest tests/ -v --cov=src/contextrouter --cov-report=xml

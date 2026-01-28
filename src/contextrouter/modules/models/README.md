@@ -81,6 +81,7 @@ model = model_registry.get_llm_with_fallback(
 | **HF Hub (Remote)** | `hf-hub/*` | Text + Image + Audio (task-dependent) | Requires `contextrouter[models-hf-hub]`. Depends on task: ASR, VQA, image-to-text. |
 | **Local (vLLM/Ollama)** | `local/*`, `local-vllm/*` | Text + Image | Requires `contextrouter[models-openai]`. Vision models support images. |
 | **HuggingFace Transformers** | `hf/*` | Task-dependent (Text/Image/Audio) | Local inference. Task controls modality: text-gen, ASR, image-classification. |
+| **RLM (Recursive)** | `rlm/*` | Text | Wraps any LLM with recursive REPL. For massive contexts (50k+ items). Requires `pip install rlm`. |
 | **LiteLLM** | `litellm/*` | - | **Stub only** (not implemented). |
 
 ### HuggingFace Transformers ⚠️
@@ -104,6 +105,61 @@ uv add contextrouter[hf-transformers]
 - Production inference
 - Large models
 - GPU workloads (use vLLM/TGI instead)
+
+### RLM (Recursive Language Models) 🆕
+
+**RLM** wraps any base LLM with recursive REPL capabilities for processing **massive contexts** (50k+ items) that would cause context degradation in standard LLM calls.
+
+**Reference:** [arXiv:2512.24601](https://arxiv.org/abs/2512.24601) | [GitHub](https://github.com/alexzhang13/rlm)
+
+**Key Benefits:**
+- GPT-5-mini with RLM **outperforms GPT-5** on long-context tasks
+- Context stored as Python variable, not in prompt
+- Model can `grep`, `filter`, `iterate`, and recursively analyze
+- 60-70% cost reduction for bulk processing
+
+**Installation:**
+```bash
+pip install rlm  # or: uv add rlm
+```
+
+**Usage:**
+```python
+from contextrouter.modules.models import model_registry
+
+# Create RLM-wrapped model
+model = model_registry.create_llm(
+    "rlm/gpt-5-mini",  # Uses GPT-5-mini as base
+    config=config,
+    environment="docker",  # Isolated execution (recommended for production)
+)
+
+# Use for bulk operations
+response = await model.generate(ModelRequest(
+    system="You are a product matching expert.",
+    parts=[TextPart(text="""
+Variables available:
+- supplier_products: 50,000 items
+- site_products: 10,000 items
+
+Write code to match products efficiently.
+""")],
+))
+```
+
+**Use Cases:**
+- **Product Matching**: 50k supplier → 10k site catalog
+- **Taxonomy Classification**: Navigate 1000+ category tree
+- **Bulk Normalization**: Process 50k product names
+- **Knowledge Graph Extraction**: Extract relations from large datasets
+
+**Environment Options:**
+| Environment | Use Case | Safety |
+|-------------|----------|--------|
+| `local` | Development | Low (same process) |
+| `docker` | Production | High (isolated container) |
+| `modal` | Cloud scaling | High |
+| `prime` | High-performance cloud | High |
 
 ### LiteLLM (stub)
 

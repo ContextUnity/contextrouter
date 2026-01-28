@@ -1,6 +1,6 @@
 [project]
 name = "contextrouter"
-version = "0.12.0"
+version = "0.13.0"
 description = "Modular LangGraph-powered agentic brain for multi-source knowledge orchestration and RAG"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -30,9 +30,9 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://contextrouter.dev"
-Documentation = "https://contextrouter.org"
-Repository = "https://github.com/ContextRouter/contextrouter"
-Issues = "https://github.com/ContextRouter/contextrouter/issues"
+Documentation = "https://contextrouter.dev"
+Repository = "https://github.com/ContextUnity/contextrouter"
+Issues = "https://github.com/ContextUnity/contextrouter/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -106,6 +106,13 @@ all = [
 all_experimental = [
     "contextrouter[all]"
 ]
+# Recursive Language Models for massive context processing (50k+ items)
+# Used for deep product matching, bulk taxonomy classification
+# Ref: https://arxiv.org/abs/2512.24601
+# NOTE: Not yet on PyPI, install from GitHub via `uv add contextrouter[rlm]`
+rlm = [
+    "rlm",
+]
 
 [project.scripts]
 contextrouter = "contextrouter.cli.app:main"
@@ -113,6 +120,10 @@ contextrouter = "contextrouter.cli.app:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+# Allow Git-based dependencies in optional-dependencies (needed for RLM which is not on PyPI)
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/contextrouter"]
@@ -158,3 +169,4 @@ markers = [
 
 [tool.uv.sources]
 contextcore = { path = "../contextcore" }
+rlm = { git = "https://github.com/alexzhang13/rlm.git" }
