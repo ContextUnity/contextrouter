@@ -71,6 +71,7 @@ class SerperSearchConnector:
             self.api_key = config.serper.api_key
         else:
             import os
+
             self.api_key = os.environ.get("SERPER_API_KEY", "")
 
         if not self.api_key:
@@ -138,12 +139,14 @@ class SerperSearchConnector:
 
         normalized = []
         for item in raw_results:
-            normalized.append({
-                "title": item.get("title", ""),
-                "url": item.get("link", ""),
-                "snippet": item.get("snippet", ""),
-                "source": "serper",
-            })
+            normalized.append(
+                {
+                    "title": item.get("title", ""),
+                    "url": item.get("link", ""),
+                    "snippet": item.get("snippet", ""),
+                    "source": "serper",
+                }
+            )
 
         return normalized
 

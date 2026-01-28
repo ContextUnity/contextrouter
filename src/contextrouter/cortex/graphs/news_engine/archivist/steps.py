@@ -26,11 +26,32 @@ logger = logging.getLogger(__name__)
 
 # Banned keywords for content filtering
 BANNED_KEYWORDS = {
-    "war", "війна", "russia", "росія", "belarus", "білорусь",
-    "putin", "путін", "zelensky", "зеленський",
-    "crime", "злочин", "murder", "вбивство", "death", "смерть",
-    "scandal", "скандал", "tragedy", "трагедія", "accident", "аварія",
-    "corruption", "корупція", "arrest", "арешт",
+    "war",
+    "війна",
+    "russia",
+    "росія",
+    "belarus",
+    "білорусь",
+    "putin",
+    "путін",
+    "zelensky",
+    "зеленський",
+    "crime",
+    "злочин",
+    "murder",
+    "вбивство",
+    "death",
+    "смерть",
+    "scandal",
+    "скандал",
+    "tragedy",
+    "трагедія",
+    "accident",
+    "аварія",
+    "corruption",
+    "корупція",
+    "arrest",
+    "арешт",
 }
 
 # Default archivist prompt
@@ -118,9 +139,9 @@ async def validate_node(state: NewsEngineState) -> Dict[str, Any]:
         for item in raw_items:
             user_prompt = f"""Validate this news item:
 
-Headline: {item.get('headline', '')}
-Summary: {item.get('summary', '')}
-Source: {item.get('url', '')}"""
+Headline: {item.get("headline", "")}
+Summary: {item.get("summary", "")}
+Source: {item.get("url", "")}"""
 
             request = ModelRequest(
                 system=system_prompt,
@@ -155,7 +176,9 @@ Source: {item.get('url', '')}"""
                 logger.warning(f"Validation failed for item: {e}")
                 validated.append(item)  # Accept on error
 
-        logger.info(f"[{tenant_id}] LLM validation: {len(validated)} accepted, {rejected} total rejected")
+        logger.info(
+            f"[{tenant_id}] LLM validation: {len(validated)} accepted, {rejected} total rejected"
+        )
 
         return {
             "raw_items": validated,
@@ -286,7 +309,9 @@ async def store_node(state: NewsEngineState) -> Dict[str, Any]:
                     metadata={
                         "significance_score": str(fact["significance_score"]),
                         "source": fact["source"],
-                        "suggested_agents": ",".join(fact["suggested_agents"]) if fact["suggested_agents"] else "",
+                        "suggested_agents": ",".join(fact["suggested_agents"])
+                        if fact["suggested_agents"]
+                        else "",
                     },
                 )
 
@@ -313,6 +338,7 @@ async def store_node(state: NewsEngineState) -> Dict[str, Any]:
         logger.warning("contextcore not available, facts won't be stored to Brain")
         # Still create facts for the pipeline
         import uuid
+
         for item in raw_items:
             fact = {
                 "id": str(uuid.uuid4()),

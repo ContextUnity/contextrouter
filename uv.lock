@@ -446,7 +446,7 @@ wheels = [
 
 [[package]]
 name = "contextcore"
-version = "0.1.0"
+version = "0.2.0"
 source = { directory = "../contextcore" }
 dependencies = [
     { name = "grpcio" },
@@ -470,12 +470,14 @@ provides-extras = ["dev"]
 [package.metadata.requires-dev]
 dev = [
     { name = "grpcio-tools", specifier = ">=1.76.0" },
+    { name = "pytest", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", specifier = ">=0.21.0" },
     { name = "ruff", specifier = ">=0.14.14" },
 ]
 
 [[package]]
 name = "contextrouter"
-version = "0.12.0"
+version = "0.13.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },

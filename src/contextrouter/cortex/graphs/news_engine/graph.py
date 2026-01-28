@@ -124,7 +124,9 @@ def build_news_engine_graph():
 
     # Pipeline progression for full_pipeline
     workflow.add_conditional_edges("harvest", _after_harvest, {"archivist": "archivist", END: END})
-    workflow.add_conditional_edges("archivist", _after_archivist, {"showrunner": "showrunner", END: END})
+    workflow.add_conditional_edges(
+        "archivist", _after_archivist, {"showrunner": "showrunner", END: END}
+    )
     workflow.add_conditional_edges("showrunner", _after_showrunner, {"agents": "agents", END: END})
     workflow.add_edge("agents", END)
 

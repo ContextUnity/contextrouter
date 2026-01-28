@@ -293,10 +293,7 @@ class RLMBulkMatcher:
             )
         except ImportError:
             # Fallback: RLM not installed, use chunked standard approach
-            logger.warning(
-                "RLM not installed (pip install rlm). "
-                "Falling back to chunked matching."
-            )
+            logger.warning("RLM not installed (pip install rlm). Falling back to chunked matching.")
             return await self._fallback_chunked_match(
                 supplier_products, site_products, confidence_threshold
             )
@@ -325,7 +322,8 @@ class RLMBulkMatcher:
         # Build result
         matched_supplier_ids = {m.supplier_id for m in matches if m.site_id}
         unmatched = [
-            p for p in supplier_products
+            p
+            for p in supplier_products
             if str(p.get("id", p.get("sku", ""))) not in matched_supplier_ids
         ]
 
@@ -345,12 +343,8 @@ class RLMBulkMatcher:
                 if supplier_products
                 else 0,
                 "high_confidence": len([m for m in matches if m.confidence >= 0.9]),
-                "medium_confidence": len(
-                    [m for m in matches if 0.7 <= m.confidence < 0.9]
-                ),
-                "low_confidence": len(
-                    [m for m in matches if m.confidence < 0.7 and m.site_id]
-                ),
+                "medium_confidence": len([m for m in matches if 0.7 <= m.confidence < 0.9]),
+                "low_confidence": len([m for m in matches if m.confidence < 0.7 and m.site_id]),
             },
         )
 
@@ -404,7 +398,7 @@ Begin writing code to perform the matching.
             import re
 
             # Find JSON array in response
-            json_match = re.search(r'\[[\s\S]*\]', response_text)
+            json_match = re.search(r"\[[\s\S]*\]", response_text)
             if json_match:
                 data = json.loads(json_match.group())
                 for item in data:
@@ -437,9 +431,7 @@ Begin writing code to perform the matching.
 
         Uses traditional chunked LLM calls instead of RLM recursion.
         """
-        logger.info(
-            "Using fallback chunked matching (RLM not available)"
-        )
+        logger.info("Using fallback chunked matching (RLM not available)")
 
         # Simple SKU-based matching as fallback
         sku_index = {}
@@ -486,7 +478,8 @@ Begin writing code to perform the matching.
             total_site=len(site_products),
             matches=matches,
             unmatched=[
-                p for p in supplier_products
+                p
+                for p in supplier_products
                 if not any(
                     m.supplier_id == str(p.get("id", p.get("sku", ""))) and m.site_id
                     for m in matches

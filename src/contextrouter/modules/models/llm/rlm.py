@@ -85,8 +85,7 @@ class RLMLLM(BaseModel):
             from rlm import RLM
         except ImportError as e:
             raise ImportError(
-                "RLMLLM requires the 'rlm' package. "
-                "Install with: pip install rlm or uv add rlm"
+                "RLMLLM requires the 'rlm' package. Install with: pip install rlm or uv add rlm"
             ) from e
 
         self._cfg = config
@@ -111,6 +110,7 @@ class RLMLLM(BaseModel):
         # Add logger if log_dir specified
         if log_dir:
             from rlm.logger import RLMLogger
+
             rlm_kwargs["logger"] = RLMLogger(log_dir=log_dir)
 
         self._rlm = RLM(**rlm_kwargs)
@@ -159,12 +159,10 @@ class RLMLLM(BaseModel):
 
         # RLM completion (synchronous, wrap in executor for async)
         import asyncio
+
         loop = asyncio.get_event_loop()
 
-        result = await loop.run_in_executor(
-            None,
-            lambda: self._rlm.completion(prompt)
-        )
+        result = await loop.run_in_executor(None, lambda: self._rlm.completion(prompt))
 
         # Extract response text
         response_text = getattr(result, "response", str(result))
@@ -229,8 +227,7 @@ class RLMLLM(BaseModel):
             trajectory = getattr(result, "trajectory", None)
             if trajectory:
                 total_tokens = sum(
-                    step.get("tokens", 0) for step in trajectory
-                    if isinstance(step, dict)
+                    step.get("tokens", 0) for step in trajectory if isinstance(step, dict)
                 )
                 return UsageStats(
                     input_tokens=0,

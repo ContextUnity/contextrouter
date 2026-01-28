@@ -45,9 +45,8 @@ jobs:
     - name: Architecture enforcement
       run: python scripts/check_architecture.py
 
-    # Tests temporarily disabled until packages stabilize
-    # - name: Run tests
-    #   run: uv run python -m pytest tests/ -v --cov=src/contextrouter --cov-report=xml
+    - name: Run tests
+      run: uv run pytest tests/ -v --tb=short
 
     - name: Run Bandit security scanner
       run: |

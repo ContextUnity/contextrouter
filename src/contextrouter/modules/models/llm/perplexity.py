@@ -76,13 +76,13 @@ class PerplexityLLM(BaseModel):
         _ = token
 
         messages = self._build_messages(request)
-        
+
         payload: dict[str, Any] = {
             "model": self._model_name,
             "messages": messages,
             "temperature": request.temperature or 0.7,
         }
-        
+
         if request.max_output_tokens:
             payload["max_tokens"] = request.max_output_tokens
 
@@ -107,7 +107,7 @@ class PerplexityLLM(BaseModel):
 
         choice = data.get("choices", [{}])[0]
         content = choice.get("message", {}).get("content", "")
-        citations = data.get("citations", [])
+        # Citations available in data.get("citations", []) for online models
 
         usage = self._extract_usage(data)
 
@@ -161,7 +161,7 @@ class PerplexityLLM(BaseModel):
                 async for line in response.aiter_lines():
                     if not line.startswith("data: "):
                         continue
-                    
+
                     data_str = line[6:]
                     if data_str == "[DONE]":
                         break
@@ -182,10 +182,12 @@ class PerplexityLLM(BaseModel):
         messages = []
 
         if request.system:
-            messages.append({
-                "role": "system",
-                "content": request.system,
-            })
+            messages.append(
+                {
+                    "role": "system",
+                    "content": request.system,
+                }
+            )
 
         # Handle parts - only text supported
         user_content = ""
@@ -194,10 +196,12 @@ class PerplexityLLM(BaseModel):
                 user_content += part.text
 
         if user_content:
-            messages.append({
-                "role": "user",
-                "content": user_content,
-            })
+            messages.append(
+                {
+                    "role": "user",
+                    "content": user_content,
+                }
+            )
 
         return messages
 

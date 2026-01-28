@@ -100,6 +100,7 @@ async def harvest_perplexity_node(state: NewsEngineState) -> dict[str, Any]:
             # Parse response
             import json
             import re
+
             try:
                 text = response.text
                 logger.debug(f"Perplexity raw response length: {len(text)}")
@@ -107,16 +108,16 @@ async def harvest_perplexity_node(state: NewsEngineState) -> dict[str, Any]:
 
                 # Look for JSON array of objects - pattern: [ { ... } ]
                 # Find first [ that is followed by {
-                match = re.search(r'\[\s*\{', text)
+                match = re.search(r"\[\s*\{", text)
                 if match:
                     start = match.start()
                     # Find matching closing ]
                     depth = 0
                     end = start
                     for i, char in enumerate(text[start:]):
-                        if char == '[':
+                        if char == "[":
                             depth += 1
-                        elif char == ']':
+                        elif char == "]":
                             depth -= 1
                             if depth == 0:
                                 end = start + i + 1
@@ -128,7 +129,7 @@ async def harvest_perplexity_node(state: NewsEngineState) -> dict[str, Any]:
                 else:
                     logger.warning("No JSON array of objects found in response")
                     # Try to extract from code block
-                    code_match = re.search(r'```(?:json)?\s*(\[.*?\])\s*```', text, re.DOTALL)
+                    code_match = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", text, re.DOTALL)
                     if code_match:
                         items = json.loads(code_match.group(1))
                     else:
@@ -141,18 +142,25 @@ async def harvest_perplexity_node(state: NewsEngineState) -> dict[str, Any]:
             for item in items:
                 item["source"] = "perplexity"
                 # Dedupe by headline
-                if not any(existing.get("headline") == item.get("headline") for existing in all_items):
+                if not any(
+                    existing.get("headline") == item.get("headline") for existing in all_items
+                ):
                     all_items.append(item)
 
-            logger.info(f"[{tenant_id}] Perplexity attempt {attempt + 1}: got {len(items)} items, total unique: {len(all_items)}")
+            logger.info(
+                f"[{tenant_id}] Perplexity attempt {attempt + 1}: got {len(items)} items, total unique: {len(all_items)}"
+            )
 
             # Check if we have enough
             if len(all_items) >= min_items:
                 break
 
             if attempt < max_retries - 1:
-                logger.info(f"[{tenant_id}] Retrying Perplexity - need {min_items - len(all_items)} more items")
+                logger.info(
+                    f"[{tenant_id}] Retrying Perplexity - need {min_items - len(all_items)} more items"
+                )
                 import asyncio
+
                 await asyncio.sleep(1)  # Brief pause between retries
 
         except Exception as e:
@@ -220,15 +228,15 @@ Return 5-10 actionable, inspiring stories."""
             logger.debug(f"LLM fallback raw response length: {len(text)}")
 
             # Look for JSON array
-            match = re.search(r'\[\s*\{', text)
+            match = re.search(r"\[\s*\{", text)
             if match:
                 start = match.start()
                 depth = 0
                 end = start
                 for i, char in enumerate(text[start:]):
-                    if char == '[':
+                    if char == "[":
                         depth += 1
-                    elif char == ']':
+                    elif char == "]":
                         depth -= 1
                         if depth == 0:
                             end = start + i + 1
@@ -238,7 +246,7 @@ Return 5-10 actionable, inspiring stories."""
                 items = json.loads(json_str)
             else:
                 # Try code block extraction
-                code_match = re.search(r'```(?:json)?\s*(\[.*?\])\s*```', text, re.DOTALL)
+                code_match = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", text, re.DOTALL)
                 if code_match:
                     items = json.loads(code_match.group(1))
                 else:
@@ -263,7 +271,6 @@ Return 5-10 actionable, inspiring stories."""
         return {
             "harvest_errors": errors + [f"LLM fallback error: {str(e)}"],
         }
-
 
 
 async def store_raw_to_brain_node(state: NewsEngineState) -> dict[str, Any]:
@@ -291,6 +298,7 @@ async def store_raw_to_brain_node(state: NewsEngineState) -> dict[str, Any]:
         for item in raw_items:
             try:
                 import uuid
+
                 item_id = str(uuid.uuid4())
 
                 news_item = brain_pb2.NewsItem(

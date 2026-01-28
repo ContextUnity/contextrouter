@@ -69,6 +69,7 @@ class BaseModel(ABC):
         For async batch processing (e.g., OpenAI Batch API), use separate methods.
         """
         import asyncio
+
         results = await asyncio.gather(
             *[self.generate(req, token=token) for req in requests],
             return_exceptions=True,
@@ -78,6 +79,7 @@ class BaseModel(ABC):
         for result in results:
             if isinstance(result, Exception):
                 from .types import ModelError
+
                 raise ModelError(f"Batch generation failed: {result}")
             responses.append(result)
         return responses

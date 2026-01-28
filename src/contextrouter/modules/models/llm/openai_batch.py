@@ -94,8 +94,7 @@ class OpenAIBatchClient:
                 from openai import AsyncOpenAI
             except ImportError as e:
                 raise ImportError(
-                    "OpenAI Batch API requires `openai` package. "
-                    "Install with: pip install openai"
+                    "OpenAI Batch API requires `openai` package. Install with: pip install openai"
                 ) from e
 
             self._client = AsyncOpenAI(
@@ -144,9 +143,7 @@ class OpenAIBatchClient:
         jsonl_content = "\n".join(jsonl_lines)
 
         # Upload file
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".jsonl", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
             f.write(jsonl_content)
             temp_path = Path(f.name)
 
@@ -231,11 +228,13 @@ class OpenAIBatchClient:
             # Check for error
             error = data.get("error")
             if error:
-                results.append(BatchResult(
-                    custom_id=custom_id,
-                    content="",
-                    error=str(error),
-                ))
+                results.append(
+                    BatchResult(
+                        custom_id=custom_id,
+                        content="",
+                        error=str(error),
+                    )
+                )
                 continue
 
             # Extract response
@@ -250,11 +249,13 @@ class OpenAIBatchClient:
 
             usage = body.get("usage")
 
-            results.append(BatchResult(
-                custom_id=custom_id,
-                content=content_text,
-                usage=usage,
-            ))
+            results.append(
+                BatchResult(
+                    custom_id=custom_id,
+                    content=content_text,
+                    usage=usage,
+                )
+            )
 
         return results
 

@@ -101,11 +101,13 @@ async def analyze_node(state: NewsEngineState) -> Dict[str, Any]:
         if fact.get("category") and fact.get("category") != "unknown":
             score += 0.2
 
-        scored_facts.append({
-            **fact,
-            "index": i,
-            "selection_score": round(score, 2),
-        })
+        scored_facts.append(
+            {
+                **fact,
+                "index": i,
+                "selection_score": round(score, 2),
+            }
+        )
 
     # Sort by score
     scored_facts.sort(key=lambda x: x["selection_score"], reverse=True)
@@ -143,15 +145,19 @@ async def plan_node(state: NewsEngineState) -> Dict[str, Any]:
         facts_text = ""
         for i, fact in enumerate(facts[:15]):  # Limit to 15
             facts_text += f"""
-{i}. {fact.get('headline', '')}
-   Category: {fact.get('category', 'unknown')}
-   Summary: {fact.get('summary', '')[:200]}
-   Score: {fact.get('selection_score', 0)}
+{i}. {fact.get("headline", "")}
+   Category: {fact.get("category", "unknown")}
+   Summary: {fact.get("summary", "")[:200]}
+   Score: {fact.get("selection_score", 0)}
 """
 
         request = ModelRequest(
             system=system_prompt,
-            parts=[TextPart(text=f"Today's facts:\n{facts_text}\n\nCreate the editorial plan. Respond with valid JSON ONLY, no markdown code blocks.")],
+            parts=[
+                TextPart(
+                    text=f"Today's facts:\n{facts_text}\n\nCreate the editorial plan. Respond with valid JSON ONLY, no markdown code blocks."
+                )
+            ],
             temperature=0.5,
             max_output_tokens=2000,
         )
@@ -203,12 +209,16 @@ async def plan_node(state: NewsEngineState) -> Dict[str, Any]:
                                 break
 
                     if fact:
-                        stories.append({
-                            "fact": fact,
-                            "assigned_agent": item.get("reporter", item.get("agent", "constructive_analyst")),
-                            "angle": item.get("angle", ""),
-                            "priority": item.get("priority", 5),
-                        })
+                        stories.append(
+                            {
+                                "fact": fact,
+                                "assigned_agent": item.get(
+                                    "reporter", item.get("agent", "constructive_analyst")
+                                ),
+                                "angle": item.get("angle", ""),
+                                "priority": item.get("priority", 5),
+                            }
+                        )
 
                 if not stories:
                     logger.warning("LLM returned 0 parsable stories, falling back to heuristic")
@@ -258,12 +268,14 @@ def _heuristic_plan(facts: list) -> Dict[str, Any]:
         if fact.get("suggested_agents"):
             agent = fact["suggested_agents"][0]
 
-        stories.append({
-            "fact": fact,
-            "assigned_agent": agent,
-            "angle": _create_angle(fact),
-            "priority": len(stories) + 1,
-        })
+        stories.append(
+            {
+                "fact": fact,
+                "assigned_agent": agent,
+                "angle": _create_angle(fact),
+                "priority": len(stories) + 1,
+            }
+        )
 
         seen_categories.add(category)
 

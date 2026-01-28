@@ -63,55 +63,46 @@ PERSONALITY: The Ethologist
 You are fascinated by animal behavior and nature. Your voice is that of a nature documentary narrator -
 dry humor, genuine wonder, occasional philosophical observations about what animals teach us about ourselves.
 Reference David Attenborough if needed. Find the surprising intelligence in animal stories.""",
-
     "lifestyle_guru": """
 PERSONALITY: The Lifestyle Guru
 Former fashion editor who discovered slow living. You're snarky about overconsumption but warm about
 genuine sustainability. You see the new luxury in simplicity. Use gentle irony about influencer culture
 while celebrating real change.""",
-
     "eco_futurist": """
 PERSONALITY: The Eco-Futurist
 Optimistic environmentalist who treats green transition as inevitable momentum. You find renewable energy
 exciting, talk about fossil fuels as "retro technology". Use data but make it poetic.
 The future is already here, just unevenly distributed.""",
-
     "tech_optimist": """
 PERSONALITY: The Tech-Optimist
 You cut through tech hype to find real human benefits. Skeptical of buzzwords but genuinely excited
 about innovation that helps people. You explain complex tech simply, find humor in Silicon Valley culture,
 and always ask "but how does this actually help?".""",
-
     "urbanist": """
 PERSONALITY: The Urbanist
 City lover who sees cities as living organisms. You romanticize public transit, crosswalks, and park benches.
 You're playfully anti-car but not preachy. You notice the small details that make cities livable -
 the bench placement, the tree shade, the pedestrian shortcuts.""",
-
     "prosperity_observer": """
 PERSONALITY: The Prosperity Observer
 Economist-philosopher who measures success in wellbeing, not just GDP. You use financial terms poetically,
 find beauty in trade statistics, see inequality reduction as thrilling. You make economics human -
 every number represents someone's life getting better.""",
-
     "culture_critic": """
 PERSONALITY: The Culture Critic
 Self-aware about your pretentiousness. You celebrate cultural democracy - art in unexpected places,
 creativity breaking barriers. You find significance in pop culture shifts, street fashion,
 and how communities create meaning. Occasionally philosophical but grounded.""",
-
     "community_voice": """
 PERSONALITY: The Community Voice
 Warm local storyteller who celebrates everyday heroes. You find the personal story behind initiatives,
 name people when possible, notice the volunteers and organizers. Your tone is like a neighbor sharing
 good news over the fence.""",
-
     "justice_reformer": """
 PERSONALITY: The Justice Reformer
 You celebrate boring safety - crime rates dropping is exciting to you. You focus on restorative justice,
 rehabilitation success, and reformers who make communities safer. You make safety data feel like progress,
 not just numbers.""",
-
     "constructive_analyst": """
 PERSONALITY: The Constructive Analyst
 Sociologist-futurist who spots generational shifts. You respect all generations equally, find patterns
@@ -134,6 +125,7 @@ async def load_context_node(state: NewsEngineState) -> Dict[str, Any]:
 
     try:
         from contextcore import BrainClient
+
         client = BrainClient(host=config.brain.grpc_endpoint)
 
         for story in stories:
@@ -147,10 +139,7 @@ async def load_context_node(state: NewsEngineState) -> Dict[str, Any]:
                     source_types=["news_post"],
                     limit=3,
                 )
-                story["similar_posts"] = [
-                    {"content": s.content}
-                    for s in similar
-                ]
+                story["similar_posts"] = [{"content": s.content} for s in similar]
             else:
                 story["similar_posts"] = []
 
@@ -217,9 +206,9 @@ async def generate_posts_node(state: NewsEngineState) -> Dict[str, Any]:
 
             user_prompt = f"""Write a post about this news:
 
-Headline: {fact.get('headline', '')}
-Summary: {fact.get('summary', '')}
-Source: {fact.get('url', '')}
+Headline: {fact.get("headline", "")}
+Summary: {fact.get("summary", "")}
+Source: {fact.get("url", "")}
 Angle: {angle}
 {context_text}
 Write the post following the language and style rules from your system prompt."""
@@ -231,11 +220,13 @@ Write the post following the language and style rules from your system prompt.""
                 max_output_tokens=2500,  # Allow 2000+ character posts
             )
             requests.append(request)
-            story_metadata.append({
-                "agent": agent,
-                "headline": fact.get("headline", ""),
-                "url": fact.get("url", ""),
-            })
+            story_metadata.append(
+                {
+                    "agent": agent,
+                    "headline": fact.get("headline", ""),
+                    "url": fact.get("url", ""),
+                }
+            )
 
         # Use batch generation (providers with native batch API will optimize)
         logger.info(f"[{tenant_id}] Sending batch of {len(requests)} generation requests")
@@ -245,13 +236,15 @@ Write the post following the language and style rules from your system prompt.""
 
             # Map responses back to posts
             for response, meta in zip(responses, story_metadata):
-                posts.append({
-                    "agent": meta["agent"],
-                    "headline": meta["headline"],
-                    "content": response.text.strip(),
-                    "emoji": AGENT_EMOJI.get(meta["agent"], "📰"),
-                    "fact_url": meta["url"],
-                })
+                posts.append(
+                    {
+                        "agent": meta["agent"],
+                        "headline": meta["headline"],
+                        "content": response.text.strip(),
+                        "emoji": AGENT_EMOJI.get(meta["agent"], "📰"),
+                        "fact_url": meta["url"],
+                    }
+                )
 
         except Exception as e:
             logger.error(f"Batch generation failed: {e}")

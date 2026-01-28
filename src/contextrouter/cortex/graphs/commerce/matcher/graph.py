@@ -115,4 +115,3 @@ def create_rlm_bulk_matcher_subgraph():
     graph.add_edge("rlm_bulk_match", END)
 
     return graph.compile()
-
