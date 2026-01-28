@@ -312,8 +312,13 @@ class Config(BaseModel):
         if langfuse_service := get_env("LANGFUSE_SERVICE_NAME"):
             self.langfuse.service_name = langfuse_service
 
-        # Security configuration
-        if security_enabled := get_bool_env("CONTEXTROUTER_SECURITY_ENABLED"):
+        # Security configuration - ENABLED by default for security-first approach
+        # Set CONTEXTROUTER_SECURITY_ENABLED=false explicitly to disable in dev
+        security_enabled = get_bool_env("CONTEXTROUTER_SECURITY_ENABLED")
+        if security_enabled is None:
+            # Default: enabled in production-like environments
+            self.security.enabled = True
+        else:
             self.security.enabled = security_enabled
         if private_key_path := get_env("CONTEXTROUTER_PRIVATE_KEY_PATH"):
             self.security.private_key_path = private_key_path

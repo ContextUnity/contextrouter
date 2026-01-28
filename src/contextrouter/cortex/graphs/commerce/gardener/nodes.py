@@ -191,7 +191,7 @@ def _load_prompt(prompts_dir: str, filename: str) -> str:
 
 async def fetch_pending_node(state: GardenerState) -> dict:
     """Fetch products needing enrichment from queue."""
-    from ....queue import get_enrichment_queue
+    from ..queue import get_enrichment_queue
 
     queue = get_enrichment_queue()
     product_ids = await queue.dequeue(
@@ -348,7 +348,8 @@ async def update_kg_node(state: GardenerState) -> dict:
 
     start = time.time()
 
-    ontology_path = Path(__file__).parent.parent.parent / "ontology" / "relations.json"
+    # Path: gardener/ -> commerce/ontology/
+    ontology_path = Path(__file__).parent.parent / "ontology" / "relations.json"
     if ontology_path.exists():
         with open(ontology_path) as f:
             ontology = json.load(f)

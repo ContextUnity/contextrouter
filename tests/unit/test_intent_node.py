@@ -4,7 +4,7 @@ import json
 
 from langchain_core.messages import HumanMessage
 
-from contextrouter.cortex.steps.rag_retrieval.intent import detect_intent
+from contextrouter.cortex.graphs.rag_retrieval.intent import detect_intent
 from contextrouter.modules.models.types import (
     ModelCapabilities,
     ModelRequest,

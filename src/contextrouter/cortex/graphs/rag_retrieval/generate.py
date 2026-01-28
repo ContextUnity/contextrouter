@@ -16,7 +16,7 @@ from contextrouter.modules.models import model_registry
 from contextrouter.modules.models.types import ModelRequest, TextPart
 
 from ...llm import build_rag_prompt
-from ...nodes.utils import pipeline_log
+from ...utils.pipeline import pipeline_log
 from .no_results import no_results_response
 
 logger = logging.getLogger(__name__)

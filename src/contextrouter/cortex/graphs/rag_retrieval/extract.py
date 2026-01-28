@@ -7,7 +7,7 @@ import time
 
 from contextrouter.cortex import AgentState, get_last_user_query
 
-from ...nodes.utils import pipeline_log
+from ...utils.pipeline import pipeline_log
 
 logger = logging.getLogger(__name__)
 

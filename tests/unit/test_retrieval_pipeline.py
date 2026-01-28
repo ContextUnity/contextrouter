@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
-from contextcore import ContextUnit
-from contextrouter.core.interfaces import IRead
-from contextrouter.modules.retrieval.rag.models import Citation, RetrievedDoc
 from contextrouter.modules.retrieval.rag import RagPipeline
+from contextrouter.modules.retrieval.rag.models import Citation, RetrievedDoc
 
 
 def test_retrieval_pipeline_returns_empty_on_empty_query(monkeypatch) -> None:
@@ -25,15 +23,20 @@ def test_retrieval_pipeline_calls_vertex_and_builds_citations(monkeypatch) -> No
     class MockResult:
         def __init__(self):
             doc = RetrievedDoc(source_type="book", content="book:hello", title="t")
+
             # Create a mock ContextUnit-like object with content attribute
             class MockUnit:
                 def __init__(self):
                     self.content = doc
+
             self.units = [MockUnit()]
 
-    async def mock_execute(self, query, *, limit: int = 5, filters=None, token=None, providers=None):
+    async def mock_execute(
+        self, query, *, limit: int = 5, filters=None, token=None, providers=None
+    ):
         calls.append((str(query), limit))
         from contextrouter.modules.retrieval.pipeline import PipelineResult
+
         return PipelineResult(units=MockResult().units)
 
     class MockReranker:

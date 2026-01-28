@@ -1,0 +1,50 @@
+{
+    "MADE_BY": {
+        "description": "Product is made by a brand",
+        "source_type": "product",
+        "target_type": "brand",
+        "symmetric": false
+    },
+    "USES": {
+        "description": "Product uses a technology",
+        "source_type": "product",
+        "target_type": "technology",
+        "symmetric": false
+    },
+    "BELONGS_TO": {
+        "description": "Product belongs to a category",
+        "source_type": "product",
+        "target_type": "category",
+        "symmetric": false
+    },
+    "HAS_COLOR": {
+        "description": "Product has a specific color variant",
+        "source_type": "product",
+        "target_type": "color",
+        "symmetric": false
+    },
+    "HAS_SIZE": {
+        "description": "Product has a specific size variant",
+        "source_type": "product",
+        "target_type": "size",
+        "symmetric": false
+    },
+    "SIMILAR_TO": {
+        "description": "Product is similar to another product",
+        "source_type": "product",
+        "target_type": "product",
+        "symmetric": true
+    },
+    "VARIANT_OF": {
+        "description": "Product is a variant of a parent product",
+        "source_type": "product",
+        "target_type": "product",
+        "symmetric": false
+    },
+    "COMPATIBLE_WITH": {
+        "description": "Product is compatible with another product",
+        "source_type": "product",
+        "target_type": "product",
+        "symmetric": true
+    }
+}

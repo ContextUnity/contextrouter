@@ -14,8 +14,8 @@ from contextrouter.cortex.services import get_graph_service
 from contextrouter.cortex.state import AgentState, get_last_user_query
 from contextrouter.modules.observability import retrieval_span
 
-from ...nodes.utils import pipeline_log
 from ...utils.json import strip_json_fence
+from ...utils.pipeline import pipeline_log
 from ...utils.taxonomy_loader import (
     get_taxonomy_canonical_map,
     get_taxonomy_top_level_categories,

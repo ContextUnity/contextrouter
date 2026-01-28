@@ -40,7 +40,7 @@ import contextrouter.core.registry as core_registry_module
 from contextrouter.core import agent_registry, get_core_config
 from contextrouter.cortex import AgentState, InputState, OutputState
 
-from ..steps.rag_retrieval.routing import should_retrieve
+from .routing import should_retrieve
 
 _compiled_graph: object | None = None
 
@@ -96,16 +96,16 @@ def build_graph() -> StateGraph:
         mode = "agent"
 
     if mode == "direct":
-        # Direct-mode: assemble graph from function nodes.
-        from contextrouter.cortex.steps.rag_retrieval import (
+        # Direct-mode: assemble graph from function nodes (local imports).
+        from . import (
             detect_intent,
             extract_user_query,
             generate_response,
             generate_search_suggestions,
             retrieve_documents,
         )
-        from contextrouter.cortex.steps.rag_retrieval.memory import fetch_memory
-        from contextrouter.cortex.steps.rag_retrieval.reflect import reflect_interaction
+        from .memory import fetch_memory
+        from .reflect import reflect_interaction
 
         workflow.add_node("extract_query", extract_user_query)
         workflow.add_node("fetch_memory", fetch_memory)
@@ -118,8 +118,8 @@ def build_graph() -> StateGraph:
         # Agent-mode: assemble graph dynamically from registry (class-based nodes).
         extract_cls = agent_registry.get("extract_query")
         # Memory fetch might not be in registry yet, using direct import for now
-        from contextrouter.cortex.steps.rag_retrieval.memory import fetch_memory
-        from contextrouter.cortex.steps.rag_retrieval.reflect import reflect_interaction
+        from .memory import fetch_memory
+        from .reflect import reflect_interaction
 
         intent_cls = agent_registry.get("detect_intent")
         retrieve_cls = agent_registry.get("retrieve")

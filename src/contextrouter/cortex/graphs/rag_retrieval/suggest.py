@@ -8,8 +8,8 @@ import logging
 from contextrouter.cortex import AgentState
 from contextrouter.modules.observability import retrieval_span
 
-from ...nodes.utils import pipeline_log
 from ...utils.json import strip_json_fence
+from ...utils.pipeline import pipeline_log
 
 logger = logging.getLogger(__name__)
 

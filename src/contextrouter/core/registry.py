@@ -259,12 +259,11 @@ def select_transformer(name: str, **kwargs: Any) -> Any:
 # Essential for cortex agent hot-swapping and dynamic graph assembly
 
 BUILTIN_AGENTS: dict[str, str] = {
-    "extract_query": "contextrouter.cortex.nodes.rag_retrieval.extract.ExtractQueryAgent",
-    "detect_intent": "contextrouter.cortex.nodes.rag_retrieval.intent.DetectIntentAgent",
-    "retrieve": "contextrouter.cortex.nodes.rag_retrieval.retrieve.RetrieveAgent",
-    "suggest": "contextrouter.cortex.nodes.rag_retrieval.suggest.SuggestAgent",
-    "generate": "contextrouter.cortex.nodes.rag_retrieval.generate.GenerateAgent",
-    "routing": "contextrouter.cortex.nodes.rag_retrieval.routing.RoutingAgent",
+    "extract_query": "contextrouter.cortex.graphs.rag_retrieval.agents.ExtractQueryAgent",
+    "detect_intent": "contextrouter.cortex.graphs.rag_retrieval.agents.DetectIntentAgent",
+    "retrieve": "contextrouter.cortex.graphs.rag_retrieval.agents.RetrieveAgent",
+    "suggest": "contextrouter.cortex.graphs.rag_retrieval.agents.SuggestAgent",
+    "generate": "contextrouter.cortex.graphs.rag_retrieval.agents.GenerateAgent",
 }
 
 agent_registry: Registry = Registry(name="agents", builtin_map=BUILTIN_AGENTS)

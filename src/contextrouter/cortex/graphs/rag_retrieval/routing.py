@@ -7,7 +7,7 @@ from typing import Literal
 
 from contextrouter.cortex import AgentState
 
-from ...nodes.utils import pipeline_log
+from ...utils.pipeline import pipeline_log
 
 logger = logging.getLogger(__name__)
 

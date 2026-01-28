@@ -137,7 +137,7 @@ async def generate_with_native_grounding(state: AgentState) -> dict[str, object]
             from langchain_core.messages import AIMessage as LangChainAIMessage
             from langchain_core.messages import HumanMessage
 
-            from contextrouter.cortex.steps.rag_retrieval.no_results import no_results_response
+            from ..no_results import no_results_response
 
             # Format conversation history from messages (same logic as RAGStrategy._format_history)
             conversation_history = ""
