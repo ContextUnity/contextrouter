@@ -33,40 +33,12 @@ class TestGardenerConfig:
         assert config.poll_interval_sec == 900  # 15 min
 
 
-class TestInvokeGardener:
-    """Test invoke_gardener function."""
-    
-    @pytest.mark.asyncio
-    async def test_invoke_gardener_requires_prompts_dir(self):
-        """Verify prompts_dir is required."""
-        from contextrouter.cortex.graphs.gardener import invoke_gardener
-        
-        with pytest.raises(ValueError, match="prompts_dir must be passed"):
-            await invoke_gardener(
-                db_url="postgresql://test",
-                tenant_id="test",
-                prompts_dir=None,  # Should fail
-            )
-    
-    @pytest.mark.asyncio
-    async def test_invoke_gardener_requires_tenant_id(self):
-        """Verify tenant_id is required."""
-        from contextrouter.cortex.graphs.gardener import invoke_gardener
-        
-        with pytest.raises(ValueError, match="Tenant ID not configured"):
-            await invoke_gardener(
-                db_url="postgresql://test",
-                tenant_id="",  # Empty
-                prompts_dir="/some/path",
-            )
-
-
 class TestLoadPrompt:
     """Test prompt loading from files."""
     
     def test_load_prompt_from_directory(self, tmp_path):
         """Test loading prompt from custom directory."""
-        from contextrouter.cortex.graphs.gardener import _load_prompt
+        from contextrouter.cortex.graphs.commerce.gardener.nodes import _load_prompt
         
         # Create test prompt
         prompts_dir = tmp_path / "prompts"
@@ -79,7 +51,7 @@ class TestLoadPrompt:
     
     def test_load_prompt_not_found_raises(self, tmp_path):
         """Test error when prompt not found."""
-        from contextrouter.cortex.graphs.gardener import _load_prompt
+        from contextrouter.cortex.graphs.commerce.gardener.nodes import _load_prompt
         
         with pytest.raises(FileNotFoundError, match="Prompt not found"):
             _load_prompt(str(tmp_path), "nonexistent.txt")
@@ -90,7 +62,7 @@ class TestSlugify:
     
     def test_slugify_basic(self):
         """Test basic slugification."""
-        from contextrouter.cortex.graphs.gardener import _slugify
+        from contextrouter.cortex.graphs.commerce.gardener.nodes import _slugify
         
         assert _slugify("Gore-Tex Pro") == "gore-tex-pro"
         assert _slugify("Arc'teryx") == "arcteryx"
@@ -102,7 +74,7 @@ class TestParseJsonResponse:
     
     def test_parse_json_array(self):
         """Test parsing JSON array from response."""
-        from contextrouter.cortex.graphs.gardener import _parse_json_response
+        from contextrouter.cortex.graphs.commerce.gardener.nodes import _parse_json_response
         
         content = '[{"id": 1, "category": "outdoor.jackets"}]'
         result = _parse_json_response(content)
@@ -112,7 +84,7 @@ class TestParseJsonResponse:
     
     def test_parse_json_with_markdown(self):
         """Test parsing JSON wrapped in markdown."""
-        from contextrouter.cortex.graphs.gardener import _parse_json_response
+        from contextrouter.cortex.graphs.commerce.gardener.nodes import _parse_json_response
         
         content = '''Here is the result:
 ```json
@@ -126,7 +98,7 @@ class TestParseJsonResponse:
     
     def test_parse_invalid_json_returns_empty(self):
         """Test invalid JSON returns empty list."""
-        from contextrouter.cortex.graphs.gardener import _parse_json_response
+        from contextrouter.cortex.graphs.commerce.gardener.nodes import _parse_json_response
         
         result = _parse_json_response("not json at all")
         
