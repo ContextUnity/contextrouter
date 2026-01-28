@@ -34,7 +34,7 @@ def create_chat_subgraph():
 
     This subgraph adds LLM intent detection on top of Commerce.
     Use this when you have natural language input from users.
-    
+
     For programmatic access, use build_commerce_graph() directly with intent field.
 
     Flow:
@@ -95,11 +95,11 @@ async def invoke_chat(user_message: str, product_id: str = None) -> Dict[str, An
     Run Chat (PIM supervisor).
 
     Entry point for PIM Chat with LLM intent detection.
-    
+
     Args:
         user_message: Natural language message from user
         product_id: Optional product context
-        
+
     Returns:
         Dict with intent, response, actions, and sub_result
     """

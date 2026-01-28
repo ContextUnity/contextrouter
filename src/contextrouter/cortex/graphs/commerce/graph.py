@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict
 
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, StateGraph
 
 from contextrouter.core.registry import register_graph
 

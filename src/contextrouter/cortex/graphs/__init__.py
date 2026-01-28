@@ -17,16 +17,13 @@ Usage:
     # Via dispatcher (config-based)
     from contextrouter.cortex.graphs import compile_graph
     graph = compile_graph()  # Uses router.graph config
-    
+
     # Direct access
     from contextrouter.cortex.graphs.commerce import build_commerce_graph
     commerce = build_commerce_graph()
 """
 
 from . import rag_retrieval
-
-# Dispatcher (central graph selection)
-from .dispatcher import build_graph, compile_graph, reset_graph
 
 # Commerce graph
 from .commerce import (
@@ -42,6 +39,9 @@ from .commerce import (
     create_matcher_subgraph,
     invoke_chat,
 )
+
+# Dispatcher (central graph selection)
+from .dispatcher import build_graph, compile_graph, reset_graph
 
 __all__ = [
     # Dispatcher

@@ -33,9 +33,7 @@ class DBClient:
         import psycopg
         from psycopg.rows import dict_row
 
-        async with await psycopg.AsyncConnection.connect(
-            self.db_url, row_factory=dict_row
-        ) as conn:
+        async with await psycopg.AsyncConnection.connect(self.db_url, row_factory=dict_row) as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
                     """
@@ -291,9 +289,7 @@ async def extract_ner_node(state: GardenerState) -> dict:
         return {}
 
     llm = get_llm()
-    items = [
-        {"id": p.id, "name": p.name, "brand": p.brand_name or ""} for p in products[:50]
-    ]
+    items = [{"id": p.id, "name": p.name, "brand": p.brand_name or ""} for p in products[:50]]
     system_prompt = _load_prompt(state["prompts_dir"], "ner_extraction.txt")
 
     ner_results = []
@@ -437,12 +433,8 @@ async def write_results_node(state: GardenerState) -> dict:
         + state.get("kg_results", [])
     ):
         if result.product_id not in enrichment_map:
-            product = next(
-                (p for p in state["products"] if p.id == result.product_id), None
-            )
-            enrichment_map[result.product_id] = (
-                product.enrichment.copy() if product else {}
-            )
+            product = next((p for p in state["products"] if p.id == result.product_id), None)
+            enrichment_map[result.product_id] = product.enrichment.copy() if product else {}
 
         enrichment_map[result.product_id][result.task] = {
             "status": result.status,

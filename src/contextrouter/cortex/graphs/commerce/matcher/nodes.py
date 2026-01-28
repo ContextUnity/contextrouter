@@ -7,7 +7,7 @@ Core matching logic for product deduplication and linking.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from contextcore import BrainClient, ContextUnit
 
@@ -72,12 +72,12 @@ async def match_products_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Match products using MatchingNode."""
     matcher = MatchingNode()
     products = state.get("products", [])
-    
+
     results = []
     for product in products:
         result = await matcher.process({"product": product})
         results.append(result)
-    
+
     return {"match_results": results}
 
 
@@ -86,12 +86,12 @@ async def link_or_queue_node(state: Dict[str, Any]) -> Dict[str, Any]:
     results = state.get("match_results", [])
     auto_linked = 0
     queued = 0
-    
+
     for result in results:
         if result.get("match_status") == "linked":
             auto_linked += 1
         else:
             queued += 1
-    
+
     logger.info(f"Matcher: {auto_linked} auto-linked, {queued} queued for review")
     return {"auto_linked": auto_linked, "queued": queued}

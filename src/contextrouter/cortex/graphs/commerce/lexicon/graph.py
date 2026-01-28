@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 class LexiconState:
     """State for Lexicon subgraph."""
+
     pass
 
 
