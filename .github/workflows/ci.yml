@@ -16,6 +16,12 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Checkout contextcore
+      uses: actions/checkout@v4
+      with:
+        repository: ContextUnity/contextcore
+        path: contextcore
+
     - name: Set up Python 3.13
       uses: actions/setup-python@v5
       with:

@@ -85,11 +85,14 @@ class OpenAILLM(BaseModel):
             )
 
         messages = build_openai_messages(request)
-        model = self._model.bind(
-            temperature=request.temperature,
-            max_tokens=request.max_output_tokens,
-            timeout=request.timeout_sec,
-        )
+        # gpt-5-mini only supports temperature=1, skip if model doesn't support it
+        bind_kwargs: dict = {
+            "max_tokens": request.max_output_tokens,
+            "timeout": request.timeout_sec,
+        }
+        if "gpt-5-mini" not in self._model_name:
+            bind_kwargs["temperature"] = request.temperature
+        model = self._model.bind(**bind_kwargs)
         msg = await model.ainvoke(messages)
         text = getattr(msg, "content", "")
 
@@ -110,11 +113,14 @@ class OpenAILLM(BaseModel):
     ) -> AsyncIterator[ModelStreamEvent]:
         _ = token
         messages = build_openai_messages(request)
-        model = self._model.bind(
-            temperature=request.temperature,
-            max_tokens=request.max_output_tokens,
-            timeout=request.timeout_sec,
-        )
+        # gpt-5-mini only supports temperature=1, skip if model doesn't support it
+        bind_kwargs: dict = {
+            "max_tokens": request.max_output_tokens,
+            "timeout": request.timeout_sec,
+        }
+        if "gpt-5-mini" not in self._model_name:
+            bind_kwargs["temperature"] = request.temperature
+        model = self._model.bind(**bind_kwargs)
 
         full = ""
         async for chunk in model.astream(messages):
