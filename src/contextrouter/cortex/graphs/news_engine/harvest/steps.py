@@ -92,7 +92,7 @@ async def harvest_perplexity_node(state: NewsEngineState) -> dict[str, Any]:
                 system=system_prompt,
                 parts=[TextPart(text=user_prompt)],
                 temperature=0.3 + (attempt * 0.1),  # Slightly higher temp on retry
-                max_output_tokens=4000,
+                max_output_tokens=8000,  # Extra for reasoning models
             )
 
             response = await model.generate(request)
@@ -214,7 +214,7 @@ Return 5-10 actionable, inspiring stories."""
             system=system_prompt,
             parts=[TextPart(text=user_prompt)],
             temperature=0.5,
-            max_output_tokens=4000,
+            max_output_tokens=8000,  # Extra for reasoning models
         )
 
         response = await model.generate(request)

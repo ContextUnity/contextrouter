@@ -55,11 +55,13 @@ class OpenAILLM(BaseModel):
 
         self._cfg = config
         self._model_name = (model_name or "gpt-5.1").strip() or "gpt-5.1"
+        # Disable SDK retries - we handle fallback ourselves via FallbackModel
+        # This prevents wasting time on quota errors that will never succeed
         self._model = ChatOpenAI(
             model=self._model_name,
             api_key=(config.openai.api_key or None),
             organization=config.openai.organization,
-            max_retries=config.llm.max_retries,
+            max_retries=0,  # No SDK retries - fallback handles it
             **kwargs,
         )
 
@@ -74,6 +76,8 @@ class OpenAILLM(BaseModel):
     async def generate(
         self, request: ModelRequest, *, token: ContextToken | None = None
     ) -> ModelResponse:
+        from ..types import ModelQuotaExhaustedError, ModelRateLimitError, ProviderInfo
+        
         _ = token
         if any(isinstance(p, AudioPart) for p in request.parts):
             return await generate_asr_openai_compat(
@@ -85,27 +89,69 @@ class OpenAILLM(BaseModel):
             )
 
         messages = build_openai_messages(request)
-        # gpt-5-mini only supports temperature=1, skip if model doesn't support it
+        
+        # Reasoning models (gpt-5*, o1*) require max_completion_tokens, not max_tokens
+        # They also don't support custom temperature (must be 1)
+        is_reasoning_model = any(
+            x in self._model_name.lower() 
+            for x in ["gpt-5", "o1-", "o1_", "o3-", "o3_"]
+        )
+        
         bind_kwargs: dict = {
-            "max_tokens": request.max_output_tokens,
             "timeout": request.timeout_sec,
         }
-        if "gpt-5-mini" not in self._model_name:
+        
+        if is_reasoning_model:
+            # Reasoning models need more tokens for CoT + response
+            # Use max_completion_tokens (not max_tokens!)
+            bind_kwargs["max_completion_tokens"] = request.max_output_tokens
+            # Temperature must be 1 for reasoning models
+        else:
+            bind_kwargs["max_tokens"] = request.max_output_tokens
             bind_kwargs["temperature"] = request.temperature
+            
         model = self._model.bind(**bind_kwargs)
-        msg = await model.ainvoke(messages)
+        
+        provider_info = ProviderInfo(
+            provider="openai",
+            model_name=self._model_name,
+            model_key=f"openai/{self._model_name}",
+        )
+        
+        try:
+            msg = await model.ainvoke(messages)
+        except Exception as e:
+            # Convert OpenAI-specific errors to our error types for proper fallback
+            error_str = str(e).lower()
+            if "insufficient_quota" in error_str or "billing" in error_str:
+                raise ModelQuotaExhaustedError(
+                    f"OpenAI quota exhausted: {e}",
+                    provider_info=provider_info,
+                ) from e
+            elif "rate_limit" in error_str or "too many requests" in error_str:
+                raise ModelRateLimitError(
+                    f"OpenAI rate limited: {e}",
+                    provider_info=provider_info,
+                ) from e
+            raise  # Re-raise other errors as-is
+            
         text = getattr(msg, "content", "")
+        
+        # Debug: log when content is empty
+        if not text:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"OpenAI returned empty content. Full response: {msg}")
+            # Check for refusal or other issues
+            if hasattr(msg, "refusal") and msg.refusal:
+                logger.warning(f"OpenAI REFUSED to respond: {msg.refusal}")
 
         usage = self._extract_usage(msg)
 
         return ModelResponse(
             text=str(text or ""),
             usage=usage,
-            raw_provider=ProviderInfo(
-                provider="openai",
-                model_name=self._model_name,
-                model_key=f"openai/{self._model_name}",
-            ),
+            raw_provider=provider_info,
         )
 
     async def stream(

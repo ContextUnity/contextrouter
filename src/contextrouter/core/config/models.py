@@ -71,6 +71,10 @@ class ModelsConfig(BaseModel):
 
     default_llm: str = Field(default="vertex/gemini-2.5-flash", alias="default")
     default_embeddings: str = "hf/sentence-transformers"
+    
+    # Fallback LLM chain - used when default_llm fails (e.g., quota exceeded)
+    # Set via CONTEXTROUTER_FALLBACK_LLMS="anthropic/claude-sonnet-4,google/gemini-2.5-flash"
+    fallback_llms: list[str] = Field(default_factory=list)
 
     # Canonical per-component configuration:
     rag: RagModelsConfig = Field(default_factory=RagModelsConfig)

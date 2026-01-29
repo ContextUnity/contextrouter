@@ -10,139 +10,198 @@
 
 ## What is ContextRouter?
 
-ContextRouter is a modular AI agent framework designed for building production-ready agent orchestration systems. It's built on top of LangGraph and provides a clean separation between your agent's decision logic and the technical implementation details.
+ContextRouter is the **AI Gateway and Agent Orchestration** layer of the [ContextUnity](https://github.com/ContextUnity) ecosystem. It's built on LangGraph and provides:
 
-Think of it as an **AI Gateway** that can:
-- **Orchestrate multiple LLM providers** (OpenAI, Anthropic, Vertex AI, Groq, local models)
-- **Route requests intelligently** based on latency, cost, and user tier
-- **Manage agent workflows** using LangGraph state machines
-- **Handle voice I/O** for speech-to-text and text-to-speech
-- **Scale across instances** with shared state management
+- **LLM Provider Routing** — OpenAI, Anthropic, Vertex AI, Groq, Perplexity, local models
+- **Agent Orchestration** — LangGraph state machines for complex workflows
+- **Fallback & Reliability** — automatic provider fallback with quota/rate limit handling
+- **ContextUnit Protocol** — all data flows through the provenance-tracking ContextUnit format
+- **Tool Integration** — exposes Brain (search) and Commerce (products) as LLM tools
 
-## What is it for?
+Think of it as the **"Mind"** that processes requests, delegates memory to Brain, and orchestrates multi-step reasoning.
 
-ContextRouter is designed for developers and companies who want to:
+## Core Concepts
 
-- **Build complex AI agents** — from simple Q&A systems to sophisticated workflows
-- **Orchestrate agent workflows** — multi-step tasks with state management and conditional routing
-- **Create platform-independent solutions** — works with web, Telegram, API, or any other platform
-- **Ensure security and traceability** — every piece of data uses ContextUnit protocol for full provenance tracking
+### ContextUnit — The Atomic Unit
 
-### Typical use cases:
-- AI Gateway and load balancing for LLM providers
-- Agent orchestration for complex business workflows
-- Voice-enabled personal assistants
-- Multi-instance production deployments
+All data flowing through ContextRouter uses the **ContextUnit** protocol from [ContextCore](https://github.com/ContextUnity/contextcore):
 
-## Key Features
+```python
+from contextcore import ContextUnit, ContextToken
 
-- **🧩 Truly Modular** — every component can be swapped without changing your agent logic
-- **🎯 Agent Orchestration** — build sophisticated agent workflows with LangGraph state machines
-- **🛡️ Production Ready** — ContextUnit protocol for data provenance and audit trails, multi-instance safe state
-- **🌐 Universal Model Support** — use any LLM provider: commercial (OpenAI, Anthropic, Vertex AI, Groq), aggregators (OpenRouter), or local (Ollama, vLLM)
-- **🔧 Extensible by Design** — build custom agents, processing graphs, and integrations without touching core code
+unit = ContextUnit(
+    payload={"query": "What is RAG?"},
+    provenance=["connector:telegram", "graph:rag"],
+    security=SecurityScopes(read=["knowledge:read"])
+)
 
-## Modules Overview
+# Authorization via capability-based tokens
+token = ContextToken(permissions=("knowledge:read",))
+if token.can_read(unit.security):
+    # Process request
+```
 
-ContextRouter's architecture is built around specialized modules:
+Every transformation adds to the provenance chain, enabling full traceability.
 
-- **`modules/models/`** — LLM and embedding model abstractions (OpenAI, Anthropic, Vertex AI, Groq, local models)
-- **`modules/protocols/`** — Platform adapters (AG-UI events, A2A/A2UI protocols)
-- **`cortex/graphs/`** — LangGraph-based agent workflows:
-  - `dispatcher.py` — Central graph selection (by config/registry)
-  - `rag_retrieval.py` — RAG pipeline (retrieve → generate)
-  - `commerce/` — Commerce domain (gardener, lexicon, matcher, chat)
-- **`core/`** — ContextUnit protocol, token management, and core interfaces
+### Model Registry
+
+All LLM usage goes through the central registry with automatic fallback:
+
+```python
+from contextrouter.modules.models import model_registry
+
+model = model_registry.get_llm_with_fallback(
+    key="openai/gpt-5-mini",
+    fallback_keys=["anthropic/claude-sonnet-4", "vertex/gemini-2.5-flash"],
+    strategy="fallback",
+    config=config,
+)
+
+response = await model.generate(request)
+```
 
 ## Integration with ContextUnity
 
-ContextRouter is part of the [ContextUnity](https://github.com/ContextUnity) ecosystem:
+ContextRouter is the orchestration layer that connects all ContextUnity services:
 
-| Service | Role | Documentation |
-|---------|------|---------------|
-| **ContextCore** | Shared types and ContextUnit protocol | [contextcore.dev](https://contextcore.dev) |
-| **ContextBrain** | RAG retrieval and knowledge storage | [contextbrain.dev](https://contextbrain.dev) |
-| **ContextWorker** | Background task execution | [contextworker.dev](https://contextworker.dev) |
-| **ContextCommerce** | E-commerce platform with agent integration | [contextcommerce.dev](https://contextcommerce.dev) |
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         ContextRouter                               │
+│                     (The "Mind" — Orchestration)                    │
+├─────────────────────────────────────────────────────────────────────┤
+│  • Receives requests from protocols (Telegram, Web, API)            │
+│  • Routes to appropriate LLM providers                              │
+│  • Orchestrates multi-step agent workflows                          │
+│  • Delegates memory operations to Brain                             │
+│  • Exposes tools for LLM function calling                           │
+└───────────────┬─────────────────────────────────────┬───────────────┘
+                │                                     │
+                ▼                                     ▼
+┌───────────────────────────┐           ┌───────────────────────────┐
+│      ContextBrain         │           │     ContextCommerce       │
+│  (The "Memory" — RAG)     │           │   (The "Store" — PIM)     │
+├───────────────────────────┤           ├───────────────────────────┤
+│ • Vector storage          │           │ • Product catalog         │
+│ • Semantic search         │           │ • Taxonomy management     │
+│ • Knowledge graph         │           │ • Supplier integration    │
+│ • Episodic memory         │           │ • E-commerce backend      │
+└───────────────────────────┘           └───────────────────────────┘
+                ▲                                     ▲
+                │                                     │
+                └─────────────────┬───────────────────┘
+                                  │
+                                  ▼
+                    ┌───────────────────────────┐
+                    │      ContextWorker        │
+                    │  (The "Hands" — Tasks)    │
+                    ├───────────────────────────┤
+                    │ • Temporal workflows      │
+                    │ • Background processing   │
+                    │ • Scheduled jobs          │
+                    └───────────────────────────┘
+```
+
+| Service | Role | How Router Uses It |
+|---------|------|-------------------|
+| **ContextCore** | Shared types, ContextUnit, gRPC contracts | Types, tokens, protos |
+| **ContextBrain** | Knowledge storage and RAG | Search, memory, taxonomy via gRPC |
+| **ContextWorker** | Background task execution | Triggers workflows via Temporal |
+| **ContextCommerce** | E-commerce platform | Products, enrichment, matching |
+
+> **What is gRPC?** [gRPC](https://grpc.io/) is a high-performance RPC framework that uses Protocol Buffers for serialization. It enables type-safe, efficient communication between services — faster than REST, with built-in streaming support.
 
 ### Memory & Retrieval (The Brain)
 
-ContextRouter no longer manages vector databases directly. It delegates all memory operations to **ContextBrain** via the `BrainProvider`.
+ContextRouter delegates all memory operations to **ContextBrain** via the `BrainProvider`:
 
-| Mode | Description | Requirements |
-|------|-------------|--------------|
-| **Local** | Direct library import | `pip install contextbrain` |
-| **gRPC** | Network call to remote service | `contextbrain` service running |
+```python
+from contextrouter.modules.providers.storage import BrainProvider
 
-Set your mode via `BRAIN_MODE=local` or `BRAIN_MODE=grpc`. See [Storage Provider Docs](./src/contextrouter/modules/providers/storage/README.md) for details.
+brain = BrainProvider(config)
+results = await brain.search("product taxonomy", limit=10)
+```
 
-For RAG capabilities, knowledge storage, and ingestion pipelines, see [ContextBrain](https://contextbrain.dev).
+Set your mode via `BRAIN_MODE=local` or `BRAIN_MODE=grpc`.
 
-## Roadmap
+## Key Features
 
-We're actively developing ContextRouter with focus on improving agent orchestration and developer experience:
+- **🧩 Modular Architecture** — swap components without changing agent logic
+- **🎯 Agent Orchestration** — LangGraph state machines for complex workflows
+- **🛡️ Production Ready** — ContextUnit protocol for data provenance and audit trails
+- **🌐 Universal Model Support** — 15+ LLM providers with automatic fallback
+- **⚡ Reliability** — quota exhaustion, rate limit, and timeout handling
+- **🔧 Extensible** — add providers, graphs, tools via registry pattern
 
-### Near-term priorities:
-- **Enhanced Voice I/O** — improved speech-to-text and text-to-speech capabilities
-- **Advanced Routing** — smarter provider selection based on cost, latency, and quality
-- **Plugin System** — comprehensive plugin architecture for extending functionality
-- **Multi-instance Improvements** — better state synchronization and leader election
+## Supported LLM Providers
+
+| Provider | Key | Use Case |
+|----------|-----|----------|
+| **Vertex AI** | `vertex/gemini-2.0-flash` | Production, multimodal |
+| **OpenAI** | `openai/gpt-5-mini` | General purpose |
+| **Anthropic** | `anthropic/claude-sonnet-4` | Reasoning, analysis |
+| **Perplexity** | `perplexity/sonar` | Web-grounded search |
+| **Groq** | `groq/llama-3.3-70b-versatile` | Ultra-fast inference |
+| **OpenRouter** | `openrouter/deepseek/deepseek-r1` | Access to 100+ models |
+| **Local** | `local/llama3.2` | Privacy, development |
+| **RLM** | `rlm/gpt-5-mini` | Massive context (50k+ items) |
 
 ## Quick Start
 
 ```python
 from contextrouter.cortex import stream_agent
 
-# Initialize the shared brain
 async for event in stream_agent(
     messages=[{"role": "user", "content": "How does RAG work?"}],
     session_id="session_123",
     platform="web",
-    style_prompt="Be concise and technical."
 ):
     print(event)
 ```
 
-For more examples, see the [`examples/`](./examples/) directory.
+## Installation
 
-## Getting Started
+```bash
+pip install contextrouter
 
-1. **Install ContextRouter**:
-   ```bash
-   pip install contextrouter
-   # For full functionality (recommended):
-   pip install contextrouter[vertex,storage,ingestion]
-   # Observability (optional):
-   pip install contextrouter[observability]
-   ```
+# With all providers (recommended):
+pip install contextrouter[vertex,storage,ingestion]
 
-2. **Configure your data sources** and LLM models
-3. **Build your first agent** using the examples above
-4. **Deploy** to your preferred platform (web, API, Telegram, etc.)
+# Observability (optional):
+pip install contextrouter[observability]
+```
 
-### Notes (Vertex / Gemini)
+## Configuration
 
-- **Vertex AI mode**: ContextRouter sets `GOOGLE_GENAI_USE_VERTEXAI=true` by default to avoid the
-  Google GenAI SDK accidentally trying API-key auth. You can override it by exporting
-  `GOOGLE_GENAI_USE_VERTEXAI=false` before importing/starting ContextRouter.
+```bash
+# LLM routing
+export CONTEXTROUTER_DEFAULT_LLM="openai/gpt-5-mini"
+export CONTEXTROUTER_FALLBACK_LLMS="anthropic/claude-sonnet-4,vertex/gemini-2.0-flash"
+
+# Brain connection
+export BRAIN_MODE="grpc"
+export BRAIN_GRPC_HOST="localhost:50051"
+
+# LLM providers
+export OPENAI_API_KEY="sk-..."
+export ANTHROPIC_API_KEY="..."
+export GOOGLE_CLOUD_PROJECT="my-project"
+export PERPLEXITY_API_KEY="pplx-..."
+```
 
 ## Documentation
 
 - [Full Documentation](https://contextrouter.dev) — complete guides and API reference
 - [Technical Reference](./contextrouter-fulldoc.md) — architecture deep-dive
-- [Examples Directory](./examples/) — working code samples
-- [Contributing Guide](./CONTRIBUTING.md) — how to contribute to the project
+- [Contributing Guide](./CONTRIBUTING.md) — Golden Paths for adding functionality
 
 ## Contributing
 
-We welcome contributions! ContextRouter maintains strict coding standards with emphasis on:
+We welcome contributions! See our [Contributing Guide](./CONTRIBUTING.md) for:
 
-- **Security First** — All contributions undergo security review and automated scanning
-- **Code Quality** — Comprehensive linting, type checking, and automated testing
-- **Clean Architecture** — Clear separation between business logic, infrastructure, and data layers
-- **Type Safety** — Strict typing throughout the codebase with mypy validation
-
-See our [Contributing Guide](./CONTRIBUTING.md) for detailed guidelines and current development priorities.
+- **Golden Path: Adding LLM Providers** — full template with error handling
+- **Golden Path: Adding Config Sections** — Pydantic settings pattern
+- **Golden Path: Adding Cortex Graphs** — LangGraph agent workflows
+- **Golden Path: Adding Tools** — LLM function calling
 
 ## License
 

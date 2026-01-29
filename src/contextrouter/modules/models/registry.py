@@ -29,6 +29,7 @@ from .types import (
     ModelCapabilities,
     ModelCapabilityError,
     ModelExhaustedError,
+    ModelQuotaExhaustedError,
     ModelRateLimitError,
     ModelRequest,
     ModelResponse,
@@ -369,6 +370,11 @@ class FallbackModel(BaseModel):
                 else:
                     logger.info(f"Generation succeeded with model {key}")
                 return response
+            except ModelQuotaExhaustedError as e:
+                # Quota exhausted = billing issue, fallback immediately (no retries help)
+                logger.warning(f"Model {key} quota exhausted, trying fallback: {e}")
+                last_error = e
+                continue
             except (ModelTimeoutError, ModelRateLimitError) as e:
                 logger.warning(f"Model {key} failed ({type(e).__name__}): {e}")
                 last_error = e
@@ -448,6 +454,10 @@ class FallbackModel(BaseModel):
                     # Model completed without yielding anything - try next
                     continue
 
+            except ModelQuotaExhaustedError as e:
+                logger.warning(f"Model {key} quota exhausted during streaming, trying fallback: {e}")
+                last_error = e
+                continue
             except (ModelTimeoutError, ModelRateLimitError) as e:
                 logger.warning(f"Model {key} failed during streaming ({type(e).__name__}): {e}")
                 last_error = e

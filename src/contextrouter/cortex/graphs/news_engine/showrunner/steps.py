@@ -136,7 +136,7 @@ async def plan_node(state: NewsEngineState) -> Dict[str, Any]:
     try:
         model = model_registry.get_llm_with_fallback(
             key=config.models.default_llm,
-            fallback_keys=[],
+            fallback_keys=config.models.fallback_llms,
             strategy="fallback",
             config=config,
         )
@@ -159,7 +159,7 @@ async def plan_node(state: NewsEngineState) -> Dict[str, Any]:
                 )
             ],
             temperature=0.5,
-            max_output_tokens=2000,
+            max_output_tokens=8000,  # Extra for reasoning models
         )
 
         response = await model.generate(request)

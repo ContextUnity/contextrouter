@@ -128,7 +128,7 @@ async def validate_node(state: NewsEngineState) -> Dict[str, Any]:
     try:
         model = model_registry.get_llm_with_fallback(
             key=config.models.default_llm,
-            fallback_keys=[],
+            fallback_keys=config.models.fallback_llms,
             strategy="fallback",
             config=config,
         )
@@ -147,7 +147,7 @@ Source: {item.get("url", "")}"""
                 system=system_prompt,
                 parts=[TextPart(text=user_prompt)],
                 temperature=0.2,
-                max_output_tokens=500,
+                max_output_tokens=4000,  # Extra for reasoning models
             )
 
             try:

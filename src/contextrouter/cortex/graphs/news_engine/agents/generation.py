@@ -175,7 +175,7 @@ async def generate_posts_node(state: NewsEngineState) -> Dict[str, Any]:
     try:
         model = model_registry.get_llm_with_fallback(
             key=config.models.default_llm,
-            fallback_keys=[],
+            fallback_keys=config.models.fallback_llms,
             strategy="fallback",
             config=config,
         )
@@ -217,7 +217,9 @@ Write the post following the language and style rules from your system prompt.""
                 system=system_prompt,
                 parts=[TextPart(text=user_prompt)],
                 temperature=0.8,
-                max_output_tokens=2500,  # Allow 2000+ character posts
+                # Reasoning models (gpt-5, o1) need extra tokens for CoT reasoning
+                # Budget: ~2000 reasoning + ~2000 response = 4000 minimum
+                max_output_tokens=8000,
             )
             requests.append(request)
             story_metadata.append(
@@ -228,33 +230,56 @@ Write the post following the language and style rules from your system prompt.""
                 }
             )
 
-        # Use batch generation (providers with native batch API will optimize)
-        logger.info(f"[{tenant_id}] Sending batch of {len(requests)} generation requests")
+        # Generate posts in parallel for speed
+        logger.info(f"[{tenant_id}] Generating {len(requests)} posts in parallel")
 
-        try:
-            responses = await model.generate_batch(requests)
+        async def generate_single(request: ModelRequest, meta: dict) -> dict | None:
+            """Generate a single post, return None on failure or empty content."""
+            try:
+                response = await model.generate(request)
+                content = response.text.strip()
+                
+                # Validate content is not empty
+                if not content:
+                    logger.warning(f"Empty response for {meta['headline'][:50]} - skipping")
+                    errors.append(f"{meta['agent']}: Empty LLM response")
+                    return None
+                    
+                return {
+                    "agent": meta["agent"],
+                    "headline": meta["headline"],
+                    "content": content,
+                    "emoji": AGENT_EMOJI.get(meta["agent"], "📰"),
+                    "fact_url": meta["url"],
+                }
+            except Exception as e:
+                logger.error(f"Generation failed for {meta['headline'][:50]}: {e}")
+                errors.append(f"{meta['agent']}: {str(e)}")
+                return None
 
-            # Map responses back to posts
-            for response, meta in zip(responses, story_metadata):
-                posts.append(
-                    {
-                        "agent": meta["agent"],
-                        "headline": meta["headline"],
-                        "content": response.text.strip(),
-                        "emoji": AGENT_EMOJI.get(meta["agent"], "📰"),
-                        "fact_url": meta["url"],
-                    }
-                )
-
-        except Exception as e:
-            logger.error(f"Batch generation failed: {e}")
-            errors.append(f"Batch: {str(e)}")
+        # Run generations with limited concurrency to avoid rate limits
+        import asyncio
+        semaphore = asyncio.Semaphore(3)  # Max 3 concurrent requests
+        
+        async def limited_generate(req, meta):
+            async with semaphore:
+                return await generate_single(req, meta)
+        
+        results = await asyncio.gather(
+            *(limited_generate(req, meta) for req, meta in zip(requests, story_metadata)),
+            return_exceptions=False,  # Exceptions handled in generate_single
+        )
+        
+        # Collect successful posts (non-None only)
+        for result in results:
+            if result is not None:
+                posts.append(result)
 
     except Exception as e:
         logger.error(f"Generation setup failed: {e}")
         errors.append(f"Setup: {str(e)}")
 
-    logger.info(f"[{tenant_id}] Generated {len(posts)} posts via batch API, {len(errors)} errors")
+    logger.info(f"[{tenant_id}] Generated {len(posts)} posts, {len(errors)} errors")
 
     return {
         "posts": posts,

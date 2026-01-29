@@ -220,7 +220,13 @@ class ModelTimeoutError(ModelError):
 
 
 class ModelRateLimitError(ModelError):
-    """Raised on rate limiting."""
+    """Raised on rate limiting (transient, can retry after delay)."""
+
+    pass
+
+
+class ModelQuotaExhaustedError(ModelError):
+    """Raised when API quota/billing is exhausted (NOT transient, should fallback immediately)."""
 
     pass
 
@@ -248,4 +254,5 @@ __all__ = [
     "ModelExhaustedError",
     "ModelTimeoutError",
     "ModelRateLimitError",
+    "ModelQuotaExhaustedError",
 ]

@@ -196,6 +196,10 @@ class Config(BaseModel):
             self.models.rag.generation.model = generation_val
         if no_results_val := get_env("CONTEXTROUTER_NO_RESULTS_LLM"):
             self.models.rag.no_results.model = no_results_val
+        
+        # Fallback LLM chain - comma-separated list of model keys
+        if fallback_val := get_env("CONTEXTROUTER_FALLBACK_LLMS"):
+            self.models.fallback_llms = [m.strip() for m in fallback_val.split(",") if m.strip()]
 
         # Vertex configuration
         # Primary (in-repo) env names:

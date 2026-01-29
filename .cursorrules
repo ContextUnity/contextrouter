@@ -1,76 +1,175 @@
 # ContextRouter: Agent Development Guide
 
-ContextRouter is a modular, LangGraph-powered "shared brain" designed for high-performance agentic workflows and multi-source knowledge orchestration.
+ContextRouter is a modular, LangGraph-powered AI Gateway designed for high-performance agentic workflows and multi-provider LLM orchestration.
 
 ## Core Philosophy
 
-- **Knowledge Agnostic**: While RAG is a core capability, the brain is designed to orchestrate data from any source (Web, SQL, Vector, RSS) through bidirectional pipelines (Read/Write).
-- **Platform Agnostic**: The brain should not know about HTTP, Telegram, or Web. It consumes messages and emits events.
-- **Strict Separation**: Logic (cortex) vs. Infrastructure (modules/providers) vs. Raw Data (modules/connectors).
 - **ContextUnit Protocol**: All data passing through the pipeline uses `ContextUnit` from `contextcore` for provenance and security. Authorization is handled via `ContextToken` which integrates with `ContextUnit.security` scopes.
+- **Platform Agnostic**: The router should not know about HTTP, Telegram, or Web. It consumes messages and emits events.
+- **Strict Separation**: Logic (cortex) vs. Infrastructure (modules/providers) vs. Raw Data (modules/connectors).
 - **Registry-First**: Components are registered via decorators and loaded lazily.
+- **Fallback-First**: All LLM calls go through FallbackModel with proper error type handling.
 
-## Architecture Guidelines
+## Architecture Overview
 
-### Cortex (The Brain)
-- Located in `src/contextrouter/cortex/`.
-- Owns the `StateGraph` definition and node orchestration.
-- **Node vs Step**: Nodes (classes in `nodes/`) are wrappers for registries; Steps (functions in `steps/`) contain pure business logic.
+```
+src/contextrouter/
+├── core/                    # Kernel: Config, Registry, ContextToken
+├── cortex/                  # LangGraph agents and orchestration
+│   ├── graphs/              # Agent graphs (dispatcher, rag, commerce, news)
+│   └── steps/               # Business logic functions
+├── modules/
+│   ├── models/              # LLM and embedding providers
+│   │   ├── registry.py      # BUILTIN_LLMS, model_registry
+│   │   ├── base.py          # BaseModel interface
+│   │   ├── types.py         # ModelRequest, ModelResponse, error types
+│   │   └── llm/             # Provider implementations
+│   ├── providers/           # Storage implementations (BrainProvider)
+│   ├── connectors/          # Raw data fetchers (Web, RSS)
+│   ├── protocols/           # Platform adapters (AG-UI, Telegram)
+│   └── tools/               # LLM tool registry
+└── protocols/               # Communication layer
+```
 
-### Agent wrapper contract (agent-mode)
-- **Return type**: `BaseAgent.process(...)` MUST return a `dict` (partial state update).
-- **Async steps**: If a wrapper calls an async step, it MUST `await` it. Returning a coroutine will crash LangGraph with `InvalidUpdateError`.
-- **Guardrail**: Keep `tests/unit/test_agent_wrapper_contract.py` passing.
+## Model Registry (MANDATORY)
 
-### Modules (The Capabilities)
-- **Providers**: Database/Storage implementations (`IRead`, `IWrite`).
-- **Connectors**: Raw data fetchers (Web, RSS, Files).
-- **Models**: LLM and Embedding abstractions.
-- **Protocols**: Mapping internal events to external formats (e.g., AG-UI).
+All LLM usage MUST go through `model_registry`:
 
-## Engineering Principles
+```python
+from contextrouter.modules.models import model_registry
 
-1. **No direct `os.environ`**: Use `core.config.Config` for all settings.
-2. **Type Safety (Compromise Policy)**:
-   - Use **TypedDict** for JSON-shaped contracts (ingestion `struct_data`, UI citation dict schemas).
-   - Use **Pydantic** for runtime entities inside the brain (`cortex/models.py`: `RetrievedDoc`, `Citation`, etc.).
-   - Avoid leaking `Any` across boundaries. If an external SDK returns loose objects, normalize at the boundary.
-3. **Immutability**: Treat the LangGraph state as immutable; nodes return partial updates.
-4. **Provenance**: Always use `envelope.add_trace("stage_name")` when transforming data.
+# Configuration-driven with fallback
+model = model_registry.get_llm_with_fallback(
+    key=config.models.default_llm,
+    fallback_keys=config.models.fallback_llms,  # Use config, not hardcoded!
+    strategy="fallback",
+    config=config,
+)
+```
 
-## StructData (Ingestion + Retrieval Contracts)
+### Error Handling
 
-### What `StructData` is
-`StructData` is the canonical type for **JSON-serializable payloads** that are persisted or exported:
-- In ingestion, `ShadowRecord.struct_data` (snake_case keys) and Vertex import JSONL `structData`.
-- In retrieval, `RetrievedDoc.metadata` carries normalized, JSON-safe metadata from providers.
+Providers MUST convert SDK errors to proper types for fallback:
 
-Types live in `src/contextrouter/core/types.py`:
-- `StructDataPrimitive`, `StructDataValue`, `StructData`
-- `coerce_struct_data(...)` for boundary normalization
+```python
+from ..types import ModelQuotaExhaustedError, ModelRateLimitError
 
-### Rules
-- **Use `source_type`** (snake_case) in `struct_data`. Do not introduce ad-hoc `"type"` keys.
-- **Use TypedDict schemas** for per-source `struct_data` payloads:
-  - `BookStructData`, `VideoStructData`, `QAStructData`, `WebStructData`, `KnowledgeStructData`
-- **Boundary coercion only**: `coerce_struct_data(...)` must be called at integration boundaries (e.g., Vertex SDK parsing),
-  not sprinkled through business logic.
+try:
+    response = await sdk.generate(...)
+except SdkError as e:
+    if "quota" in str(e).lower() or "billing" in str(e).lower():
+        raise ModelQuotaExhaustedError(str(e), provider_info=provider_info)
+    if "rate" in str(e).lower():
+        raise ModelRateLimitError(str(e), provider_info=provider_info)
+    raise
+```
 
-## UI Citation Schema
-The UI formatter returns camelCase dicts. Use the typed union `UICitation` (TypedDict union) from `core/types.py`
-as the return type for the formatter in `modules/retrieval/formatting/`.
+### Reasoning Models (gpt-5, o1, o3)
 
-## Key Directories
+Reasoning models have special requirements:
 
-- `core/`: Framework kernel (Config, Registry, ContextUnit, ContextToken).
-- `cortex/`: Graph orchestration and state nodes.
-- `modules/retrieval/`: Search business logic (Orchestrator, Reranker, Formatter).
-- `modules/protocols/agui/`: Unified UI event mapping.
+```python
+# ❌ WRONG - will fail
+bind_kwargs = {"max_tokens": 2000, "temperature": 0.7}
 
-## Coding Standards
-- **Python**: PEP 8, 4-space indent, strict typing (mypy).
-- **No Direct Imports**: `packages/contextrouter` must NOT import from external apps. It must remain a standalone kernel.
-- **Documentation**: Keep `AGENTS.md` files laconic and directive.
+# ✅ CORRECT
+if is_reasoning_model:
+    bind_kwargs = {"max_completion_tokens": 8000}  # Includes reasoning tokens
+else:
+    bind_kwargs = {"max_tokens": 2000, "temperature": 0.7}
+```
+
+## ContextUnit Protocol
+
+All data crossing module boundaries MUST use ContextUnit:
+
+```python
+from contextcore import ContextUnit, ContextToken
+
+# Create with provenance tracking
+unit = ContextUnit(
+    payload={"query": "..."},
+    provenance=["connector:web"],
+)
+
+# Add trace at each stage
+unit.provenance.append("graph:rag")
+
+# Authorization check
+token = ContextToken(permissions=("knowledge:read",))
+if token.can_read(unit.security):
+    # Access granted
+```
+
+## Cortex (The Brain)
+
+### ⚠️ CRITICAL: Router Is Domain-Agnostic
+
+**ContextRouter MUST NOT contain business logic.** It is a thin orchestration layer:
+
+- ✅ **Router does**: LLM routing, graph orchestration, protocol adapters, tool exposure
+- ❌ **Router does NOT**: Product enrichment logic, taxonomy rules, pricing calculations
+
+**Business logic belongs in domain services:**
+- Commerce logic → `ContextCommerce`
+- Knowledge storage → `ContextBrain`  
+- Background workflows → `ContextWorker`
+
+Router only **calls** these services, never implements their logic.
+
+### Connecting External Graphs
+
+Domain-specific graphs live in their own packages and connect via:
+
+```python
+# Option 1: Config-based override
+export CONTEXTROUTER_OVERRIDE_PATH="contextcommerce.graphs:build_gardener"
+
+# Option 2: Registry (programmatic)
+from contextrouter.core.registry import register_graph
+
+@register_graph("gardener")
+def build_gardener_graph():
+    from contextcommerce.agents.gardener import create_graph
+    return create_graph()
+```
+
+See `CONTRIBUTING.md` → "Golden Path: Connecting External Graphs"
+
+### Agent Wrapper Contract
+
+```python
+# ✅ CORRECT - return dict
+async def my_node(state: MyState) -> dict:
+    result = await process(state["input"])
+    return {"output": result}
+
+# ❌ WRONG - returning coroutine crashes LangGraph
+def my_node(state: MyState) -> Coroutine:
+    return process(state["input"])  # Missing await!
+```
+
+## Configuration
+
+All settings MUST go through `core.config.Config`:
+
+```python
+# ❌ FORBIDDEN - direct env access
+value = os.environ.get("SOME_VAR")
+
+# ✅ CORRECT - use Config
+class MyConfig(BaseSettings):
+    some_var: str = Field(default="", alias="SOME_VAR")
+```
+
+## Adding New Functionality
+
+See `CONTRIBUTING.md` for complete Golden Paths:
+
+1. **Adding LLM Provider** → BUILTIN_LLMS + module + config
+2. **Adding Config Section** → Pydantic BaseSettings + env prefix
+3. **Adding Cortex Graph** → StateGraph + dispatcher registration
+4. **Adding Tool** → `@tool_registry.register` decorator
 
 ## Agent Behavior Rules
 
@@ -78,16 +177,8 @@ as the return type for the formatter in `modules/retrieval/formatting/`.
 - **NEVER** execute `git commit` commands on behalf of the user
 - **ONLY** suggest changes and provide commands for the user to run manually
 - **ALWAYS** ask for confirmation before making any commits
-- **RESPECT** user's codebase ownership - commits are their decision, not yours
-
-### Git Workflow
-- **STAGE** files with `git add` only when requested
-- **SUGGEST** commit messages but let user execute the commit
-- **PROVIDE** commands but don't execute them automatically
-- **WAIT** for explicit user approval before any git operations
 
 ### Documentation Updates
-- **ALWAYS** update documentation in `contextrouter-docs/` when adding, changing, or removing functionality
-- **KEEP** technical docs and user guides in sync with code changes
-- **REVIEW** README files and API documentation for accuracy after code modifications
-- **UPDATE** example scripts and tutorials when breaking changes occur
+- **ALWAYS** update documentation when adding/changing functionality
+- **KEEP** README, fulldoc, and docs site in sync
+- **UPDATE** CONTRIBUTING.md Golden Paths when patterns change

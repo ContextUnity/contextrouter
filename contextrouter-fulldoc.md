@@ -2,7 +2,7 @@
 
 **The Reasoning Engine of ContextUnity**
 
-ContextRouter is the AI Gateway and Agent Orchestration layer. It hosts LangGraph-based agents, manages LLM provider routing, and coordinates multi-step reasoning workflows.
+ContextRouter is the AI Gateway and Agent Orchestration layer. It hosts LangGraph-based agents, manages LLM provider routing with automatic fallback, and coordinates multi-step reasoning workflows using the ContextUnit protocol.
 
 ---
 
@@ -13,10 +13,27 @@ ContextRouter sits at the center of the ContextUnity ecosystem, receiving reques
 ### Key Responsibilities
 
 1. **Agent Orchestration** — LangGraph state machines for complex workflows
-2. **LLM Routing** — Intelligent provider selection (OpenAI, Anthropic, Vertex AI, local)
+2. **LLM Routing** — Intelligent provider selection with fallback (OpenAI, Anthropic, Vertex AI, local)
 3. **RAG Pipeline** — Retrieval-Augmented Generation with Brain as backend
 4. **Protocol Adapters** — Telegram, AG-UI, A2A event formats
 5. **Tool Integration** — Exposes Brain (search) and Commerce (products) as LLM tools
+
+### ContextUnit Protocol
+
+All data flowing through ContextRouter uses the ContextUnit protocol from ContextCore:
+
+```python
+from contextcore import ContextUnit, ContextToken
+
+unit = ContextUnit(
+    payload={"query": "What is RAG?"},
+    provenance=["connector:telegram", "graph:rag"],
+    security=SecurityScopes(read=["knowledge:read"])
+)
+
+# Every stage adds to provenance
+unit.provenance.append("step:generation")
+```
 
 ---
 
@@ -30,13 +47,15 @@ ContextRouter sits at the center of the ContextUnity ecosystem, receiving reques
 │  modules/                         cortex/                                  │
 │  ├── models/                      ├── graphs/                              │
 │  │   ├── registry.py         ────▶│   ├── dispatcher.py    (graph router) │
-│  │   ├── llm/                     │   ├── rag_retrieval/   (RAG pipeline) │
-│  │   │   ├── openai.py            │   ├── commerce/                       │
-│  │   │   ├── anthropic.py         │   │   ├── gardener/    (taxonomy)     │
-│  │   │   ├── vertex.py            │   │   ├── matcher/     (linking)      │
-│  │   │   ├── perplexity.py        │   │   └── chat/        (product Q&A)  │
-│  │   │   └── rlm.py (RLM)         │   └── news_engine/                    │
-│  │   └── embeddings/              │       └── showrunner/  (curation)     │
+│  │   ├── base.py                  │   ├── rag_retrieval/   (RAG pipeline) │
+│  │   ├── types.py                 │   ├── commerce/                       │
+│  │   ├── llm/                     │   │   ├── gardener/    (taxonomy)     │
+│  │   │   ├── openai.py            │   │   ├── matcher/     (linking)      │
+│  │   │   ├── anthropic.py         │   │   └── chat/        (product Q&A)  │
+│  │   │   ├── vertex.py            │   └── news_engine/                    │
+│  │   │   ├── perplexity.py        │       ├── harvest/     (data fetch)   │
+│  │   │   └── rlm.py (RLM)         │       ├── showrunner/  (curation)     │
+│  │   └── embeddings/              │       └── agents/      (generation)   │
 │  │                                │                                        │
 │  ├── protocols/                   └── steps/                              │
 │  │   ├── agui.py                      ├── retrieval.py                    │
@@ -46,10 +65,35 @@ ContextRouter sits at the center of the ContextUnity ecosystem, receiving reques
 │  │   └── storage/                 core/                                   │
 │  │       └── brain_provider.py    ├── config/                             │
 │  │                                ├── registry.py                          │
-│  └── tools/                       └── context_unit.py                      │
+│  └── tools/                       └── tokens.py                            │
 │      └── registry.py                                                       │
 │                                                                            │
 └────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Integration with ContextUnity
+
+ContextRouter is the orchestration hub that connects all ContextUnity services:
+
+| Service | Role | How Router Uses It |
+|---------|------|-------------------|
+| **ContextCore** | Shared types, ContextUnit, gRPC contracts | Types, tokens, protos |
+| **ContextBrain** | Knowledge storage and RAG | Search, memory, taxonomy via gRPC |
+| **ContextWorker** | Background task execution | Triggers workflows via Temporal |
+| **ContextCommerce** | E-commerce platform | Products, enrichment, matching |
+
+### BrainProvider
+
+All memory operations delegate to ContextBrain:
+
+```python
+from contextrouter.modules.providers.storage import BrainProvider
+
+brain = BrainProvider(config)
+results = await brain.search("product taxonomy", limit=10)
+related = await brain.graph_search(["entity:123"], depth=2)
 ```
 
 ---
@@ -79,24 +123,29 @@ Taxonomy classification and product enrichment.
 - Output: Category assignments, attributes extraction
 
 #### Matcher Agent  
-Supplier-to-catalog product linking.
+Supplier-to-catalog product linking with RLM support for massive datasets.
 - Input: Supplier products + catalog products
 - Process: Multi-factor matching (name, brand, attributes)
 - Output: Matched pairs with confidence scores
 
-#### Chat Agent
-Product-aware conversational interface.
-- Input: User questions about products
-- Process: RAG with product context
-- Output: Grounded responses with product references
-
 ### 4. News Engine (`news_engine/`)
 
-#### Showrunner Agent
-Content curation and editorial planning.
-- Input: Raw news feeds, themes
-- Process: Semantic filtering, deduplication, planning
-- Output: Curated content with AI-generated summaries
+Multi-stage news curation pipeline:
+
+#### Harvest
+- Fetches news from multiple sources via Perplexity Sonar
+- Extracts facts with structured JSON output
+- Deduplicates via semantic similarity
+
+#### Showrunner
+- Creates editorial plan based on themes
+- Assigns stories to AI personas
+- Curates content flow
+
+#### Agents (Generation)
+- Parallel generation with semaphore-based concurrency
+- Each persona has unique voice prompts
+- Outputs formatted posts with source attribution
 
 ---
 
@@ -107,10 +156,10 @@ All LLM usage MUST go through the model registry:
 ```python
 from contextrouter.modules.models import model_registry
 
-# Configuration-driven selection
+# Configuration-driven selection with fallback
 model = model_registry.get_llm_with_fallback(
-    key=config.models.default_llm,  # From CONTEXTROUTER_DEFAULT_LLM
-    fallback_keys=["gpt-4o", "claude-sonnet"],
+    key=config.models.default_llm,
+    fallback_keys=config.models.fallback_llms,
     strategy="fallback",
     config=config,
 )
@@ -123,63 +172,40 @@ model = model_registry.create_llm("perplexity/sonar", config=config)
 
 | Provider | Models | Use Case |
 |----------|--------|----------|
-| **Vertex AI** | Gemini 2.0, 1.5 Pro | Primary (Google Cloud) |
-| **OpenAI** | GPT-4o, o1, o3 | General purpose |
-| **Anthropic** | Claude Sonnet, Haiku | Reasoning, analysis |
+| **Vertex AI** | Gemini 2.0, 2.5 Pro | Primary (Google Cloud) |
+| **OpenAI** | GPT-5-mini, o1, o3 | General purpose, reasoning |
+| **Anthropic** | Claude Sonnet 4, Haiku | Reasoning, analysis |
 | **Perplexity** | Sonar | Web-grounded search |
+| **Groq** | Llama 3.3 70B | Ultra-fast inference |
 | **RLM** | Recursive LM | Massive context (50k+ items) |
 | **Local** | Ollama, vLLM | Development, privacy |
 
----
+### Error Handling & Fallback
 
-## Brain Integration
-
-ContextRouter delegates all memory operations to ContextBrain:
-
-### Mode Configuration
-
-```bash
-# Local mode (library import)
-export BRAIN_MODE=local
-
-# Remote mode (gRPC call)
-export BRAIN_MODE=grpc
-export BRAIN_GRPC_HOST=localhost:50051
-```
-
-### BrainProvider Interface
+The `FallbackModel` handles provider failures automatically:
 
 ```python
-from contextrouter.modules.providers.storage import BrainProvider
+# Quota exhaustion → immediate fallback (no retries)
+except ModelQuotaExhaustedError:
+    logger.warning(f"Model {key} quota exhausted, trying fallback")
+    continue
 
-brain = BrainProvider(config)
-
-# Semantic search
-results = await brain.search("product taxonomy", limit=10)
-
-# Graph traversal
-related = await brain.graph_search(["entity:123"], depth=2)
+# Rate limiting → fallback with delay
+except ModelRateLimitError:
+    logger.warning(f"Model {key} rate limited")
+    continue
 ```
 
----
+### Reasoning Models
 
-## Protocols
-
-### Telegram Protocol
+OpenAI reasoning models (gpt-5, o1, o3) require special handling:
 
 ```python
-from contextrouter.modules.protocols.telegram import TelegramAdapter
-
-adapter = TelegramAdapter(bot_token, router_config)
-# Handles: messages → agent → response formatting
+# Use max_completion_tokens, not max_tokens
+# Include extra budget for chain-of-thought reasoning
+if is_reasoning_model:
+    bind_kwargs["max_completion_tokens"] = 8000  # 4k reasoning + 4k response
 ```
-
-### AG-UI Protocol
-
-Browser-based chat interface with streaming support:
-- WebSocket events for real-time updates
-- Structured message formats
-- Citation rendering
 
 ---
 
@@ -189,8 +215,8 @@ Browser-based chat interface with streaming support:
 
 ```bash
 # Core
-CONTEXTROUTER_DEFAULT_LLM="gemini-2.0-flash"
-CONTEXTROUTER_FALLBACK_LLMS="gpt-4o,claude-sonnet"
+CONTEXTROUTER_DEFAULT_LLM="openai/gpt-5-mini"
+CONTEXTROUTER_FALLBACK_LLMS="anthropic/claude-sonnet-4,vertex/gemini-2.0-flash"
 
 # Brain connection
 BRAIN_MODE="grpc"
@@ -200,7 +226,7 @@ BRAIN_GRPC_HOST="localhost:50051"
 GOOGLE_CLOUD_PROJECT="my-project"
 OPENAI_API_KEY="sk-..."
 ANTHROPIC_API_KEY="..."
-PERPLEXITY_API_KEY="..."
+PERPLEXITY_API_KEY="pplx-..."
 
 # Observability
 LANGFUSE_SECRET_KEY="..."
@@ -215,6 +241,17 @@ from contextrouter.core.config import RouterConfig
 config = RouterConfig.from_env()
 # Access: config.models, config.brain, config.providers
 ```
+
+---
+
+## Adding New Functionality
+
+See `CONTRIBUTING.md` for complete Golden Paths:
+
+1. **Adding LLM Provider** — Create module + BUILTIN_LLMS + config + tests
+2. **Adding Config Section** — Pydantic BaseSettings with env aliases
+3. **Adding Cortex Graph** — StateGraph + state TypedDict + dispatcher registration
+4. **Adding Tool** — `@tool_registry.register` decorator
 
 ---
 
@@ -256,7 +293,9 @@ uv run pytest --cov=contextrouter
 | `cortex/graphs/dispatcher.py` | Agent graph router |
 | `cortex/graphs/rag_retrieval/graph.py` | RAG pipeline |
 | `cortex/graphs/commerce/gardener/graph.py` | Taxonomy classifier |
-| `modules/models/registry.py` | LLM provider registry |
+| `cortex/graphs/news_engine/agents/generation.py` | News post generation |
+| `modules/models/registry.py` | LLM provider registry, BUILTIN_LLMS |
+| `modules/models/types.py` | ModelRequest, error types |
 | `modules/providers/storage/brain_provider.py` | Brain integration |
 | `core/config/main.py` | Configuration management |
 
