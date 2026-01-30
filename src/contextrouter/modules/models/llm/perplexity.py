@@ -86,11 +86,15 @@ class PerplexityLLM(BaseModel):
         if request.max_output_tokens:
             payload["max_tokens"] = request.max_output_tokens
 
-        # Search-specific options for online models
-        if "online" in self._model_name:
-            if self._search_recency_filter:
-                payload["search_recency_filter"] = self._search_recency_filter
+        # Search-specific options - enable for all models (Perplexity has built-in search)
+        if self._search_recency_filter:
+            payload["search_recency_filter"] = self._search_recency_filter
+        if self._return_citations:
             payload["return_citations"] = self._return_citations
+
+        logger.debug(
+            f"Perplexity request: model={self._model_name}, recency={self._search_recency_filter}"
+        )
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -139,9 +143,10 @@ class PerplexityLLM(BaseModel):
         if request.max_output_tokens:
             payload["max_tokens"] = request.max_output_tokens
 
-        if "online" in self._model_name:
-            if self._search_recency_filter:
-                payload["search_recency_filter"] = self._search_recency_filter
+        # Search-specific options - enable for all models
+        if self._search_recency_filter:
+            payload["search_recency_filter"] = self._search_recency_filter
+        if self._return_citations:
             payload["return_citations"] = self._return_citations
 
         async with httpx.AsyncClient() as client:

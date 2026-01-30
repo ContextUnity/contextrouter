@@ -76,8 +76,8 @@ class OpenAILLM(BaseModel):
     async def generate(
         self, request: ModelRequest, *, token: ContextToken | None = None
     ) -> ModelResponse:
-        from ..types import ModelQuotaExhaustedError, ModelRateLimitError, ProviderInfo
-        
+        from ..types import ModelQuotaExhaustedError, ModelRateLimitError
+
         _ = token
         if any(isinstance(p, AudioPart) for p in request.parts):
             return await generate_asr_openai_compat(
@@ -89,35 +89,41 @@ class OpenAILLM(BaseModel):
             )
 
         messages = build_openai_messages(request)
-        
+
         # Reasoning models (gpt-5*, o1*) require max_completion_tokens, not max_tokens
         # They also don't support custom temperature (must be 1)
         is_reasoning_model = any(
-            x in self._model_name.lower() 
-            for x in ["gpt-5", "o1-", "o1_", "o3-", "o3_"]
+            x in self._model_name.lower() for x in ["gpt-5", "o1-", "o1_", "o3-", "o3_"]
         )
-        
+
         bind_kwargs: dict = {
             "timeout": request.timeout_sec,
         }
-        
+
         if is_reasoning_model:
             # Reasoning models need more tokens for CoT + response
             # Use max_completion_tokens (not max_tokens!)
             bind_kwargs["max_completion_tokens"] = request.max_output_tokens
-            # Temperature must be 1 for reasoning models
+            # Temperature must be 1 for reasoning models (cannot customize)
+            # Use reasoning effort from config to control token consumption
+            reasoning_effort = self._cfg.openai.reasoning_effort or "minimal"
+            bind_kwargs["reasoning"] = {"effort": reasoning_effort}
         else:
             bind_kwargs["max_tokens"] = request.max_output_tokens
             bind_kwargs["temperature"] = request.temperature
-            
+
+        # Add JSON mode if requested (not supported by reasoning models)
+        if request.response_format == "json_object" and not is_reasoning_model:
+            bind_kwargs["response_format"] = {"type": "json_object"}
+
         model = self._model.bind(**bind_kwargs)
-        
+
         provider_info = ProviderInfo(
             provider="openai",
             model_name=self._model_name,
             model_key=f"openai/{self._model_name}",
         )
-        
+
         try:
             msg = await model.ainvoke(messages)
         except Exception as e:
@@ -134,13 +140,24 @@ class OpenAILLM(BaseModel):
                     provider_info=provider_info,
                 ) from e
             raise  # Re-raise other errors as-is
-            
+
         text = getattr(msg, "content", "")
-        
+
+        # Handle reasoning model responses where content is a list of blocks
+        # [{'type': 'reasoning', ...}, {'type': 'text', 'text': 'actual content'}]
+        if isinstance(text, list):
+            text_parts = []
+            for block in text:
+                if isinstance(block, dict):
+                    # Only include 'text' type blocks, skip 'reasoning' blocks
+                    if block.get("type") == "text":
+                        text_parts.append(block.get("text", ""))
+                elif isinstance(block, str):
+                    text_parts.append(block)
+            text = "".join(text_parts)
+
         # Debug: log when content is empty
         if not text:
-            import logging
-            logger = logging.getLogger(__name__)
             logger.warning(f"OpenAI returned empty content. Full response: {msg}")
             # Check for refusal or other issues
             if hasattr(msg, "refusal") and msg.refusal:

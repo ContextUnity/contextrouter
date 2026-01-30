@@ -267,7 +267,7 @@ class ModelRegistry:
                 seen.add(k)
                 unique_keys.append(k)
 
-        logger.debug(f"Model fallback candidates: {unique_keys}, strategy: {strategy}")
+        logger.info(f"Model fallback candidates: {unique_keys}, strategy: {strategy}")
 
         return FallbackModel(
             registry=self,
@@ -455,7 +455,9 @@ class FallbackModel(BaseModel):
                     continue
 
             except ModelQuotaExhaustedError as e:
-                logger.warning(f"Model {key} quota exhausted during streaming, trying fallback: {e}")
+                logger.warning(
+                    f"Model {key} quota exhausted during streaming, trying fallback: {e}"
+                )
                 last_error = e
                 continue
             except (ModelTimeoutError, ModelRateLimitError) as e:

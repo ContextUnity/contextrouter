@@ -97,6 +97,9 @@ class ModelRequest(BaseModel):
     timeout_sec: float | None = None
     max_retries: int | None = None
 
+    # Response format (for JSON mode)
+    response_format: Literal["text", "json_object"] | None = None
+
     def required_modalities(self) -> set[str]:
         """Extract the set of required modalities from parts."""
         return {part.kind for part in self.parts}
