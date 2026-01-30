@@ -3,14 +3,13 @@ Archivist subgraph steps.
 
 Pipeline:
 1. filter_node - Apply positive filter, reject banned content
-2. validate_node - LLM validation for greenwashing/quality
-3. dedupe_node - Vector search for duplicates via Brain
-4. store_node - Store valid facts in Brain
+2. dedupe_node - Vector search for duplicates via Brain
+3. store_node - Store valid facts in Brain
 """
 
 from __future__ import annotations
 
-import json
+import asyncio
 import logging
 from typing import Any, Dict
 
@@ -21,65 +20,10 @@ from contextrouter.modules.models import model_registry
 from contextrouter.modules.models.types import ModelRequest, TextPart
 
 from ..state import NewsEngineState
+from .filters import BANNED_KEYWORDS, DEFAULT_ARCHIVIST_PROMPT, SIMILARITY_THRESHOLD
+from .json_utils import extract_json_from_response
 
 logger = logging.getLogger(__name__)
-
-# Banned keywords for content filtering
-BANNED_KEYWORDS = {
-    "war",
-    "війна",
-    "russia",
-    "росія",
-    "belarus",
-    "білорусь",
-    "putin",
-    "путін",
-    "zelensky",
-    "зеленський",
-    "crime",
-    "злочин",
-    "murder",
-    "вбивство",
-    "death",
-    "смерть",
-    "scandal",
-    "скандал",
-    "tragedy",
-    "трагедія",
-    "accident",
-    "аварія",
-    "corruption",
-    "корупція",
-    "arrest",
-    "арешт",
-}
-
-# Default archivist prompt
-DEFAULT_ARCHIVIST_PROMPT = """You are an editor for a positive news channel.
-
-Your job is to validate news items for quality and authenticity.
-
-REJECT items that are:
-- Greenwashing (corporate PR disguised as real progress)
-- Vague announcements without concrete results
-- Speculation or "plans to" without actual achievement
-- Clickbait with misleading headlines
-- Anything promoting harmful products/practices
-
-ACCEPT items that are:
-- Concrete achievements with measurable impact
-- Community-driven initiatives with real outcomes
-- Scientific/technological breakthroughs with verification
-- Policy changes that have already taken effect
-
-For each item, respond with JSON:
-{
-  "verdict": "accept" | "reject",
-  "reason": "brief explanation",
-  "category": "environment|technology|community|urban|nature|energy|innovation",
-  "significance_score": 1-10,
-  "suggested_agents": ["agent1", "agent2"]
-}"""
 
 
 async def filter_node(state: NewsEngineState) -> Dict[str, Any]:
@@ -111,7 +55,11 @@ async def filter_node(state: NewsEngineState) -> Dict[str, Any]:
 
 
 async def validate_node(state: NewsEngineState) -> Dict[str, Any]:
-    """LLM validation for quality and greenwashing detection."""
+    """LLM validation for quality and greenwashing detection.
+
+    Note: This node is currently not used in the pipeline (Showrunner handles selection).
+    Kept for potential future use.
+    """
     raw_items = state.get("raw_items", [])
     tenant_id = state.get("tenant_id", "default")
 
@@ -137,6 +85,7 @@ async def validate_node(state: NewsEngineState) -> Dict[str, Any]:
         rejected = state.get("rejected_count", 0)
 
         for item in raw_items:
+            headline = item.get("headline", "")[:60]
             user_prompt = f"""Validate this news item:
 
 Headline: {item.get("headline", "")}
@@ -148,18 +97,16 @@ Source: {item.get("url", "")}"""
                 parts=[TextPart(text=user_prompt)],
                 temperature=0.2,
                 max_output_tokens=4000,  # Extra for reasoning models
+                response_format="json_object",  # Enforce JSON output
             )
 
             try:
                 response = await model.generate(request)
 
-                # Parse response
-                text = response.text
-                start = text.find("{")
-                end = text.rfind("}") + 1
-                if start >= 0 and end > start:
-                    result = json.loads(text[start:end])
+                # Parse response using robust extractor
+                result = extract_json_from_response(response.text)
 
+                if result:
                     if result.get("verdict") == "accept":
                         item["category"] = result.get("category", item.get("category", "unknown"))
                         item["significance_score"] = result.get("significance_score", 5)
@@ -170,11 +117,28 @@ Source: {item.get("url", "")}"""
                         rejected += 1
                         logger.debug(f"Rejected: {item.get('headline')} - {result.get('reason')}")
                 else:
-                    # Couldn't parse, accept by default
+                    # Log first 200 chars of response for debugging
+                    preview = response.text[:200].replace("\n", " ") if response.text else "(empty)"
+                    logger.warning(
+                        f"[No JSON Found] '{headline}...' - Could not extract JSON from response. "
+                        f"Preview: {preview}... Accepting item by default."
+                    )
                     validated.append(item)
+
+            except asyncio.CancelledError:
+                logger.warning(
+                    f"[Connection Timeout] '{headline}...' - OpenAI request was cancelled "
+                    "(likely timeout or connection issue). Accepting item by default."
+                )
+                validated.append(item)
+
             except Exception as e:
-                logger.warning(f"Validation failed for item: {e}")
-                validated.append(item)  # Accept on error
+                error_type = type(e).__name__
+                logger.warning(
+                    f"[{error_type}] '{headline}...' - Validation failed: {e}. "
+                    "Accepting item by default."
+                )
+                validated.append(item)
 
         logger.info(
             f"[{tenant_id}] LLM validation: {len(validated)} accepted, {rejected} total rejected"
@@ -191,77 +155,80 @@ Source: {item.get("url", "")}"""
 
 
 async def dedupe_node(state: NewsEngineState) -> Dict[str, Any]:
-    """Check for duplicates via Brain vector search using semantic similarity."""
+    """Check for duplicates via semantic similarity (facts-based).
+    
+    Note: URL-based deduplication was removed because:
+    - Perplexity often returns generic homepage URLs
+    - One URL can contain multiple different articles
+    - Semantic similarity is more reliable for detecting duplicate content
+    """
     raw_items = state.get("raw_items", [])
     tenant_id = state.get("tenant_id", "default")
 
     if not raw_items:
         return {"duplicate_count": 0}
 
-    logger.info(f"[{tenant_id}] Deduplicating {len(raw_items)} items via semantic search")
+    logger.info(f"[{tenant_id}] Deduplicating {len(raw_items)} items (semantic only)")
 
     config = get_core_config()
 
-    # Similarity threshold - items above this are considered duplicates
-    # 0.85 = very similar, 0.90 = nearly identical
-    SIMILARITY_THRESHOLD = 0.85
+    unique_items = []
+    duplicates = 0
+    seen_headlines: set[str] = set()
 
-    try:
-        from contextcore import BrainClient
+    for item in raw_items:
+        headline = item.get("headline", "")
+        summary = item.get("summary", "")
 
-        client = BrainClient(host=config.brain.grpc_endpoint)
+        # 1. Local headline deduplication (within current batch)
+        # This catches exact duplicates in the same harvest
+        headline_key = headline.strip().lower()
+        if headline_key in seen_headlines:
+            duplicates += 1
+            logger.debug(f"Exact headline duplicate in batch: '{headline[:50]}...'")
+            continue
+        seen_headlines.add(headline_key)
 
-        unique_items = []
-        duplicates = 0
+        # 2. Semantic similarity search via Brain
+        is_duplicate = False
+        try:
+            from contextcore import BrainClient
 
-        for item in raw_items:
-            headline = item.get("headline", "")
-            summary = item.get("summary", "")
+            client = BrainClient(host=config.brain.grpc_endpoint)
 
-            # Use headline + summary for better matching
             search_text = f"{headline} {summary}"[:500]
-
-            # Search for similar items in Brain
             similar = await client.search(
                 tenant_id=tenant_id,
                 query_text=search_text,
-                source_types=["news_fact"],
-                limit=3,  # Check top 3 matches
+                source_types=["news_fact", "news_post"],
+                limit=5,
             )
 
-            # Check if any result is too similar using similarity score
-            is_duplicate = False
             for s in similar:
-                # SearchResult now has score field directly
                 if s.score >= SIMILARITY_THRESHOLD:
                     is_duplicate = True
-                    logger.debug(
-                        f"Duplicate (score={s.score:.2f}): '{headline[:50]}...' "
-                        f"matches '{s.content[:50]}...'"
+                    logger.info(
+                        f"Semantic duplicate (score={s.score:.2f}): '{headline[:50]}...' "
+                        f"matches existing: '{s.content[:50]}...'"
                     )
+                    duplicates += 1
                     break
+        except Exception as e:
+            logger.debug(f"Semantic search unavailable: {e}")
 
-            if is_duplicate:
-                duplicates += 1
-            else:
-                unique_items.append(item)
+        if not is_duplicate:
+            unique_items.append(item)
 
-        logger.info(
-            f"[{tenant_id}] Dedupe: {len(unique_items)} unique, {duplicates} duplicates "
-            f"(threshold={SIMILARITY_THRESHOLD})"
-        )
+    logger.info(
+        f"[{tenant_id}] Dedupe: {len(unique_items)} unique, {duplicates} duplicates "
+        f"(threshold={SIMILARITY_THRESHOLD})"
+    )
 
-        return {
-            "raw_items": unique_items,
-            "duplicate_count": duplicates,
-        }
+    return {
+        "raw_items": unique_items,
+        "duplicate_count": duplicates,
+    }
 
-    except ImportError:
-        logger.warning("contextcore not available, skipping dedupe")
-        return {"duplicate_count": 0}
-    except Exception as e:
-        logger.warning(f"Dedupe failed: {e}")
-        return {"duplicate_count": 0}
 
 
 async def store_node(state: NewsEngineState) -> Dict[str, Any]:
@@ -276,14 +243,11 @@ async def store_node(state: NewsEngineState) -> Dict[str, Any]:
     stored_count = 0
 
     try:
-        # Use gRPC client
         import uuid
 
-        import grpc
-        from contextcore import brain_pb2, brain_pb2_grpc
+        from contextcore import BrainClient
 
-        channel = grpc.aio.insecure_channel(config.brain.grpc_endpoint)
-        stub = brain_pb2_grpc.BrainServiceStub(channel)
+        client = BrainClient(host=config.brain.grpc_endpoint)
 
         for item in raw_items:
             fact = {
@@ -299,12 +263,12 @@ async def store_node(state: NewsEngineState) -> Dict[str, Any]:
             }
 
             try:
-                news_item = brain_pb2.NewsItem(
-                    id=fact["id"],
+                fact_id = await client.upsert_news_item(
                     tenant_id=tenant_id,
                     url=fact["url"],
                     headline=fact["headline"],
                     summary=fact["summary"],
+                    item_type="fact",
                     category=fact["category"],
                     metadata={
                         "significance_score": str(fact["significance_score"]),
@@ -315,23 +279,15 @@ async def store_node(state: NewsEngineState) -> Dict[str, Any]:
                     },
                 )
 
-                request = brain_pb2.UpsertNewsItemRequest(
-                    tenant_id=tenant_id,
-                    item=news_item,
-                    item_type="fact",
-                )
-
-                response = await stub.UpsertNewsItem(request)
-                if response.success:
+                if fact_id:
                     stored_count += 1
-                    fact["brain_id"] = response.id
+                    fact["brain_id"] = fact_id
 
             except Exception as e:
                 logger.warning(f"Failed to store fact to Brain: {e}")
 
             facts.append(fact)
 
-        await channel.close()
         logger.info(f"[{tenant_id}] Stored {stored_count}/{len(facts)} facts to Brain")
 
     except ImportError:
@@ -367,17 +323,22 @@ async def store_node(state: NewsEngineState) -> Dict[str, Any]:
 
 
 def create_archivist_subgraph():
-    """Build the archivist subgraph."""
+    """Build the archivist subgraph.
+
+    Pipeline: filter -> dedupe -> store
+
+    Note: LLM validation was removed because Showrunner already does
+    editorial selection. This speeds up the pipeline by ~4 minutes.
+    """
     workflow = StateGraph(NewsEngineState)
 
     workflow.add_node("filter", filter_node)
-    workflow.add_node("validate", validate_node)
+    # validate_node removed - Showrunner handles editorial selection
     workflow.add_node("dedupe", dedupe_node)
     workflow.add_node("store", store_node)
 
     workflow.set_entry_point("filter")
-    workflow.add_edge("filter", "validate")
-    workflow.add_edge("validate", "dedupe")
+    workflow.add_edge("filter", "dedupe")  # Skip validate, go directly to dedupe
     workflow.add_edge("dedupe", "store")
     workflow.add_edge("store", END)
 
