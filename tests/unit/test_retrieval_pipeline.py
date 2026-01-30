@@ -46,7 +46,10 @@ def test_retrieval_pipeline_calls_vertex_and_builds_citations(monkeypatch) -> No
     # Mock BaseRetrievalPipeline.execute to return our test result
     monkeypatch.setattr(BaseRetrievalPipeline, "execute", mock_execute)
     monkeypatch.setattr(RagPipeline, "_should_run_web", lambda _s, _state: False)
-    monkeypatch.setattr(RagPipeline, "_get_graph_facts", lambda _s, _state: ["f1"])
+    monkeypatch.setattr(
+        "contextrouter.modules.retrieval.rag.pipeline.get_graph_facts",
+        lambda _state: ["f1"],
+    )
     monkeypatch.setattr(
         "contextrouter.modules.retrieval.rag.pipeline.get_reranker",
         lambda **kwargs: MockReranker(),

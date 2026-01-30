@@ -84,14 +84,14 @@ def build_news_engine_graph():
         # Full pipeline
         result = await graph.ainvoke({
             "intent": "full_pipeline",
-            "tenant_id": "pinkpony",
+            "tenant_id": "my_news_agency",
             "prompt_overrides": {"harvester": "custom prompt..."},
         })
 
         # Individual steps
         result = await graph.ainvoke({
             "intent": "archivist",
-            "tenant_id": "pinkpony",
+            "tenant_id": "my_news_agency",
             "raw_items": [...],
         })
     """

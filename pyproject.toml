@@ -26,6 +26,7 @@ dependencies = [
     "rich>=13.0.0",
     "tomli>=2.0.0",
     "storage>=0.0.4.3",
+    "language-tool-python>=3.2.2",
 ]
 
 [project.urls]
