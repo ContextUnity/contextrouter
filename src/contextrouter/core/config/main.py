@@ -12,7 +12,7 @@ from .base import get_bool_env, get_env, set_env_default
 
 # RAGConfig removed - ingestion moved to contextbrain
 # from .ingestion import RAGConfig
-from .models import GardenerConfig, LLMConfig, ModelsConfig, RouterConfig
+from .models import GardenerConfig, LLMConfig, ModelsConfig, NewsEngineConfig, RouterConfig
 from .paths import ConfigPaths
 from .providers import (
     AnthropicConfig,
@@ -85,6 +85,7 @@ class Config(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)
     gardener: GardenerConfig = Field(default_factory=GardenerConfig)  # Commerce enrichment
+    news_engine: NewsEngineConfig = Field(default_factory=NewsEngineConfig)
     # rag and ingestion removed - moved to contextbrain
     # rag: RAGConfig = Field(default_factory=RAGConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
@@ -196,7 +197,7 @@ class Config(BaseModel):
             self.models.rag.generation.model = generation_val
         if no_results_val := get_env("CONTEXTROUTER_NO_RESULTS_LLM"):
             self.models.rag.no_results.model = no_results_val
-        
+
         # Fallback LLM chain - comma-separated list of model keys
         if fallback_val := get_env("CONTEXTROUTER_FALLBACK_LLMS"):
             self.models.fallback_llms = [m.strip() for m in fallback_val.split(",") if m.strip()]
@@ -265,6 +266,9 @@ class Config(BaseModel):
             self.openai.api_key = openai_key
         if openai_org := get_env("OPENAI_ORGANIZATION"):
             self.openai.organization = openai_org
+        if reasoning_effort := get_env("OPENAI_REASONING_EFFORT"):
+            # Options: minimal, low, medium, high
+            self.openai.reasoning_effort = reasoning_effort
 
         # Anthropic configuration
         if anthropic_key := get_env("ANTHROPIC_API_KEY"):
@@ -360,6 +364,19 @@ class Config(BaseModel):
             self.debug = debug_val
         if log_level := get_env("CONTEXTROUTER_LOG_LEVEL"):
             self.log_level = log_level
+
+        # News Engine configuration
+        if v := get_bool_env("NEWS_ENGINE_LANGUAGE_TOOL_ENABLED"):
+            self.news_engine.language_tool_enabled = v
+        if v := get_env("NEWS_ENGINE_LANGUAGE_TOOL_LANG"):
+            self.news_engine.language_tool_lang = v
+        if v := get_bool_env("NEWS_ENGINE_LANGUAGE_TOOL_AUTO_CORRECT"):
+            self.news_engine.language_tool_auto_correct = v
+        if v := get_env("NEWS_ENGINE_DEDUPE_THRESHOLD"):
+            try:
+                self.news_engine.dedupe_similarity_threshold = float(v)
+            except ValueError:
+                pass
 
 
 # ---- Global config management ----

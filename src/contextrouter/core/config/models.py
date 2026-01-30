@@ -71,7 +71,7 @@ class ModelsConfig(BaseModel):
 
     default_llm: str = Field(default="vertex/gemini-2.5-flash", alias="default")
     default_embeddings: str = "hf/sentence-transformers"
-    
+
     # Fallback LLM chain - used when default_llm fails (e.g., quota exceeded)
     # Set via CONTEXTROUTER_FALLBACK_LLMS="anthropic/claude-sonnet-4,google/gemini-2.5-flash"
     fallback_llms: list[str] = Field(default_factory=list)
@@ -132,3 +132,27 @@ class GardenerConfig(BaseModel):
 
     # Tenant - MUST be set via env/config
     tenant_id: str = ""
+
+
+class NewsEngineConfig(BaseModel):
+    """Configuration for News Engine graph.
+
+    Controls news harvesting, generation, and post-processing.
+    Set via NEWS_ENGINE_* environment variables.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    # LanguageTool grammar/spell checking
+    # Set via NEWS_ENGINE_LANGUAGE_TOOL_LANG=uk (or en, de, etc.)
+    language_tool_enabled: bool = False
+    language_tool_lang: str = "uk"  # Ukrainian by default
+    language_tool_auto_correct: bool = True  # Auto-apply corrections
+
+    # Generation settings
+    max_posts_per_run: int = 10
+    min_article_chars: int = 1100
+    max_article_chars: int = 1800
+
+    # Deduplication
+    dedupe_similarity_threshold: float = 0.85

@@ -37,6 +37,10 @@ class OpenAIConfig(BaseModel):
 
     api_key: str = ""
     organization: str | None = None
+    # Reasoning effort for reasoning models (gpt-5, o1, o3)
+    # Options: "minimal", "low", "medium", "high"
+    # "minimal" saves tokens, "high" uses more reasoning
+    reasoning_effort: str = "minimal"
 
 
 class AnthropicConfig(BaseModel):
