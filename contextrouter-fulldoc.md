@@ -40,36 +40,48 @@ unit.provenance.append("step:generation")
 ## Architecture
 
 ```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                              ContextRouter                                  │
-├────────────────────────────────────────────────────────────────────────────┤
-│                                                                            │
-│  modules/                         cortex/                                  │
-│  ├── models/                      ├── graphs/                              │
-│  │   ├── registry.py         ────▶│   ├── dispatcher.py    (graph router) │
-│  │   ├── base.py                  │   ├── rag_retrieval/   (RAG pipeline) │
-│  │   ├── types.py                 │   ├── commerce/                       │
-│  │   ├── llm/                     │   │   ├── gardener/    (taxonomy)     │
-│  │   │   ├── openai.py            │   │   ├── matcher/     (linking)      │
-│  │   │   ├── anthropic.py         │   │   └── chat/        (product Q&A)  │
-│  │   │   ├── vertex.py            │   └── news_engine/                    │
-│  │   │   ├── perplexity.py        │       ├── harvest/     (data fetch)   │
-│  │   │   └── rlm.py (RLM)         │       ├── showrunner/  (curation)     │
-│  │   └── embeddings/              │       └── agents/      (generation)   │
-│  │                                │                                        │
-│  ├── protocols/                   └── steps/                              │
-│  │   ├── agui.py                      ├── retrieval.py                    │
-│  │   └── telegram.py                  ├── generation.py                   │
-│  │                                    └── tool_use.py                     │
-│  ├── providers/                                                            │
-│  │   └── storage/                 core/                                   │
-│  │       └── brain_provider.py    ├── config/                             │
-│  │                                ├── registry.py                          │
-│  └── tools/                       └── tokens.py                            │
-│      └── registry.py                                                       │
-│                                                                            │
-└────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                              ContextRouter                                    │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  modules/                         cortex/                                    │
+│  ├── models/                      ├── graphs/                                │
+│  │   ├── registry.py              │   ├── dispatcher.py    (graph router)   │
+│  │   ├── types.py                 │   ├── rag_retrieval/   (RAG pipeline)   │
+│  │   └── llm/                     │   ├── commerce/                         │
+│  │       ├── openai.py            │   │   ├── gardener/    (taxonomy)       │
+│  │       ├── anthropic.py         │   │   └── matcher/     (linking)        │
+│  │       ├── vertex.py            │   └── news_engine/                      │
+│  │       ├── perplexity.py        │       ├── harvest/     (modular)        │
+│  │       └── rlm.py               │       │   ├── steps.py                  │
+│  │                                │       │   ├── json_parser.py            │
+│  ├── retrieval/rag/               │       │   └── prompts.py                │
+│  │   ├── pipeline.py              │       ├── archivist/   (modular)        │
+│  │   ├── pipeline_helpers.py      │       │   ├── steps.py                  │
+│  │   └── pipeline_retrieval.py    │       │   ├── filters.py                │
+│  │                                │       │   └── json_utils.py             │
+│  ├── providers/storage/           │       ├── showrunner/  (modular)        │
+│  │   └── brain.py                 │       │   ├── steps.py                  │
+│  │                                │       │   ├── heuristics.py             │
+│  └── tools/                       │       │   └── prompts.py                │
+│                                   │       └── agents/      (modular)        │
+│  cortex/services/                 │           ├── generation.py             │
+│  └── graph/       (modular)       │           ├── personas.py               │
+│      ├── __init__.py              │           └── language_tool.py          │
+│      ├── local.py                 │                                          │
+│      └── postgres.py              core/                                     │
+│                                   ├── config/                                │
+│                                   └── tokens.py                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Modular Design (400-Line Code Scale)
+
+All modules follow the 400-Line Code Scale standard:
+- **cortex/services/graph/**: Split from monolithic graph.py (~540 lines → 3 modules)
+- **modules/retrieval/rag/**: Pipeline split into focused modules (~330 lines → 3 modules)
+- **news_engine/*/**: Each stage (harvest, archivist, showrunner, agents) has extracted prompts, utils, heuristics
 
 ---
 
@@ -293,10 +305,25 @@ uv run pytest --cov=contextrouter
 | `cortex/graphs/dispatcher.py` | Agent graph router |
 | `cortex/graphs/rag_retrieval/graph.py` | RAG pipeline |
 | `cortex/graphs/commerce/gardener/graph.py` | Taxonomy classifier |
-| `cortex/graphs/news_engine/agents/generation.py` | News post generation |
+| `cortex/graphs/news_engine/graph.py` | News engine orchestration |
+| `cortex/graphs/news_engine/harvest/steps.py` | News discovery |
+| `cortex/graphs/news_engine/harvest/json_parser.py` | Robust JSON extraction |
+| `cortex/graphs/news_engine/archivist/steps.py` | Content validation |
+| `cortex/graphs/news_engine/archivist/filters.py` | Banned keywords, thresholds |
+| `cortex/graphs/news_engine/showrunner/steps.py` | Editorial planning |
+| `cortex/graphs/news_engine/showrunner/heuristics.py` | Content scoring |
+| `cortex/graphs/news_engine/agents/generation.py` | Post generation |
+| `cortex/graphs/news_engine/agents/personas.py` | Agent persona definitions |
+| `cortex/graphs/news_engine/agents/language_tool.py` | Ukrainian proofreading |
+| `cortex/services/graph/` | Modular GraphService |
+| `cortex/services/graph/local.py` | LocalGraphService |
+| `cortex/services/graph/postgres.py` | PostgresGraphService |
 | `modules/models/registry.py` | LLM provider registry, BUILTIN_LLMS |
 | `modules/models/types.py` | ModelRequest, error types |
-| `modules/providers/storage/brain_provider.py` | Brain integration |
+| `modules/retrieval/rag/pipeline.py` | RAG pipeline core |
+| `modules/retrieval/rag/pipeline_helpers.py` | Pipeline helper functions |
+| `modules/retrieval/rag/pipeline_retrieval.py` | Retrieval logic |
+| `modules/providers/storage/brain.py` | Brain integration |
 | `core/config/main.py` | Configuration management |
 
 ---
