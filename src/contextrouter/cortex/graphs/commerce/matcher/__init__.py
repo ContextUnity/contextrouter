@@ -8,6 +8,13 @@ Provides two matching modes:
 - RLM Bulk: Large-scale matching (50k+ products) using Recursive Language Models
 """
 
+from .data_loaders import (
+    KnowledgeGraphData,
+    RLMDataLoader,
+    TaxonomyData,
+    load_knowledge_graph_for_rlm,
+    load_taxonomy_for_rlm,
+)
 from .graph import (
     MatcherState,
     RLMBulkMatcherState,
@@ -16,6 +23,12 @@ from .graph import (
 )
 from .nodes import MatchingNode
 from .rlm_bulk import BulkMatchResult, ProductMatch, RLMBulkMatcher, rlm_bulk_match_node
+from .sku_parser import (
+    SkuAttributes,
+    SkuParser,
+    normalize_sku,
+    parse_sku_attributes,
+)
 
 __all__ = [
     # Regular matcher
@@ -29,4 +42,15 @@ __all__ = [
     "ProductMatch",
     "BulkMatchResult",
     "rlm_bulk_match_node",
+    # SKU parsing utilities
+    "SkuParser",
+    "SkuAttributes",
+    "parse_sku_attributes",
+    "normalize_sku",
+    # Data loaders for RLM
+    "RLMDataLoader",
+    "TaxonomyData",
+    "KnowledgeGraphData",
+    "load_taxonomy_for_rlm",
+    "load_knowledge_graph_for_rlm",
 ]
