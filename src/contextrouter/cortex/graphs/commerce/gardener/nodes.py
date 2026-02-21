@@ -16,128 +16,6 @@ from .state import EnrichmentResult, GardenerState, Product
 logger = logging.getLogger(__name__)
 
 
-# --- Database Client ---
-
-
-class DBClient:
-    """Single client for both Commerce and Brain (same DB)."""
-
-    def __init__(self, db_url: str):
-        self.db_url = db_url
-
-    async def get_products_by_ids(self, product_ids: List[int]) -> List[Product]:
-        """Get products by IDs (for queue-based processing)."""
-        if not product_ids:
-            return []
-
-        import psycopg
-        from psycopg.rows import dict_row
-
-        async with await psycopg.AsyncConnection.connect(self.db_url, row_factory=dict_row) as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """
-                    SELECT
-                        dp.id, dp.name, dp.category, dp.description, dp.params, dp.enrichment,
-                        b.name as brand_name
-                    FROM harvester_dealer_product dp
-                    LEFT JOIN harvester_brand b ON dp.brand_id = b.id
-                    WHERE dp.id = ANY(%s)
-                """,
-                    (product_ids,),
-                )
-
-                rows = await cur.fetchall()
-                return [
-                    Product(
-                        id=row["id"],
-                        name=row["name"] or "",
-                        category=row["category"] or "",
-                        description=row["description"] or "",
-                        params=row["params"] or {},
-                        enrichment=row["enrichment"] or {},
-                        brand_name=row["brand_name"],
-                    )
-                    for row in rows
-                ]
-
-    async def update_product_enrichment(
-        self,
-        product_id: int,
-        enrichment: Dict[str, Any],
-        trace_id: str,
-        status: str = "enriching",
-    ) -> None:
-        """Update product enrichment field."""
-        import psycopg
-
-        async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """
-                    UPDATE harvester_dealer_product
-                    SET
-                        enrichment = %s,
-                        enrichment_trace_id = %s,
-                        status = %s,
-                        updated_at = NOW()
-                    WHERE id = %s
-                """,
-                    (json.dumps(enrichment), trace_id, status, product_id),
-                )
-                await conn.commit()
-
-    async def update_product_ner_fields(
-        self,
-        product_id: int,
-        product_type: str | None,
-        model_name: str | None,
-        brand_id: int | None = None,
-    ) -> None:
-        """Update NER-extracted fields on product."""
-        import psycopg
-
-        async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """
-                    UPDATE harvester_dealer_product
-                    SET
-                        product_type = COALESCE(%s, product_type),
-                        model_name = COALESCE(%s, model_name),
-                        updated_at = NOW()
-                    WHERE id = %s
-                """,
-                    (product_type, model_name, product_id),
-                )
-                await conn.commit()
-
-    async def create_kg_relation(
-        self,
-        tenant_id: str,
-        source_type: str,
-        source_id: str,
-        relation: str,
-        target_type: str,
-        target_id: str,
-    ) -> None:
-        """Create relation in knowledge_edges."""
-        import psycopg
-
-        async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """
-                    INSERT INTO knowledge_edges
-                        (tenant_id, source_type, source_id, relation, target_type, target_id, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
-                    ON CONFLICT DO NOTHING
-                """,
-                    (tenant_id, source_type, source_id, relation, target_type, target_id),
-                )
-                await conn.commit()
-
-
 # --- Helpers ---
 
 
@@ -204,10 +82,34 @@ async def fetch_pending_node(state: GardenerState) -> dict:
         logger.info("No products in enrichment queue")
         return {"products": []}
 
-    client = DBClient(state["db_url"])
-    products = await client.get_products_by_ids(product_ids)
+    # Use BrainClient instead of direct DB access for security
+    from contextcore import BrainClient
 
-    logger.info(f"Fetched {len(products)} products from queue for enrichment")
+    brain_url = state["brain_url"]
+    token = state.get("access_token")  # Get token from state
+    client = BrainClient(host=brain_url, mode="grpc", token=token)
+
+    products_data = await client.get_products(
+        tenant_id=state["tenant_id"],
+        product_ids=product_ids,
+        trace_id=state["trace_id"],
+        parent_provenance=["router:gardener:fetch_pending"],
+    )
+
+    products = [
+        Product(
+            id=p.get("id", 0),
+            name=p.get("name", ""),
+            category=p.get("category", ""),
+            description=p.get("description", ""),
+            params=p.get("params", {}),
+            enrichment=p.get("enrichment", {}),
+            brand_name=p.get("brand_name"),
+        )
+        for p in products_data
+    ]
+
+    logger.info("Fetched %s products from queue for enrichment via Brain gRPC", len(products))
     return {"products": products}
 
 
@@ -260,7 +162,7 @@ async def classify_taxonomy_node(state: GardenerState) -> dict:
             )
 
     except Exception as e:
-        logger.error(f"Taxonomy classification failed: {e}")
+        logger.error("Taxonomy classification failed: %s", e)
         return {"errors": state.get("errors", []) + [f"taxonomy: {str(e)}"]}
 
     step_trace = {
@@ -325,7 +227,7 @@ async def extract_ner_node(state: GardenerState) -> dict:
             )
 
     except Exception as e:
-        logger.error(f"NER extraction failed: {e}")
+        logger.error("NER extraction failed: %s", e)
         return {"errors": state.get("errors", []) + [f"ner: {str(e)}"]}
 
     step_trace = {
@@ -356,7 +258,12 @@ async def update_kg_node(state: GardenerState) -> dict:
     else:
         ontology = {}
 
-    client = DBClient(state["db_url"])
+    # Use BrainClient instead of direct DB access for security
+    from contextcore import BrainClient
+
+    brain_url = state["brain_url"]
+    token = state.get("access_token")  # Get token from state
+    client = BrainClient(host=brain_url, mode="grpc", token=token)
     tenant_id = state["tenant_id"]
 
     relations_created = 0
@@ -378,6 +285,8 @@ async def update_kg_node(state: GardenerState) -> dict:
                 relation="MADE_BY",
                 target_type="brand",
                 target_id=brand_slug,
+                trace_id=state["trace_id"],
+                parent_provenance=["router:gardener:create_kg"],
             )
             relations_created += 1
 
@@ -391,6 +300,8 @@ async def update_kg_node(state: GardenerState) -> dict:
                     relation="USES",
                     target_type="technology",
                     target_id=tech_slug,
+                    trace_id=state["trace_id"],
+                    parent_provenance=["router:gardener:create_kg"],
                 )
                 relations_created += 1
 
@@ -403,7 +314,7 @@ async def update_kg_node(state: GardenerState) -> dict:
             )
         )
 
-    logger.info(f"Created {relations_created} KG relations")
+    logger.info("Created %s KG relations", relations_created)
 
     step_trace = {
         "step": "kg",
@@ -421,7 +332,12 @@ async def write_results_node(state: GardenerState) -> dict:
     """Write all enrichment results back to DealerProduct."""
     start = time.time()
 
-    client = DBClient(state["db_url"])
+    # Use BrainClient instead of direct DB access for security
+    from contextcore import BrainClient
+
+    brain_url = state["brain_url"]
+    token = state.get("access_token")  # Get token from state
+    client = BrainClient(host=brain_url, mode="grpc", token=token)
     products_updated = 0
     errors = []
 
@@ -443,34 +359,38 @@ async def write_results_node(state: GardenerState) -> dict:
             "tokens": result.tokens,
         }
 
-    # Write to DB
+    # Write to DB via Brain gRPC
     for product_id, enrichment in enrichment_map.items():
         try:
-            await client.update_product_enrichment(
+            success = await client.update_enrichment(
+                tenant_id=state["tenant_id"],
                 product_id=product_id,
                 enrichment=enrichment,
                 trace_id=state["trace_id"],
                 status="enriched",
+                parent_provenance=["router:gardener:write_results"],
             )
 
-            ner_result = next(
-                (r for r in state.get("ner_results", []) if r.product_id == product_id),
-                None,
-            )
-            if ner_result and ner_result.status == "done":
-                await client.update_product_ner_fields(
-                    product_id=product_id,
-                    product_type=ner_result.result.get("product_type"),
-                    model_name=ner_result.result.get("model"),
-                )
+            if not success:
+                raise RuntimeError(f"update_enrichment returned False for product {product_id}")
+
+            # TODO: NER fields (product_type, model_name) should be included in enrichment dict
+            # and updated via update_enrichment. Separate update_product_ner_fields is not available in BrainClient.
+            # ner_result = next(
+            #     (r for r in state.get("ner_results", []) if r.product_id == product_id),
+            #     None,
+            # )
+            # if ner_result and ner_result.status == "done":
+            #     # Include NER fields in enrichment dict instead
+            #     pass
 
             products_updated += 1
 
         except Exception as e:
-            logger.error(f"Failed to write results for product {product_id}: {e}")
+            logger.error("Failed to write results for product %s: %s", product_id, e)
             errors.append(f"write:{product_id}:{str(e)}")
 
-    logger.info(f"Updated {products_updated} products")
+    logger.info("Updated %s products", products_updated)
 
     step_trace = {
         "step": "write",

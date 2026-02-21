@@ -78,6 +78,8 @@ class Config(BaseModel):
 
     # Core settings
     debug: bool = False
+    debug_graph_messages: bool = False
+    debug_tools_messages: bool = False
     log_level: str = "INFO"
 
     # Sub-configurations
@@ -177,7 +179,7 @@ class Config(BaseModel):
                 config.loaded_from.append(toml_path)
             except Exception as e:
                 logger = logging.getLogger(__name__)
-                logger.warning(f"Failed to load TOML config from {toml_path}: {e}")
+                logger.warning("Failed to load TOML config from %s: %s", toml_path, e)
 
         # Override with environment variables
         config._apply_env_overrides()
@@ -186,6 +188,12 @@ class Config(BaseModel):
 
     def _apply_env_overrides(self) -> None:
         """Apply environment variable overrides to config."""
+        # Debug flags
+        if dbg_graph := get_env("DEBUG_GRAPH_MESSAGES"):
+            self.debug_graph_messages = dbg_graph.lower() in ("1", "true", "yes")
+        if dbg_tools := get_env("DEBUG_TOOLS_MESSAGES"):
+            self.debug_tools_messages = dbg_tools.lower() in ("1", "true", "yes")
+
         # Model configuration
         if llm_val := get_env("CONTEXTROUTER_DEFAULT_LLM"):
             self.models.default_llm = llm_val
@@ -258,8 +266,26 @@ class Config(BaseModel):
         # Brain configuration
         if v := get_env("BRAIN_MODE"):
             self.brain.mode = v.lower()
-        if v := get_env("BRAIN_GRPC_ENDPOINT"):
+        if v := (get_env("BRAIN_GRPC_ENDPOINT") or get_env("CONTEXT_BRAIN_URL")):
             self.brain.grpc_endpoint = v
+
+        # Router server & external services
+        if v := get_env("ROUTER_PORT"):
+            self.router.port = v
+        if v := get_env("ROUTER_INSTANCE_NAME"):
+            self.router.instance_name = v
+        if v := get_env("ROUTER_TENANTS"):
+            self.router.tenants = [t.strip() for t in v.split(",") if t.strip()]
+        if v := get_env("CONTEXT_WORKER_URL"):
+            self.router.worker_grpc_endpoint = v
+        if v := get_env("CONTEXTZERO_GRPC_HOST"):
+            self.router.contextzero_grpc_host = v
+        if v := get_env("CONTEXTSHIELD_GRPC_HOST"):
+            self.router.contextshield_grpc_host = v
+        if v := get_env("GCS_DEFAULT_BUCKET"):
+            self.router.gcs_default_bucket = v
+        if brain_idx := get_bool_env("CONTEXT_BRAIN_INDEX_TOOLS"):
+            self.router.brain_index_tools = brain_idx
 
         # OpenAI configuration
         if openai_key := get_env("OPENAI_API_KEY"):
@@ -327,21 +353,21 @@ class Config(BaseModel):
             self.langfuse.public_key = langfuse_public
         if langfuse_host := get_env("LANGFUSE_HOST"):
             self.langfuse.host = langfuse_host
+        if langfuse_project := get_env("LANGFUSE_PROJECT_ID"):
+            self.langfuse.project_id = langfuse_project
         if langfuse_env := get_env("LANGFUSE_ENVIRONMENT"):
             self.langfuse.environment = langfuse_env
         if langfuse_service := get_env("LANGFUSE_SERVICE_NAME"):
             self.langfuse.service_name = langfuse_service
 
-        # Security configuration - ENABLED by default for security-first approach
-        # Set CONTEXTROUTER_SECURITY_ENABLED=false explicitly to disable in dev
-        security_enabled = get_bool_env("CONTEXTROUTER_SECURITY_ENABLED")
-        if security_enabled is None:
-            # Default: enabled in production-like environments
-            self.security.enabled = True
-        else:
+        # Security configuration — uses unified SECURITY_ENABLED from contextcore
+        security_enabled = get_bool_env("SECURITY_ENABLED")
+        if security_enabled is not None:
             self.security.enabled = security_enabled
         if private_key_path := get_env("CONTEXTROUTER_PRIVATE_KEY_PATH"):
             self.security.private_key_path = private_key_path
+        if env_name := (get_env("CONTEXTROUTER_ENVIRONMENT") or get_env("ENVIRONMENT")):
+            self.security.environment = env_name.lower()
 
         # Redis configuration
         if v := get_env("REDIS_HOST"):

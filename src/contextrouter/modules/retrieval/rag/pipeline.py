@@ -104,7 +104,7 @@ class RetrievalPipeline(RetrievalMixin):
         try:
             token = self._token_from_state(state)
         except Exception as e:
-            from contextrouter.core.exceptions import RetrievalError
+            from contextcore.exceptions import RetrievalError
 
             raise RetrievalError(
                 f"Failed to resolve access token: {str(e)}", code="AUTH_ERROR"

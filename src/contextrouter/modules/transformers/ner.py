@@ -225,7 +225,7 @@ class NERTransformer(Transformer):
 
             return entities
         except Exception as e:
-            logger.error(f"spaCy NER extraction failed: {e}")
+            logger.error("spaCy NER extraction failed: %s", e)
             return []
 
     def _extract_with_transformers(self, text: str) -> list[NEREntity]:
@@ -259,7 +259,7 @@ class NERTransformer(Transformer):
 
             return entities
         except Exception as e:
-            logger.error(f"Transformers NER extraction failed: {e}")
+            logger.error("Transformers NER extraction failed: %s", e)
             return []
 
     async def _extract_with_llm(self, text: str) -> list[NEREntity]:
@@ -335,7 +335,7 @@ Return only valid JSON array, no markdown formatting."""
 
             return validated
         except Exception as e:
-            logger.error(f"LLM NER extraction failed: {e}")
+            logger.error("LLM NER extraction failed: %s", e)
             return []
 
     async def transform(self, unit: ContextUnit) -> ContextUnit:
@@ -354,7 +354,7 @@ Return only valid JSON array, no markdown formatting."""
         elif isinstance(content, str):
             text = content
         else:
-            logger.warning(f"NER: unsupported content type {type(content)}")
+            logger.warning("NER: unsupported content type %s", type(content))
             return unit
 
         if not text or len(text.strip()) < 10:
@@ -398,7 +398,10 @@ Return only valid JSON array, no markdown formatting."""
         unit.payload = payload
 
         logger.debug(
-            f"NER: extracted {len(entities)} entities ({len(entities_by_type)} types) using {self.mode}"
+            "NER: extracted %s entities (%s types) using %s",
+            len(entities),
+            len(entities_by_type),
+            self.mode,
         )
 
         return unit

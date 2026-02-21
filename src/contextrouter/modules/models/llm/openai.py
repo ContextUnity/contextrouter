@@ -42,7 +42,7 @@ class OpenAILLM(BaseModel):
     """OpenAI LLM provider.
 
     Supports multimodal inputs (text + images) and audio (ASR via Whisper).
-    
+
     Args:
         config: Router configuration
         model_name: OpenAI model name (e.g., "gpt-4o", "gpt-5-mini")
@@ -98,8 +98,7 @@ class OpenAILLM(BaseModel):
             from openai import AsyncOpenAI
         except Exception as e:  # pragma: no cover
             raise ImportError(
-                "OpenAI web search requires `openai>=1.0.0`. "
-                "Install with: pip install openai"
+                "OpenAI web search requires `openai>=1.0.0`. Install with: pip install openai"
             ) from e
 
         if not self._cfg.openai.api_key:
@@ -140,7 +139,7 @@ class OpenAILLM(BaseModel):
             if hasattr(part, "text"):
                 input_text += "\n" + part.text
 
-        logger.info(f"OpenAI Responses API request with web_search (model={self._model_name})")
+        logger.info("OpenAI Responses API request with web_search (model=%s)", self._model_name)
 
         try:
             response = await self._openai_client.responses.create(
@@ -171,7 +170,7 @@ class OpenAILLM(BaseModel):
                         text = content.text
                         break
 
-        logger.info(f"OpenAI Responses API returned {len(text)} chars")
+        logger.info("OpenAI Responses API returned %s chars", len(text))
 
         # Extract usage if available
         usage = None
@@ -264,9 +263,9 @@ class OpenAILLM(BaseModel):
             text = "".join(text_parts)
 
         if not text:
-            logger.warning(f"OpenAI returned empty content. Full response: {msg}")
+            logger.warning("OpenAI returned empty content. Full response: %s", msg)
             if hasattr(msg, "refusal") and msg.refusal:
-                logger.warning(f"OpenAI REFUSED to respond: {msg.refusal}")
+                logger.warning("OpenAI REFUSED to respond: %s", msg.refusal)
 
         usage = self._extract_usage(msg)
 
@@ -305,15 +304,31 @@ class OpenAILLM(BaseModel):
         yield FinalTextEvent(text=full)
 
     def _extract_usage(self, msg: object) -> UsageStats | None:
-        """Extract usage stats from LangChain message metadata."""
+        """Extract usage stats from LangChain message metadata.
+
+        Handles two formats:
+        - Chat Completions API: response_metadata.token_usage.{prompt,completion}_tokens
+        - Responses API (gpt-5/o-series with reasoning): usage_metadata.{input,output}_tokens
+        """
         try:
+            # 1. Chat Completions format (response_metadata.token_usage)
             meta = getattr(msg, "response_metadata", None) or {}
-            u = meta.get("token_usage") if isinstance(meta, dict) else None
-            if isinstance(u, dict):
+            if isinstance(meta, dict):
+                u = meta.get("token_usage")
+                if isinstance(u, dict) and u.get("prompt_tokens") is not None:
+                    return UsageStats(
+                        input_tokens=int(u.get("prompt_tokens") or 0),
+                        output_tokens=int(u.get("completion_tokens") or 0),
+                        total_tokens=int(u.get("total_tokens") or 0),
+                    )
+
+            # 2. LangChain usage_metadata (works for both APIs)
+            um = getattr(msg, "usage_metadata", None)
+            if isinstance(um, dict) and um.get("input_tokens") is not None:
                 return UsageStats(
-                    input_tokens=int(u.get("prompt_tokens") or 0),
-                    output_tokens=int(u.get("completion_tokens") or 0),
-                    total_tokens=int(u.get("total_tokens") or 0),
+                    input_tokens=int(um.get("input_tokens") or 0),
+                    output_tokens=int(um.get("output_tokens") or 0),
+                    total_tokens=int(um.get("total_tokens") or 0),
                 )
         except Exception:
             pass
@@ -321,4 +336,3 @@ class OpenAILLM(BaseModel):
 
 
 __all__ = ["OpenAILLM"]
-

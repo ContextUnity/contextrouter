@@ -30,12 +30,12 @@ def init_language_tool(lang: str = "uk"):
     try:
         import language_tool_python
 
-        logger.info(f"Starting LanguageTool server for language: {lang}")
+        logger.info("Starting LanguageTool server for language: %s", lang)
         _language_tool_instance = language_tool_python.LanguageTool(lang)
     except ImportError:
         logger.warning("language-tool-python not installed")
     except Exception as e:
-        logger.error(f"Failed to start LanguageTool: {e}")
+        logger.error("Failed to start LanguageTool: %s", e)
 
 
 def close_language_tool():
@@ -46,7 +46,7 @@ def close_language_tool():
             logger.info("Closing LanguageTool server")
             _language_tool_instance.close()
         except Exception as e:
-            logger.warning(f"Error closing LanguageTool: {e}")
+            logger.warning("Error closing LanguageTool: %s", e)
         finally:
             _language_tool_instance = None
 
@@ -75,10 +75,13 @@ async def apply_language_tool(text: str, auto_correct: bool = True) -> str:
             matches = _language_tool_instance.check(text)
 
             if matches:
-                logger.info(f"LanguageTool found {len(matches)} issues in text")
+                logger.info("LanguageTool found %s issues in text", len(matches))
                 for match in matches[:5]:  # Log first 5 issues
                     logger.debug(
-                        f"  - {match.rule_issue_type}: '{match.matched_text}' -> {match.replacements[:3]}"
+                        "  - %s: '%s' -> %s",
+                        match.rule_issue_type,
+                        match.matched_text,
+                        match.replacements[:3],
                     )
 
                 if auto_correct:
@@ -90,7 +93,7 @@ async def apply_language_tool(text: str, auto_correct: bool = True) -> str:
         return await loop.run_in_executor(None, check_and_correct)
 
     except Exception as e:
-        logger.warning(f"LanguageTool error: {e}")
+        logger.warning("LanguageTool error: %s", e)
         return text
 
 

@@ -6,7 +6,7 @@ This module provides entry points for invoking Commerce agents:
 - Lexicon: Term extraction and normalization
 
 Architecture:
-    See plans/router/gardener-architecture.md for the hybrid batch/agentic/manual approach.
+    See plans/router/gardener_architecture.md for the hybrid batch/agentic/manual approach.
 
 Usage:
     from contextrouter.cortex.runners.commerce import (
@@ -43,7 +43,6 @@ async def run_gardener_batch(
     batch_size: int = 50,
     trace_id: str | None = None,
     *,
-    db_url: str | None = None,
     brain_url: str | None = None,
     fallback_to_agentic: bool = True,
     confidence_threshold: float = CONFIDENCE_THRESHOLD,
@@ -54,7 +53,6 @@ async def run_gardener_batch(
         tenant_id: Tenant identifier.
         batch_size: Number of products to process.
         trace_id: Trace ID for observability.
-        db_url: Override database URL (deprecated, use brain_url).
         brain_url: Brain gRPC URL.
         fallback_to_agentic: If True, queue low-confidence products for agentic processing.
         confidence_threshold: Minimum confidence to accept (default 0.7).
@@ -86,7 +84,6 @@ async def run_gardener_batch(
         "tenant_id": tenant_id,
         "batch_size": batch_size,
         "trace_id": trace_id or f"gardener-{tenant_id}",
-        "db_url": db_url or config.database.url,
         "brain_url": brain_url or config.brain.url,
         "products": [],
         "product_ids": product_ids,
@@ -110,8 +107,9 @@ async def run_gardener_batch(
                     trace_id=trace_id,
                 )
                 fallback_count += 1
+                confidence_str = format(confidence, ".2f")
                 logger.info(
-                    f"Product {product_id} queued for agentic (confidence={confidence:.2f})"
+                    "Product %s queued for agentic (confidence=%s)", product_id, confidence_str
                 )
 
     # Complete batch
@@ -162,7 +160,9 @@ async def run_gardener_agentic(
     tenant_id = tenant_id or "default"
 
     # Fetch product from Brain
-    brain = BrainClient(host=brain_url or config.brain.url)
+    from contextrouter.core.brain_token import get_brain_service_token
+
+    brain = BrainClient(host=brain_url or config.brain.url, token=get_brain_service_token())
     products = await brain.get_products(tenant_id, [product_id])
 
     if not products:
@@ -254,7 +254,7 @@ async def queue_for_manual_review(
         },
     )
 
-    logger.info(f"Product {product_id} queued for manual review: {reason}")
+    logger.info("Product %s queued for manual review: %s", product_id, reason)
 
     return {
         "status": "queued",

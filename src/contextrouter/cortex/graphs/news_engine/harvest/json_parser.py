@@ -31,10 +31,10 @@ def extract_json_array(text: str) -> list[dict]:
         Parsed list of dicts, or empty list if parsing failed
     """
     if not text or len(text.strip()) < 2:
-        logger.warning(f"Empty or too short response: '{text[:100] if text else 'None'}'")
+        logger.warning("Empty or too short response: '%s'", text[:100] if text else "None")
         return []
 
-    logger.debug(f"Parsing JSON from response length: {len(text)}")
+    logger.debug("Parsing JSON from response length: %s", len(text))
 
     # Step 1: Strip markdown code blocks first
     # This handles ```json ... ``` and ``` ... ```
@@ -44,7 +44,7 @@ def extract_json_array(text: str) -> list[dict]:
         try:
             result = json.loads(json_str)
             if isinstance(result, list):
-                logger.debug(f"Parsed from code block: {len(result)} items")
+                logger.debug("Parsed from code block: %s items", len(result))
                 return result
         except json.JSONDecodeError:
             pass  # Continue to other methods
@@ -67,7 +67,7 @@ def extract_json_array(text: str) -> list[dict]:
                         break
 
             json_str = text[start:end]
-            logger.debug(f"Extracted JSON ({len(json_str)} chars): {json_str[:200]}...")
+            logger.debug("Extracted JSON (%s chars): %s...", len(json_str), json_str[:200])
             return json.loads(json_str)
 
         # Step 3: Look for any JSON array (including empty [])
@@ -77,7 +77,7 @@ def extract_json_array(text: str) -> list[dict]:
             try:
                 result = json.loads(json_str)
                 if isinstance(result, list):
-                    logger.debug(f"Parsed array: {len(result)} items")
+                    logger.debug("Parsed array: %s items", len(result))
                     return result
             except json.JSONDecodeError:
                 pass
@@ -86,7 +86,7 @@ def extract_json_array(text: str) -> list[dict]:
         return []
 
     except json.JSONDecodeError as e:
-        logger.warning(f"Failed to parse JSON: {e}")
+        logger.warning("Failed to parse JSON: %s", e)
         return []
 
 

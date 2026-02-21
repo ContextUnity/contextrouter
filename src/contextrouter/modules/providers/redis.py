@@ -12,22 +12,33 @@ class RedisProvider:
     Used for token revocation, rate limiting, and LangGraph checkpointers.
     """
 
-    def __init__(self, host: str = "localhost", port: int = 6379, db: int = 0):
+    def __init__(
+        self,
+        host: str = "localhost",
+        port: int = 6379,
+        db: int = 0,
+        password: str | None = None,
+    ):
         self.host = host
         self.port = port
         self.db = db
+        self.password = password
         self._client: Optional[redis.Redis] = None
 
     async def connect(self):
         if not self._client:
             self._client = redis.Redis(
-                host=self.host, port=self.port, db=self.db, decode_responses=True
+                host=self.host,
+                port=self.port,
+                db=self.db,
+                password=self.password,
+                decode_responses=True,
             )
             try:
                 await self._client.ping()
-                logger.info(f"Connected to Redis at {self.host}:{self.port}")
+                logger.info("Connected to Redis at %s:%s", self.host, self.port)
             except Exception as e:
-                logger.error(f"Failed to connect to Redis: {e}")
+                logger.error("Failed to connect to Redis: %s", e)
                 self._client = None
 
     async def get(self, key: str) -> Optional[str]:

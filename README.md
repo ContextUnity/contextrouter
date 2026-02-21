@@ -136,7 +136,7 @@ Set your mode via `BRAIN_MODE=local` or `BRAIN_MODE=grpc`.
 
 | Provider | Key | Use Case |
 |----------|-----|----------|
-| **Vertex AI** | `vertex/gemini-2.0-flash` | Production, multimodal |
+| **Vertex AI** | `vertex/gemini-2.5-flash` | Production, multimodal |
 | **OpenAI** | `openai/gpt-5-mini` | General purpose |
 | **Anthropic** | `anthropic/claude-sonnet-4` | Reasoning, analysis |
 | **Perplexity** | `perplexity/sonar` | Web-grounded search |
@@ -193,6 +193,75 @@ export PERPLEXITY_API_KEY="pplx-..."
 - [Full Documentation](https://contextrouter.dev) — complete guides and API reference
 - [Technical Reference](./contextrouter-fulldoc.md) — architecture deep-dive
 - [Contributing Guide](./CONTRIBUTING.md) — Golden Paths for adding functionality
+
+### Dispatcher Agent
+
+The dispatcher gRPC service uses a **modular mixin architecture**:
+
+```
+DispatcherService
+├── ExecutionMixin      — ExecuteAgent, ExecuteDispatcher, StreamDispatcher
+├── RegistrationMixin   — RegisterTools, DeregisterTools, graph management
+├── PersistenceMixin    — Redis-backed registration recovery on restart
+└── RouterServiceServicer (gRPC)
+```
+
+The dispatcher agent graph is a modular LangGraph pipeline:
+
+```
+agent → security → [execute|blocked|end]
+                     → execute → tools → agent
+                     → blocked → agent (with error)
+                     → end → reflect → END
+```
+
+- [Quick Start](./docs/DISPATCHER_QUICKSTART.md) — get started in 5 minutes
+- [Dispatcher Agent Guide](./docs/DISPATCHER_AGENT.md) — complete agent documentation
+- [Memory Usage](./docs/DISPATCHER_MEMORY_USAGE.md) — how to use Redis memory tools
+- [gRPC API](./docs/DISPATCHER_GRPC.md) — gRPC API documentation
+- [Caching Strategies](./docs/CACHING_STRATEGIES.md) — advanced caching patterns
+
+## Testing & docs
+
+- [Integration tests](../tests/integration/README.md) — cross-service tests (token/trace propagation, etc.)
+- [Security guide](https://contextrouter.dev/guides/security/) — includes Dispatcher REST API `allowed_tools` / `denied_tools`
+
+## Security
+
+ContextRouter enforces multi-layer security for all inter-service communication.
+See [Security Architecture](../../docs/security_architecture.md) for the full model.
+
+### Registration Security (Three Layers)
+
+When a project calls `RegisterTools`, three checks run **sequentially**:
+
+| Layer | Check | Fails if... |
+|-------|-------|------------|
+| **A: Tenant binding** | `project_id ∈ token.allowed_tenants` | Token doesn't include this project |
+| **B: Permission** | `has_registration_access(perms, project_id)` | Missing `tools:register:{id}` permission |
+| **C: Ownership** | `verify_project_owner(project_id, tenant)` | Project registered by different owner |
+
+```python
+# Correct client-side token for registration:
+token = ContextToken(
+    token_id="my-service",
+    permissions=("tools:register:my_project",),  # project-specific
+    allowed_tenants=("my_project",),
+)
+```
+
+### Tool Execution Security
+
+- Every tool is wrapped in `SecureTool` with `bound_tenant` enforcement
+- Token must have `tool:{name}` permission (e.g., `tool:execute_medical_sql`)
+- `tool:*` wildcard grants access to all tools (admin only)
+
+### Stream Authentication
+
+Bidirectional streams (tool executor pattern) authenticate via:
+1. Shield-verified auth tokens (production)
+2. Local fallback secrets (when Shield unavailable)
+3. Fail-closed rejection (no valid credentials)
 
 ## Contributing
 

@@ -1,17 +1,22 @@
-"""Storage providers."""
+"""Storage providers.
+
+Active providers:
+- BrainProvider: delegates to ContextBrain gRPC (primary)
+- GCSProvider: Google Cloud Storage read/write
+- VertexProvider: Vertex AI Search retrieval
+- PostgresProvider: local pgvector hybrid search
+"""
 
 from __future__ import annotations
 
-from .brain import BrainStorageProvider
+from .brain import BrainProvider
 from .gcs import GCSProvider
 from .postgres.provider import PostgresProvider
 from .vertex import VertexProvider
-from .vertex_search import VertexSearchProvider
 
 __all__ = [
-    "BrainStorageProvider",
+    "BrainProvider",
     "GCSProvider",
     "PostgresProvider",
     "VertexProvider",
-    "VertexSearchProvider",
 ]

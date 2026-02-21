@@ -11,8 +11,9 @@ from __future__ import annotations
 import logging
 import time
 
+from contextcore.exceptions import ProviderError
+
 from contextrouter.core import get_core_config
-from contextrouter.core.exceptions import ProviderError
 from contextrouter.core.types import coerce_struct_data
 from contextrouter.modules.observability.langfuse import retrieval_span
 from contextrouter.modules.retrieval.rag.models import RetrievedDoc

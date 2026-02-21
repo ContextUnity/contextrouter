@@ -7,22 +7,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
-class RagConfig(BaseModel):
-    """RAG datastore selection (compat for retrieval settings).
-
-    Used by `contextrouter.modules.retrieval.rag.settings.resolve_data_store_id`.
-    Values may be provided via TOML or env; env can still override at runtime.
-    """
-
-    model_config = ConfigDict(extra="ignore")
-
-    # blue/green selector or full datastore id
-    db_name: str = ""
-    data_store_id_blue: str = ""
-    data_store_id_green: str = ""
-
-
 ModelSelectionStrategy = Literal["fallback", "parallel", "cost-priority"]
 
 
@@ -107,6 +91,18 @@ class RouterConfig(BaseModel):
     # - "agent": class-based nodes registered in `agent_registry` (default)
     # - "direct": function-based nodes (simple flows, no agent instantiation)
     mode: Literal["agent", "direct"] = "agent"
+
+    # ── Server settings ───────────────────────────────────────────
+    port: str = "50050"
+    instance_name: str = "default"
+    tenants: list[str] = Field(default_factory=list)
+
+    # ── External service endpoints ────────────────────────────────
+    worker_grpc_endpoint: str = "localhost:50052"
+    contextzero_grpc_host: str = ""
+    contextshield_grpc_host: str = ""
+    gcs_default_bucket: str = ""
+    brain_index_tools: bool = False
 
 
 class GardenerConfig(BaseModel):

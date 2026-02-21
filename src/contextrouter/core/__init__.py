@@ -61,6 +61,8 @@ __all__ = [
     "agent_registry",  # Direct access for compatibility
     "graph_registry",  # Direct access for compatibility
     "registry",  # Access via contextrouter.core.registry
+    # Plugins
+    "plugins",  # Plugin manifest and context system
     # Security
     "AccessManager",
     "ContextToken",
@@ -83,6 +85,6 @@ def __getattr__(name: str) -> types.ModuleType:
     These names are listed in __all__ for historical reasons, but we avoid
     importing them eagerly to keep `import contextrouter.core` lightweight.
     """
-    if name in {"config", "exceptions", "env", "interfaces", "registry", "types"}:
+    if name in {"config", "exceptions", "env", "interfaces", "plugins", "registry", "types"}:
         return importlib.import_module(f"contextrouter.core.{name}")
     raise AttributeError(name)

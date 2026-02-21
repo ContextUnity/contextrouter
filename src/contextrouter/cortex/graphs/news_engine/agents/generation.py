@@ -38,14 +38,16 @@ async def load_context_node(state: NewsEngineState) -> Dict[str, Any]:
     if not stories:
         return {"similar_posts": []}
 
-    logger.info(f"[{tenant_id}] Loading context for {len(stories)} stories")
+    logger.info("[%s] Loading context for %s stories", tenant_id, len(stories))
 
     config = get_core_config()
 
     try:
         from contextcore import BrainClient
 
-        client = BrainClient(host=config.brain.grpc_endpoint)
+        from contextrouter.core.brain_token import get_brain_service_token
+
+        client = BrainClient(host=config.brain.grpc_endpoint, token=get_brain_service_token())
 
         for story in stories:
             fact = story.get("fact", {})
@@ -67,7 +69,7 @@ async def load_context_node(state: NewsEngineState) -> Dict[str, Any]:
         for story in stories:
             story["similar_posts"] = []
     except Exception as e:
-        logger.warning(f"Failed to load context: {e}")
+        logger.warning("Failed to load context: %s", e)
         for story in stories:
             story["similar_posts"] = []
 
@@ -82,7 +84,7 @@ async def generate_posts_node(state: NewsEngineState) -> Dict[str, Any]:
     if not stories:
         return {"posts": [], "generation_errors": []}
 
-    logger.info(f"[{tenant_id}] Generating posts for {len(stories)} stories")
+    logger.info("[%s] Generating posts for %s stories", tenant_id, len(stories))
 
     config = get_core_config()
     overrides = state.get("prompt_overrides", {})
@@ -154,7 +156,7 @@ Write the post following the language and style rules from your system prompt.""
             )
 
         # Generate posts in parallel for speed
-        logger.info(f"[{tenant_id}] Generating {len(requests)} posts in parallel")
+        logger.info("[%s] Generating %s posts in parallel", tenant_id, len(requests))
 
         async def generate_single(request: ModelRequest, meta: dict) -> dict | None:
             """Generate a single post, return None on failure or empty content."""
@@ -164,7 +166,7 @@ Write the post following the language and style rules from your system prompt.""
 
                 # Validate content is not empty
                 if not content:
-                    logger.warning(f"Empty response for {meta['headline'][:50]} - skipping")
+                    logger.warning("Empty response for %s - skipping", meta["headline"][:50])
                     errors.append(f"{meta['agent']}: Empty LLM response")
                     return None
 
@@ -195,7 +197,7 @@ Write the post following the language and style rules from your system prompt.""
                     "hashtags": hashtags,
                 }
             except Exception as e:
-                logger.error(f"Generation failed for {meta['headline'][:50]}: {e}")
+                logger.error("Generation failed for %s: %s", meta["headline"][:50], e)
                 errors.append(f"{meta['agent']}: {str(e)}")
                 return None
 
@@ -219,7 +221,7 @@ Write the post following the language and style rules from your system prompt.""
                 posts.append(result)
 
     except Exception as e:
-        logger.error(f"Generation setup failed: {e}")
+        logger.error("Generation setup failed: %s", e)
         errors.append(f"Setup: {str(e)}")
 
     finally:
@@ -227,7 +229,7 @@ Write the post following the language and style rules from your system prompt.""
         if config.news_engine.language_tool_enabled:
             close_language_tool()
 
-    logger.info(f"[{tenant_id}] Generated {len(posts)} posts, {len(errors)} errors")
+    logger.info("[%s] Generated %s posts, %s errors", tenant_id, len(posts), len(errors))
 
     return {
         "posts": posts,
@@ -243,7 +245,7 @@ async def store_posts_node(state: NewsEngineState) -> Dict[str, Any]:
     if not posts:
         return {"result": {"status": "no_posts", "posts_count": 0}}
 
-    logger.info(f"[{tenant_id}] Storing {len(posts)} posts to Brain")
+    logger.info("[%s] Storing %s posts to Brain", tenant_id, len(posts))
 
     config = get_core_config()
     stored_count = 0
@@ -251,7 +253,9 @@ async def store_posts_node(state: NewsEngineState) -> Dict[str, Any]:
     try:
         from contextcore import BrainClient
 
-        client = BrainClient(host=config.brain.grpc_endpoint)
+        from contextrouter.core.brain_token import get_brain_service_token
+
+        client = BrainClient(host=config.brain.grpc_endpoint, token=get_brain_service_token())
 
         for post in posts:
             try:
@@ -267,19 +271,19 @@ async def store_posts_node(state: NewsEngineState) -> Dict[str, Any]:
 
                 if post_id:
                     stored_count += 1
-                    logger.debug(f"Stored post: {post_id}")
+                    logger.debug("Stored post: %s", post_id)
                 else:
-                    logger.warning(f"Failed to store post: {post.get('headline', '')[:30]}")
+                    logger.warning("Failed to store post: %s", post.get("headline", "")[:30])
 
             except Exception as e:
-                logger.warning(f"Failed to store post '{post.get('headline', '')[:30]}': {e}")
+                logger.warning("Failed to store post '%s': %s", post.get("headline", "")[:30], e)
 
     except ImportError:
         logger.warning("contextcore not available, skipping storage")
     except Exception as e:
-        logger.error(f"Storage failed: {e}")
+        logger.error("Storage failed: %s", e)
 
-    logger.info(f"[{tenant_id}] Stored {stored_count}/{len(posts)} posts")
+    logger.info("[%s] Stored %s/%s posts", tenant_id, stored_count, len(posts))
 
     return {
         "result": {

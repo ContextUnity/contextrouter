@@ -93,7 +93,9 @@ class PerplexityLLM(BaseModel):
             payload["return_citations"] = self._return_citations
 
         logger.debug(
-            f"Perplexity request: model={self._model_name}, recency={self._search_recency_filter}"
+            "Perplexity request: model=%s, recency=%s",
+            self._model_name,
+            self._search_recency_filter,
         )
 
         async with httpx.AsyncClient() as client:

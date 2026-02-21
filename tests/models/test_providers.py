@@ -1,4 +1,8 @@
-"""Tests for model provider implementations."""
+"""Tests for model provider implementations.
+
+Vertex tests require real google-auth credentials and are skipped when unavailable.
+OpenAI and HuggingFace tests mock their dependencies via sys.modules.
+"""
 
 import os
 import sys
@@ -6,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Mock modules that might not be installed
+# Mock LLM provider modules that are optional dependencies
 sys.modules["langchain_google_vertexai"] = MagicMock()
 sys.modules["langchain_openai"] = MagicMock()
 sys.modules["transformers"] = MagicMock()
@@ -14,7 +18,6 @@ sys.modules["torch"] = MagicMock()
 
 from contextrouter.modules.models.llm.huggingface import HuggingFaceLLM  # noqa: E402
 from contextrouter.modules.models.llm.openai import OpenAILLM  # noqa: E402
-from contextrouter.modules.models.llm.vertex import VertexLLM  # noqa: E402
 from contextrouter.modules.models.types import (  # noqa: E402
     ModelCapabilities,
     ModelRequest,
@@ -23,13 +26,24 @@ from contextrouter.modules.models.types import (  # noqa: E402
     TextPart,
 )
 
-# Skip Vertex tests if no credentials
-SKIP_VERTEX = not os.getenv("GOOGLE_APPLICATION_CREDENTIALS") and not os.getenv("CI")
+# VertexLLM requires google-auth + valid credentials.
+# Only import and run Vertex tests when credentials are explicitly available.
+_has_google_auth = False
+try:
+    import google.auth  # noqa: F401
+
+    _has_google_auth = True
+except ImportError:
+    pass
+
+_has_vertex_credentials = _has_google_auth and bool(
+    os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or os.getenv("GOOGLE_CLOUD_PROJECT")
+)
 
 
-@pytest.mark.skipif(SKIP_VERTEX, reason="Vertex credentials not available")
+@pytest.mark.skipif(not _has_vertex_credentials, reason="No Vertex credentials available")
 class TestVertexLLM:
-    """Test VertexLLM provider."""
+    """Test VertexLLM provider — requires real GCP credentials."""
 
     @pytest.fixture
     def mock_config(self):
@@ -37,6 +51,7 @@ class TestVertexLLM:
         config = MagicMock()
         config.vertex.project_id = "test-project"
         config.vertex.location = "us-central1"
+        config.vertex.credentials_path = None
         config.llm.temperature = 0.7
         config.llm.max_output_tokens = 1024
         config.llm.timeout_sec = 60
@@ -45,27 +60,32 @@ class TestVertexLLM:
 
     def test_initialization(self, mock_config):
         """Test VertexLLM initialization."""
+        from contextrouter.modules.models.llm.vertex import VertexLLM
+
         with (
             patch("google.auth.default", return_value=(MagicMock(), "test-project")),
+            patch("google.auth.transport.requests.Request"),
             patch("langchain_google_vertexai.ChatVertexAI") as mock_vertex,
         ):
             model = VertexLLM(mock_config, model_name="gemini-2.5-flash")
 
             assert isinstance(model.capabilities, ModelCapabilities)
             assert model.capabilities.supports_text is True
-            assert model.capabilities.supports_image is True  # Gemini supports images
-            assert model.capabilities.supports_audio is True  # Gemini supports audio
+            assert model.capabilities.supports_image is True
+            assert model.capabilities.supports_audio is True
 
             mock_vertex.assert_called_once()
 
     @pytest.mark.anyio
     async def test_generate_text_only(self, mock_config):
         """Test text-only generation."""
+        from contextrouter.modules.models.llm.vertex import VertexLLM
+
         with (
             patch("google.auth.default", return_value=(MagicMock(), "test-project")),
+            patch("google.auth.transport.requests.Request"),
             patch("langchain_google_vertexai.ChatVertexAI") as mock_vertex_class,
         ):
-            # Mock the LangChain model
             mock_model = MagicMock()
             mock_model.model_name = "gemini-2.5-flash"
             mock_message = MagicMock()
@@ -74,7 +94,6 @@ class TestVertexLLM:
             async def _mock_ainvoke(*args, **kwargs):
                 return mock_message
 
-            # We need to mock the result of bind()
             mock_model.bind.return_value.ainvoke = _mock_ainvoke
             mock_vertex_class.return_value = mock_model
 
@@ -90,8 +109,11 @@ class TestVertexLLM:
     @pytest.mark.anyio
     async def test_stream_text_only(self, mock_config):
         """Test text-only streaming."""
+        from contextrouter.modules.models.llm.vertex import VertexLLM
+
         with (
             patch("google.auth.default", return_value=(MagicMock(), "test-project")),
+            patch("google.auth.transport.requests.Request"),
             patch("langchain_google_vertexai.ChatVertexAI") as mock_vertex_class,
         ):
             mock_model = MagicMock()
@@ -101,7 +123,6 @@ class TestVertexLLM:
             async def _mock_astream(*args, **kwargs):
                 yield mock_chunk
 
-            # We need to mock the result of bind()
             mock_model.bind.return_value.astream = _mock_astream
             mock_vertex_class.return_value = mock_model
 
@@ -113,13 +134,15 @@ class TestVertexLLM:
                 events.append(event)
 
             assert len(events) >= 1
-            # One text_delta and one final_text
             assert any(e.event_type == "text_delta" for e in events)
 
     def test_token_count(self, mock_config):
         """Test token counting."""
+        from contextrouter.modules.models.llm.vertex import VertexLLM
+
         with (
             patch("google.auth.default", return_value=(MagicMock(), "test-project")),
+            patch("google.auth.transport.requests.Request"),
             patch("langchain_google_vertexai.ChatVertexAI") as mock_vertex_class,
         ):
             mock_model = MagicMock()
@@ -131,18 +154,25 @@ class TestVertexLLM:
             assert count == 42
             mock_model.get_num_tokens.assert_called_once_with("hello world")
 
-    def test_missing_config(self):
-        """Test error when config is missing required fields."""
+    def test_missing_project_id(self):
+        """Test error when project_id is missing."""
+        from contextrouter.modules.models.llm.vertex import VertexLLM
+
         config = MagicMock()
         config.vertex.project_id = None
         config.vertex.location = "us-central1"
+        config.vertex.credentials_path = None
 
-        with pytest.raises(ValueError, match="requires vertex.project_id"):
-            VertexLLM(config)
+        with (
+            patch("google.auth.default", return_value=(MagicMock(), "test")),
+            patch("google.auth.transport.requests.Request"),
+        ):
+            with pytest.raises(ValueError, match="requires vertex.project_id"):
+                VertexLLM(config)
 
 
 class TestOpenAILLM:
-    """Test OpenAI provider."""
+    """Test OpenAI provider — mocked, no external deps needed."""
 
     @pytest.fixture
     def mock_config(self):
@@ -201,7 +231,7 @@ class TestOpenAILLM:
 
 
 class TestHuggingFaceLLM:
-    """Test HuggingFace provider."""
+    """Test HuggingFace provider — mocked, no external deps needed."""
 
     @pytest.fixture
     def mock_config(self):
@@ -223,7 +253,6 @@ class TestHuggingFaceLLM:
         model = HuggingFaceLLM(mock_config)
         request = ModelRequest(parts=[TextPart(text="test")])
 
-        # Mock failure in _ensure_model_loaded
         with patch.object(model, "_ensure_model_loaded", side_effect=RuntimeError("Load failed")):
             with pytest.raises(RuntimeError, match="Load failed"):
                 await model.generate(request)
@@ -231,27 +260,29 @@ class TestHuggingFaceLLM:
     def test_token_count_fallback(self, mock_config):
         """Test token count fallback when transformers not available."""
         model = HuggingFaceLLM(mock_config)
-        # Ensure _ensure_model_loaded is a no-op or fails but is caught
         with patch.object(model, "_ensure_model_loaded", side_effect=Exception("No transformers")):
             count = model.get_token_count("hello world test")
             assert count == 3
 
 
+@pytest.mark.skipif(not _has_vertex_credentials, reason="No Vertex credentials available")
 class TestProviderCapabilities:
-    """Test provider capability declarations."""
+    """Test provider capability declarations with real credentials."""
 
-    @pytest.mark.skipif(SKIP_VERTEX, reason="Vertex credentials not available")
     def test_vertex_capabilities_by_model(self):
         """Test that Vertex capabilities vary by model."""
+        from contextrouter.modules.models.llm.vertex import VertexLLM
+
         config = MagicMock()
         config.vertex.project_id = "test"
         config.vertex.location = "us-central1"
+        config.vertex.credentials_path = None
 
         with (
             patch("google.auth.default", return_value=(MagicMock(), "test")),
+            patch("google.auth.transport.requests.Request"),
             patch("langchain_google_vertexai.ChatVertexAI"),
         ):
-            # Test Gemini 2.5 (multimodal)
             model_25 = VertexLLM(config, model_name="gemini-2.5-flash")
             assert model_25.capabilities.supports_image is True
             assert model_25.capabilities.supports_audio is True

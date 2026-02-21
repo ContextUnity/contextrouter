@@ -60,7 +60,7 @@ VIOLATIONS = [
 def run_grep(pattern: str, path: str, exclude: list[str]) -> list[str]:
     """Run ripgrep and return matching files with line numbers."""
     cmd = ["rg", "--no-heading", "--line-number", "--color=never", pattern, path]
-    
+
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if result.returncode == 0:
@@ -90,19 +90,19 @@ def main() -> int:
     """Run all architecture checks."""
     project_root = Path(__file__).parent.parent
     check_path = project_root / CORTEX_GRAPHS
-    
+
     if not check_path.exists():
         print(f"Path not found: {check_path}")
         return 1
-    
+
     violations_found = 0
-    
+
     print("🔍 Running architecture enforcement checks...")
     print(f"   Checking: {check_path}\n")
-    
+
     for check in VIOLATIONS:
         matches = run_grep(check["pattern"], str(check_path), check.get("exclude", []))
-        
+
         if matches:
             violations_found += len(matches)
             print(f"❌ {check['name']}")
@@ -111,7 +111,7 @@ def main() -> int:
             for match in matches:
                 print(f"   {match}")
             print()
-    
+
     if violations_found == 0:
         print("✅ All architecture checks passed!")
         return 0

@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 async def harvest_perplexity_node(state: NewsEngineState) -> dict[str, Any]:
     """Use Perplexity to harvest news with built-in search."""
     tenant_id = state.get("tenant_id", "unknown")
-    logger.info(f"[{tenant_id}] Harvesting via Perplexity")
+    logger.info("[%s] Harvesting via Perplexity", tenant_id)
 
     config = get_core_config()
 
@@ -69,14 +69,14 @@ async def harvest_perplexity_node(state: NewsEngineState) -> dict[str, Any]:
                 max_output_tokens=8000,  # Extra for reasoning models
             )
 
-            logger.info(f"[{tenant_id}] Sending Perplexity request (attempt {attempt + 1})...")
+            logger.info("[%s] Sending Perplexity request (attempt %s)...", tenant_id, attempt + 1)
             response = await model.generate(request)
-            logger.info(f"[{tenant_id}] Perplexity response received")
+            logger.info("[%s] Perplexity response received", tenant_id)
 
             # Log preview
             text = response.text
             if text:
-                logger.info(f"Perplexity response preview: {text[:500]}...")
+                logger.info("Perplexity response preview: %s...", text[:500])
 
             # Parse response using shared parser
             items = extract_json_array(text)
@@ -103,12 +103,14 @@ async def harvest_perplexity_node(state: NewsEngineState) -> dict[str, Any]:
                 else:
                     stale_count += 1
                     logger.info(
-                        f"Filtered stale news: '{headline}...' (date: {pub_date or 'unknown'})"
+                        "Filtered stale news: '%s...' (date: %s)", headline, pub_date or "unknown"
                     )
 
             if stale_count > 0:
                 logger.warning(
-                    f"[{tenant_id}] Filtered out {stale_count} stale items from Perplexity response"
+                    "[%s] Filtered out %s stale items from Perplexity response",
+                    tenant_id,
+                    stale_count,
                 )
 
             # Mark source and add to collection (dedupe by headline)
@@ -121,8 +123,12 @@ async def harvest_perplexity_node(state: NewsEngineState) -> dict[str, Any]:
                     all_items.append(item)
 
             logger.info(
-                f"[{tenant_id}] Perplexity attempt {attempt + 1}: got {len(items)} items, "
-                f"{len(fresh_items)} fresh, total unique: {len(all_items)}"
+                "[%s] Perplexity attempt %s: got %s items, %s fresh, total unique: %s",
+                tenant_id,
+                attempt + 1,
+                len(items),
+                len(fresh_items),
+                len(all_items),
             )
 
             # Check if we have enough
@@ -131,14 +137,16 @@ async def harvest_perplexity_node(state: NewsEngineState) -> dict[str, Any]:
 
             if attempt < max_retries - 1:
                 logger.info(
-                    f"[{tenant_id}] Retrying Perplexity - need {min_items - len(all_items)} more items"
+                    "[%s] Retrying Perplexity - need %s more items",
+                    tenant_id,
+                    min_items - len(all_items),
                 )
                 import asyncio
 
                 await asyncio.sleep(1)  # Brief pause between retries
 
         except Exception as e:
-            logger.error(f"Perplexity harvest attempt {attempt + 1} failed: {e}")
+            logger.error("Perplexity harvest attempt %s failed: %s", attempt + 1, e)
             if attempt == max_retries - 1:
                 return {
                     "raw_items": all_items,
@@ -146,7 +154,7 @@ async def harvest_perplexity_node(state: NewsEngineState) -> dict[str, Any]:
                     "harvest_errors": [f"Perplexity error: {str(e)}"],
                 }
 
-    logger.info(f"[{tenant_id}] Perplexity returned {len(all_items)} total fresh items")
+    logger.info("[%s] Perplexity returned %s total fresh items", tenant_id, len(all_items))
 
     return {
         "raw_items": all_items,
@@ -170,7 +178,7 @@ async def harvest_llm_fallback_node(state: NewsEngineState) -> dict[str, Any]:
     tenant_id = state.get("tenant_id", "unknown")
     config = get_core_config()
 
-    logger.info(f"[{tenant_id}] Falling back to OpenAI with web search")
+    logger.info("[%s] Falling back to OpenAI with web search", tenant_id)
 
     # Get prompt override or use default
     overrides = state.get("prompt_overrides", {})
@@ -242,15 +250,18 @@ Return 5-10 stories as JSON array with:
                 fresh_items.append(item)
             else:
                 logger.debug(
-                    f"Filtered old news: {item.get('headline', 'unknown')} (date: {pub_date})"
+                    "Filtered old news: %s (date: %s)", item.get("headline", "unknown"), pub_date
                 )
 
         logger.info(
-            f"[{tenant_id}] OpenAI web search: {len(items)} total, {len(fresh_items)} fresh items"
+            "[%s] OpenAI web search: %s total, %s fresh items",
+            tenant_id,
+            len(items),
+            len(fresh_items),
         )
 
         if not fresh_items:
-            logger.warning(f"[{tenant_id}] No fresh news found via web search")
+            logger.warning("[%s] No fresh news found via web search", tenant_id)
 
         return {
             "raw_items": fresh_items,
@@ -258,7 +269,7 @@ Return 5-10 stories as JSON array with:
         }
 
     except Exception as e:
-        logger.error(f"OpenAI web search fallback failed: {e}")
+        logger.error("OpenAI web search fallback failed: %s", e)
         return {
             "harvest_errors": errors + [f"OpenAI web search error: {str(e)}"],
         }
@@ -273,14 +284,16 @@ async def store_raw_to_brain_node(state: NewsEngineState) -> dict[str, Any]:
     if not raw_items:
         return {}
 
-    logger.info(f"[{tenant_id}] Storing {len(raw_items)} raw items to Brain")
+    logger.info("[%s] Storing %s raw items to Brain", tenant_id, len(raw_items))
 
     config = get_core_config()
 
     try:
         from contextcore import BrainClient
 
-        client = BrainClient(host=config.brain.grpc_endpoint)
+        from contextrouter.core.brain_token import get_brain_service_token
+
+        client = BrainClient(host=config.brain.grpc_endpoint, token=get_brain_service_token())
 
         stored_count = 0
         for item in raw_items:
@@ -304,14 +317,14 @@ async def store_raw_to_brain_node(state: NewsEngineState) -> dict[str, Any]:
                     item["brain_id"] = item_id
 
             except Exception as e:
-                logger.warning(f"Failed to store raw item to Brain: {e}")
+                logger.warning("Failed to store raw item to Brain: %s", e)
 
-        logger.info(f"[{tenant_id}] Stored {stored_count}/{len(raw_items)} raw items to Brain")
+        logger.info("[%s] Stored %s/%s raw items to Brain", tenant_id, stored_count, len(raw_items))
 
     except ImportError:
         logger.warning("contextcore not available, skipping Brain storage")
     except Exception as e:
-        logger.error(f"Brain storage error: {e}")
+        logger.error("Brain storage error: %s", e)
 
     return {}
 

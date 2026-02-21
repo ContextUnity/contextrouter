@@ -6,6 +6,8 @@ from .langfuse import (
     flush,
     get_current_trace_context,
     get_langfuse_callbacks,
+    get_langfuse_trace_id,
+    get_langfuse_trace_url,
     retrieval_span,
     trace_context,
 )
@@ -15,5 +17,7 @@ __all__ = [
     "trace_context",
     "retrieval_span",
     "get_current_trace_context",
+    "get_langfuse_trace_id",
+    "get_langfuse_trace_url",
     "flush",
 ]

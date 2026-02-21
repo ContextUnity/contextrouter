@@ -6,7 +6,7 @@ structured, JSON-serializable keyphrase information.
 Design goals (project conventions):
 - JSON-shaped outputs use TypedDict (no leaking Any).
 - Outputs are StructData-safe (only primitives/lists/dicts).
-- Provenance is recorded via Bisquit trace.
+- Provenance is recorded via ContextUnit provenance chain.
 - Settings come from core config (no direct os.environ usage).
 """
 

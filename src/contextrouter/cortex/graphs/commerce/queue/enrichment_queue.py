@@ -131,13 +131,13 @@ class EnrichmentQueue:
         for pid in product_ids:
             # Skip if already processing
             if await r.sismember(processing_key, pid):
-                logger.debug(f"Product {pid} already processing, skipping")
+                logger.debug("Product %s already processing, skipping", pid)
                 continue
 
             # Skip if already in any queue
             for p in ["high", "normal", "low"]:
                 if await r.zscore(f"{self.key_prefix}queue:{tenant_id}:{p}", pid):
-                    logger.debug(f"Product {pid} already in queue, skipping")
+                    logger.debug("Product %s already in queue, skipping", pid)
                     continue
 
             # Add to queue with timestamp as score (FIFO within priority)
@@ -156,7 +156,7 @@ class EnrichmentQueue:
             enqueued += 1
 
         if enqueued:
-            logger.info(f"Enqueued {enqueued} products (priority={priority}, source={source})")
+            logger.info("Enqueued %s products (priority=%s, source=%s)", enqueued, priority, source)
 
         return enqueued
 
@@ -224,7 +224,7 @@ class EnrichmentQueue:
             await r.setex(f"{self.key_prefix}batch:{batch_id}", 3600, state.to_json())
 
         if product_ids:
-            logger.info(f"Dequeued {len(product_ids)} products for processing")
+            logger.info("Dequeued %s products for processing", len(product_ids))
 
         return product_ids
 
@@ -287,12 +287,15 @@ class EnrichmentQueue:
             await r.zadd(f"{self.key_prefix}queue:{tenant_id}:low", {str(product_id): time.time()})
 
             logger.info(
-                f"Product {product_id} requeued for retry ({retry_count + 1}/{QueueItem.MAX_RETRIES})"
+                "Product %s requeued for retry (%s/%s)",
+                product_id,
+                retry_count + 1,
+                QueueItem.MAX_RETRIES,
             )
             return "retrying"
         else:
             # Max retries exceeded → needs human review
-            logger.warning(f"Product {product_id} exceeded max retries, marking as pending_human")
+            logger.warning("Product %s exceeded max retries, marking as pending_human", product_id)
             return "pending_human"
 
     async def complete_batch(self, batch_id: str) -> Optional[BatchState]:
@@ -306,8 +309,10 @@ class EnrichmentQueue:
             await r.setex(f"{self.key_prefix}batch:{batch_id}", 3600, state.to_json())
 
             logger.info(
-                f"Batch {batch_id} complete: "
-                f"{len(state.processed_ids)} done, {len(state.failed_ids)} failed"
+                "Batch %s complete: %s done, %s failed",
+                batch_id,
+                len(state.processed_ids),
+                len(state.failed_ids),
             )
             return state
         return None

@@ -278,8 +278,9 @@ class RLMBulkMatcher:
             BulkMatchResult with all matches and statistics.
         """
         logger.info(
-            f"RLM Bulk Matcher: Starting match of {len(supplier_products)} supplier → "
-            f"{len(site_products)} site products"
+            "RLM Bulk Matcher: Starting match of %s supplier → %s site products",
+            len(supplier_products),
+            len(site_products),
         )
 
         # Create RLM model
@@ -348,9 +349,11 @@ class RLMBulkMatcher:
             },
         )
 
+        match_rate_pct = format(result.stats["match_rate"], ".1%")
         logger.info(
-            f"RLM Bulk Matcher complete: {result.stats['match_rate']:.1%} matched, "
-            f"{len(result.unmatched)} unmatched"
+            "RLM Bulk Matcher complete: %s matched, %s unmatched",
+            match_rate_pct,
+            len(result.unmatched),
         )
 
         return result
@@ -416,8 +419,8 @@ Begin writing code to perform the matching.
                         )
                     )
         except (json.JSONDecodeError, KeyError, TypeError) as e:
-            logger.error(f"Failed to parse RLM response: {e}")
-            logger.debug(f"Response was: {response_text[:500]}")
+            logger.error("Failed to parse RLM response: %s", e)
+            logger.debug("Response was: %s", response_text[:500])
 
         return matches
 

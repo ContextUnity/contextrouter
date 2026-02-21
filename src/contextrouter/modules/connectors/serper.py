@@ -70,9 +70,9 @@ class SerperSearchConnector:
         if config:
             self.api_key = config.serper.api_key
         else:
-            import os
+            from contextrouter.core import get_core_config
 
-            self.api_key = os.environ.get("SERPER_API_KEY", "")
+            self.api_key = get_core_config().serper.api_key
 
         if not self.api_key:
             raise ValueError("Serper API key not configured")
@@ -122,7 +122,7 @@ class SerperSearchConnector:
         else:
             results = data.get("organic", [])
 
-        logger.debug(f"Serper returned {len(results)} results for '{self.query}'")
+        logger.debug("Serper returned %s results for '%s'", len(results), self.query)
         return results
 
     async def search(self) -> list[dict[str, str]]:

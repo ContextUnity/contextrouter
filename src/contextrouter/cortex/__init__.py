@@ -56,6 +56,9 @@ __all__ = [
     # Ingestion runner
     "invoke_ingestion",
     "stream_ingestion",
+    # Dispatcher runner
+    "invoke_dispatcher",
+    "stream_dispatcher",
 ]
 
 
@@ -83,6 +86,9 @@ _EXPORTS: dict[str, str] = {
     # Ingestion runner
     "invoke_ingestion": "contextrouter.cortex.runners.ingestion.invoke_ingestion",
     "stream_ingestion": "contextrouter.cortex.runners.ingestion.stream_ingestion",
+    # Dispatcher runner
+    "invoke_dispatcher": "contextrouter.cortex.runners.dispatcher.invoke_dispatcher",
+    "stream_dispatcher": "contextrouter.cortex.runners.dispatcher.stream_dispatcher",
 }
 
 

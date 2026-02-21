@@ -128,6 +128,7 @@ class LangfuseConfig(BaseModel):
     secret_key: str = ""
     public_key: str = ""
     host: str = "https://cloud.langfuse.com"
+    project_id: str = ""  # Langfuse project ID for dashboard URL construction
     environment: str = "development"
     service_name: str = "contextrouter"
 
@@ -139,6 +140,13 @@ class RedisConfig(BaseModel):
     port: int = 6379
     db: int = 0
     password: str | None = None
+
+    @property
+    def url(self) -> str:
+        """Generate Redis URL from config."""
+        if self.password:
+            return f"redis://:{self.password}@{self.host}:{self.port}/{self.db}"
+        return f"redis://{self.host}:{self.port}/{self.db}"
 
 
 class PluginsConfig(BaseModel):

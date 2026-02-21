@@ -137,7 +137,11 @@ def trace_context(
     trace_input: object | None = None,
     trace_metadata: dict[str, object] | None = None,
     trace_tags: list[str] | None = None,
-    trace_context: dict[str, str] | None = None,
+    trace_id: str | None = None,
+    parent_span_id: str | None = None,
+    tenant_id: str | None = None,
+    agent_id: str | None = None,
+    graph_name: str | None = None,
 ) -> Generator[object | None, None, None]:
     if not _enabled():
         yield None
@@ -153,22 +157,56 @@ def trace_context(
         yield None
         return
 
+    # Prepare OTel context for Langfuse if trace_id is provided
+    # Langfuse uses OTel context to link observations.
+    context = None
+    if trace_id:
+        # Langfuse/OTel trace_id MUST be 32-char hex.
+        # If we got a UUID with dashes, strip them.
+        hex_id = trace_id.replace("-", "")
+        if len(hex_id) == 32:
+            context = {"trace_id": hex_id}
+            if parent_span_id:
+                context["parent_span_id"] = parent_span_id
+        else:
+            logger.warning("Invalid trace_id for Langfuse (must be 32 hex chars): %s", trace_id)
+
     environment = _get_environment()
     service_name = _get_service_name()
     _ = service_name
 
+    # Build tags: tenant, agent, graph (filterable in Langfuse UI)
+    if trace_tags is None:
+        tags = []
+        if tenant_id:
+            tags.append(f"tenant:{tenant_id}")
+        if agent_id:
+            tags.append(f"agent:{agent_id}")
+        if graph_name:
+            tags.append(f"graph:{graph_name}")
+        if not tags:
+            tags = [platform]
+    else:
+        tags = list(trace_tags)
+
     span_initialized = False
     try:
         with lf.start_as_current_observation(
-            as_type="span", name=name, trace_context=trace_context
+            as_type="span", name=name, trace_context=context
         ) as span:
             span_initialized = True
             try:
                 with propagate_attributes(
                     session_id=session_id,
                     user_id=user_id,
-                    tags=list(trace_tags or [platform]),
-                    metadata={"platform": platform, "environment": environment},
+                    tags=tags,
+                    metadata={
+                        "platform": platform,
+                        "environment": environment,
+                        "tenant_id": tenant_id or "",
+                        "agent_id": agent_id or "",
+                        "graph_name": graph_name or "",
+                    },
                 ):
                     if isinstance(trace_metadata, dict) and trace_metadata:
                         try:
@@ -265,10 +303,41 @@ def flush() -> None:
         logger.exception("Langfuse flush failed")
 
 
+def get_langfuse_trace_id() -> str:
+    """Extract the current Langfuse/OTel trace ID (32 hex chars).
+
+    Call this inside a ``trace_context()`` block to get the active trace ID.
+    Returns empty string if no active trace or Langfuse is disabled.
+    """
+    ctx = get_current_trace_context()
+    if ctx:
+        return ctx.get("trace_id", "")
+    return ""
+
+
+def get_langfuse_trace_url() -> str:
+    """Build a direct Langfuse dashboard URL for the current active trace.
+
+    Call inside a ``trace_context()`` block.  Returns empty string if
+    Langfuse is disabled or no active trace exists.
+    """
+    trace_id = get_langfuse_trace_id()
+    if not trace_id:
+        return ""
+    cfg = get_core_config()
+    host = cfg.langfuse.host.rstrip("/")
+    project_id = cfg.langfuse.project_id
+    if project_id:
+        return f"{host}/project/{project_id}/traces?peek={trace_id}"
+    return f"{host}/traces?peek={trace_id}"
+
+
 __all__ = [
     "get_langfuse_callbacks",
     "trace_context",
     "retrieval_span",
     "get_current_trace_context",
+    "get_langfuse_trace_id",
+    "get_langfuse_trace_url",
     "flush",
 ]

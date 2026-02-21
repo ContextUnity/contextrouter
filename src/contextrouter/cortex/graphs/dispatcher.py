@@ -49,8 +49,8 @@ def build_graph(graph_name: str | None = None):
     Returns:
         Uncompiled StateGraph
     """
-    from . import rag_retrieval
     from .commerce import build_commerce_graph
+    from .rag_retrieval.graph import build_graph as build_rag_graph
 
     cfg = get_core_config()
 
@@ -79,10 +79,21 @@ def build_graph(graph_name: str | None = None):
         return graph_registry.get(key)()
 
     # Built-in graphs
+    from .dispatcher_agent import build_dispatcher_graph
+
     builtin_graphs: dict[str, Callable[[], object]] = {
-        "rag_retrieval": rag_retrieval.build_graph,
+        "rag_retrieval": build_rag_graph,
         "commerce": build_commerce_graph,
+        "dispatcher": build_dispatcher_graph,
     }
+
+    # Optional: ContextZero privacy proxy graph
+    try:
+        from contextzero.graph import build_zero_graph
+
+        builtin_graphs["privacy_proxy"] = build_zero_graph
+    except ImportError:
+        pass
 
     if key not in builtin_graphs:
         known = sorted(set(graph_registry.list_keys()) | set(builtin_graphs.keys()))

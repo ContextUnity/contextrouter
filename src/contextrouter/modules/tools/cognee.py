@@ -54,7 +54,7 @@ class CogneeGraphBuilder:
         try:
             # Use cognee for local graph extraction
             # This is a placeholder - actual implementation would depend on cognee API
-            logger.info(f"Building graph from content ({len(content)} chars) using cognee")
+            logger.info("Building graph from content (%s chars) using cognee", len(content))
 
             # Placeholder implementation - would integrate with actual cognee API
             entities = []
@@ -72,7 +72,7 @@ class CogneeGraphBuilder:
             return entities, relations
 
         except Exception as e:
-            logger.error(f"Cognee graph building failed: {e}")
+            logger.error("Cognee graph building failed: %s", e)
             raise
 
 

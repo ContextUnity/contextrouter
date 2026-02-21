@@ -267,7 +267,7 @@ class ModelRegistry:
                 seen.add(k)
                 unique_keys.append(k)
 
-        logger.info(f"Model fallback candidates: {unique_keys}, strategy: {strategy}")
+        logger.debug("Model fallback candidates: %s, strategy: %s", unique_keys, strategy)
 
         return FallbackModel(
             registry=self,
@@ -308,7 +308,7 @@ class FallbackModel(BaseModel):
                     model = self._registry.create_llm(key, config=self._config)
                     self._candidates.append((key, model))
                 except Exception as e:
-                    logger.warning(f"Failed to initialize model {key}: {e}")
+                    logger.warning("Failed to initialize model %s: %s", key, e)
                     continue
         return self._candidates
 
@@ -363,24 +363,26 @@ class FallbackModel(BaseModel):
 
         for key, model in candidates:
             try:
-                logger.debug(f"Trying model {key} for generation")
+                logger.debug("Trying model %s for generation", key)
                 response = await model.generate(request, token=token)
                 if response.usage:
-                    logger.info(f"Generation succeeded with model {key}, usage: {response.usage}")
+                    logger.debug(
+                        "Generation succeeded with model %s, usage: %s", key, response.usage
+                    )
                 else:
-                    logger.info(f"Generation succeeded with model {key}")
+                    logger.debug("Generation succeeded with model %s", key)
                 return response
             except ModelQuotaExhaustedError as e:
                 # Quota exhausted = billing issue, fallback immediately (no retries help)
-                logger.warning(f"Model {key} quota exhausted, trying fallback: {e}")
+                logger.warning("Model %s quota exhausted, trying fallback: %s", key, e)
                 last_error = e
                 continue
             except (ModelTimeoutError, ModelRateLimitError) as e:
-                logger.warning(f"Model {key} failed ({type(e).__name__}): {e}")
+                logger.warning("Model %s failed (%s): %s", key, type(e).__name__, e)
                 last_error = e
                 continue
             except Exception as e:
-                logger.error(f"Model {key} failed with unexpected error: {e}")
+                logger.error("Model %s failed with unexpected error: %s", key, e)
                 last_error = e
                 continue
 
@@ -411,10 +413,10 @@ class FallbackModel(BaseModel):
         for i, result in enumerate(results):
             key, _ = candidates[i]
             if not isinstance(result, Exception):
-                logger.info(f"Parallel generation succeeded with model {key}")
+                logger.debug("Parallel generation succeeded with model %s", key)
                 return result
             else:
-                logger.debug(f"Model {key} failed in parallel mode: {result}")
+                logger.debug("Model %s failed in parallel mode: %s", key, result)
 
         # All failed
         raise ModelExhaustedError(
@@ -437,13 +439,13 @@ class FallbackModel(BaseModel):
 
         for key, model in candidates:
             try:
-                logger.debug(f"Trying model {key} for streaming")
+                logger.debug("Trying model %s for streaming", key)
                 event_iterator = model.stream(request, token=token)
                 first_event = await anext(event_iterator, None)
 
                 if first_event is not None:
                     # Model started streaming successfully
-                    logger.info(f"Streaming succeeded with model {key}")
+                    logger.debug("Streaming succeeded with model %s", key)
                     yield first_event
 
                     # Continue yielding from this successful model
@@ -456,16 +458,18 @@ class FallbackModel(BaseModel):
 
             except ModelQuotaExhaustedError as e:
                 logger.warning(
-                    f"Model {key} quota exhausted during streaming, trying fallback: {e}"
+                    "Model %s quota exhausted during streaming, trying fallback: %s", key, e
                 )
                 last_error = e
                 continue
             except (ModelTimeoutError, ModelRateLimitError) as e:
-                logger.warning(f"Model {key} failed during streaming ({type(e).__name__}): {e}")
+                logger.warning(
+                    "Model %s failed during streaming (%s): %s", key, type(e).__name__, e
+                )
                 last_error = e
                 continue
             except Exception as e:
-                logger.error(f"Model {key} failed streaming with unexpected error: {e}")
+                logger.error("Model %s failed streaming with unexpected error: %s", key, e)
                 last_error = e
                 continue
 
@@ -485,6 +489,44 @@ class FallbackModel(BaseModel):
 
         _, first_model = candidates[0]
         return first_model.get_token_count(text)
+
+    def bind_tools(self, tools, **kwargs):
+        """Bind tools to all candidate LangChain models with fallback chain.
+
+        Finds the underlying LangChain model from each candidate,
+        calls bind_tools on each, then chains them with with_fallbacks()
+        so ainvoke retries with the next model on failure.
+        """
+        bound_models = []
+        for key, model in self._get_candidates():
+            lc_model = getattr(model, "_langchain_model", None) or getattr(model, "_model", None)
+            if lc_model is not None and hasattr(lc_model, "bind_tools"):
+                try:
+                    bound = lc_model.bind_tools(tools, **kwargs)
+                    bound_models.append((key, bound))
+                except Exception as e:
+                    logger.warning("Failed to bind tools for %s: %s", key, e)
+                    continue
+
+        if not bound_models:
+            raise AttributeError(
+                "No candidate model supports bind_tools. "
+                "Ensure at least one LLM provider with LangChain integration is configured."
+            )
+
+        primary_key, primary = bound_models[0]
+        if len(bound_models) == 1:
+            logger.debug("FallbackModel.bind_tools using single model: %s", primary_key)
+            return primary
+
+        # Chain with LangChain's built-in fallback mechanism
+        fallbacks = [m for _, m in bound_models[1:]]
+        logger.debug(
+            "FallbackModel.bind_tools: primary=%s, fallbacks=%s",
+            primary_key,
+            [k for k, _ in bound_models[1:]],
+        )
+        return primary.with_fallbacks(fallbacks)
 
 
 model_registry = ModelRegistry()

@@ -88,9 +88,7 @@ class SkuParser:
 
         # Build color pattern from mappings
         if self._color_mappings:
-            color_patterns = "|".join(
-                re.escape(abbr) for abbr in self._color_mappings.keys()
-            )
+            color_patterns = "|".join(re.escape(abbr) for abbr in self._color_mappings.keys())
             self._color_pattern = re.compile(rf"\b({color_patterns})\b", re.IGNORECASE)
         else:
             self._color_pattern = None

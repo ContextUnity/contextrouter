@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 from .storage import (
-    BrainStorageProvider,
+    BrainProvider,
     GCSProvider,
     PostgresProvider,
     VertexProvider,
-    VertexSearchProvider,
 )
 
 __all__ = [
-    "BrainStorageProvider",
+    "BrainProvider",
     "GCSProvider",
     "PostgresProvider",
     "VertexProvider",
-    "VertexSearchProvider",
 ]

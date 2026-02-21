@@ -76,16 +76,6 @@ class TaxonomyData:
 
 
 @dataclass
-class KnowledgeEdge:
-    """Single knowledge graph edge."""
-
-    source_id: str
-    relation: str
-    target_id: str
-    weight: float = 1.0
-
-
-@dataclass
 class KnowledgeGraphData:
     """Knowledge Graph data for RLM matching.
 
@@ -130,14 +120,16 @@ class RLMDataLoader:
     def __init__(
         self,
         brain_url: str | None = None,
-        tenant_id: str = "traverse",
+        tenant_id: str = "",
     ):
         """Initialize data loader.
 
         Args:
             brain_url: ContextBrain gRPC URL. Uses default if not specified.
-            tenant_id: Tenant ID for filtering data.
+            tenant_id: Tenant ID for filtering data. Must be provided by caller — no default.
         """
+        if not tenant_id:
+            raise ValueError("tenant_id must be provided to RLMDataLoader — it is project-specific")
         self._brain_url = brain_url or "localhost:50051"
         self._tenant_id = tenant_id
 
@@ -153,10 +145,12 @@ class RLMDataLoader:
             logger.warning("contextcore not installed, returning empty taxonomy")
             return TaxonomyData()
 
+        from contextrouter.core.brain_token import get_brain_service_token
+
         data = TaxonomyData()
 
         try:
-            async with BrainClient(self._brain_url) as client:
+            async with BrainClient(self._brain_url, token=get_brain_service_token()) as client:
                 # Load categories (both singular and plural forms)
                 for domain in ["category", "categories"]:
                     items = await client.list_taxonomy(
@@ -210,12 +204,14 @@ class RLMDataLoader:
                             data.genders[kw.lower()] = value
 
         except Exception as e:
-            logger.error(f"Failed to load taxonomy from Brain: {e}")
+            logger.error("Failed to load taxonomy from Brain: %s", e)
 
         logger.info(
-            f"Loaded taxonomy: {len(data.categories)} categories, "
-            f"{len(data.colors)} colors, {len(data.sizes)} sizes, "
-            f"{len(data.genders)} genders"
+            "Loaded taxonomy: %s categories, %s colors, %s sizes, %s genders",
+            len(data.categories),
+            len(data.colors),
+            len(data.sizes),
+            len(data.genders),
         )
 
         return data
@@ -238,10 +234,12 @@ class RLMDataLoader:
             logger.warning("contextcore not installed, returning empty KG")
             return KnowledgeGraphData()
 
+        from contextrouter.core.brain_token import get_brain_service_token
+
         data = KnowledgeGraphData()
 
         try:
-            async with BrainClient(self._brain_url) as client:
+            async with BrainClient(self._brain_url, token=get_brain_service_token()) as client:
                 # Load brand edges
                 edges = await client.query_edges(
                     tenant_id=self._tenant_id,
@@ -310,13 +308,15 @@ class RLMDataLoader:
                     data.product_attributes[product_id]["technologies"].append(tech)
 
         except Exception as e:
-            logger.error(f"Failed to load KG from Brain: {e}")
+            logger.error("Failed to load KG from Brain: %s", e)
 
         logger.info(
-            f"Loaded KG: {len(data.brand_products)} brands, "
-            f"{len(data.color_products)} colors, {len(data.gender_products)} genders, "
-            f"{len(data.technology_products)} technologies, "
-            f"{len(data.product_attributes)} products with attributes"
+            "Loaded KG: %s brands, %s colors, %s genders, %s technologies, %s products with attributes",
+            len(data.brand_products),
+            len(data.color_products),
+            len(data.gender_products),
+            len(data.technology_products),
+            len(data.product_attributes),
         )
 
         return data
@@ -329,13 +329,13 @@ class RLMDataLoader:
 
 async def load_taxonomy_for_rlm(
     brain_url: str | None = None,
-    tenant_id: str = "traverse",
+    tenant_id: str = "",
 ) -> dict[str, Any]:
     """Load taxonomy data formatted for RLM variable injection.
 
     Args:
         brain_url: ContextBrain gRPC URL.
-        tenant_id: Tenant ID for filtering.
+        tenant_id: Tenant ID for filtering (required — project-specific, no default).
 
     Returns:
         Dict with taxonomy lookups suitable for RLM variables.
@@ -347,13 +347,13 @@ async def load_taxonomy_for_rlm(
 
 async def load_knowledge_graph_for_rlm(
     brain_url: str | None = None,
-    tenant_id: str = "traverse",
+    tenant_id: str = "",
 ) -> dict[str, Any]:
     """Load KG data formatted for RLM variable injection.
 
     Args:
         brain_url: ContextBrain gRPC URL.
-        tenant_id: Tenant ID for filtering.
+        tenant_id: Tenant ID for filtering (required — project-specific, no default).
 
     Returns:
         Dict with KG lookups suitable for RLM variables.

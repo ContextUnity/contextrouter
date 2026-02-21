@@ -23,11 +23,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from contextcore.exceptions import ProviderError
+
 from contextrouter.core import get_core_config
-from contextrouter.core.bisquit import BisquitEnvelope
-from contextrouter.core.exceptions import ProviderError
-from contextrouter.core.interfaces import BaseProvider, IRead, IWrite, secured
-from contextrouter.core.tokens import BiscuitToken
 from contextrouter.modules.retrieval.rag.settings import get_effective_data_store_id
 
 logger = logging.getLogger(__name__)
@@ -365,57 +363,4 @@ async def generate_with_grounding(
         ) from e
 
 
-class VertexGroundingProvider(BaseProvider, IRead, IWrite):
-    """Vertex Grounding provider with native LLM grounding.
-    **IMPORTANT:**
-    This provider bypasses the explicit RAG pipeline and uses Vertex AI Gemini's
-    native grounding capabilities. The LLM automatically retrieves from the datastore
-    and generates responses with citations.
-    **LIMITATIONS:**
-    - No custom system prompt
-    - No graph facts enrichment
-    - No custom citation formatting
-    - No reranking
-    """
-
-    @secured()
-    async def read(
-        self,
-        query: str,
-        *,
-        limit: int = 5,
-        filters: dict[str, Any] | None = None,
-        token: BiscuitToken,
-    ) -> list[BisquitEnvelope]:
-        """Generate response with native grounding.
-        Note: This bypasses explicit retrieval and returns a generated response
-        directly from the LLM with grounding. The 'limit' parameter is ignored
-        as the LLM controls retrieval.
-        """
-        response_text, citations = await generate_with_grounding(query=query)
-
-        # Wrap response in envelope
-        # Note: This is a generated response, not retrieved documents
-        env = BisquitEnvelope(
-            content=response_text,
-            provenance=[],
-            metadata={
-                "source": "vertex_grounding",
-                "citations": citations,
-                "grounding_enabled": True,
-            },
-        )
-        env.add_trace("provider:vertex_grounding")
-        return [env]
-
-    @secured()
-    async def write(self, data: BisquitEnvelope, *, token: BiscuitToken) -> None:
-        _ = data, token
-        raise NotImplementedError("VertexGroundingProvider.write is not implemented")
-
-    async def sink(self, envelope: BisquitEnvelope, *, token: BiscuitToken) -> Any:
-        await self.write(envelope, token=token)
-        return None
-
-
-__all__ = ["VertexGroundingProvider", "generate_with_grounding"]
+__all__ = ["generate_with_grounding"]

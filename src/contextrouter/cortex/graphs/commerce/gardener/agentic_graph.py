@@ -210,9 +210,9 @@ Previous enrichment (if any):
 
 async def agent_node(state: AgentState) -> Dict[str, Any]:
     """LLM reasoning node - decides what to do next."""
-    from contextrouter.cortex.llm import create_llm
+    from contextrouter.modules.models import model_registry
 
-    llm = create_llm()
+    llm = model_registry.get_llm_with_fallback()
     tools = [
         search_taxonomy,
         extract_entities,

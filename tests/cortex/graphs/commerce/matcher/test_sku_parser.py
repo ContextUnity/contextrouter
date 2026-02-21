@@ -1,14 +1,11 @@
 """Tests for SKU parser utilities."""
 
-import pytest
-
 from contextrouter.cortex.graphs.commerce.matcher.sku_parser import (
     SkuAttributes,
     SkuParser,
     normalize_sku,
     parse_sku_attributes,
 )
-
 
 # Sample taxonomy data for tests (would be loaded from DB in production)
 SAMPLE_COLOR_MAPPINGS = {

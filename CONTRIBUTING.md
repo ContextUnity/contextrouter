@@ -241,7 +241,7 @@ class Config:
 
 ### Step 3: Document
 
-Add to README.md under Configuration section with env var examples.
+Add to readme.md under Configuration section with env var examples.
 
 ---
 

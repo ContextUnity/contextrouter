@@ -13,6 +13,10 @@ Structure:
     │   ├── generate.py       # Response generation
     │   └── suggest.py        # Search suggestions
     │
+    ├── contextmed/           # Medical analytics agent
+    │   ├── graph.py          # LangGraph (planner → sql → verifier → viz)
+    │   └── prompts.py        # System prompts
+    │
     └── commerce/             # Commerce domain (subgraph architecture)
         ├── graph.py          # CommerceGraph (programmatic entry)
         ├── queue/            # Redis enrichment queue
@@ -27,33 +31,52 @@ Usage:
     from contextrouter.cortex.graphs import compile_graph
     graph = compile_graph()  # Uses router.graph config
 
-    # Direct access
+    # Direct access (no heavy imports)
+    from contextrouter.cortex.graphs.contextmed.graph import build_contextmed_graph
     from contextrouter.cortex.graphs.commerce import build_commerce_graph
-    commerce = build_commerce_graph()
-
-    # RAG graph
-    from contextrouter.cortex.graphs.rag_retrieval import compile_graph
-    rag = compile_graph()
 """
 
-# Commerce graph
-from .commerce import (
-    ChatState,
-    CommerceState,
-    GardenerState,
-    MatcherState,
-    MatchingNode,
-    build_commerce_graph,
-    create_chat_subgraph,
-    create_gardener_subgraph,
-    create_lexicon_subgraph,
-    create_matcher_subgraph,
-    invoke_chat,
-)
+from __future__ import annotations
 
-# Dispatcher (central graph selection)
-from .dispatcher import build_graph, compile_graph, reset_graph
-from .rag_retrieval import graph as rag_retrieval
+import importlib
+from typing import Any
+
+# ── Lazy imports to avoid pulling in heavy dependencies (joblib, etc.)
+# when only a lightweight subgraph is needed. ──
+
+
+def __getattr__(name: str) -> Any:
+    """Lazy-load graph submodules on first access."""
+    # Commerce graph exports
+    _commerce_exports = {
+        "ChatState",
+        "CommerceState",
+        "GardenerState",
+        "MatcherState",
+        "MatchingNode",
+        "build_commerce_graph",
+        "create_chat_subgraph",
+        "create_gardener_subgraph",
+        "create_lexicon_subgraph",
+        "create_matcher_subgraph",
+        "invoke_chat",
+    }
+    if name in _commerce_exports:
+        mod = importlib.import_module(".commerce", __name__)
+        return getattr(mod, name)
+
+    # RAG graph
+    if name == "rag_retrieval":
+        return importlib.import_module(".rag_retrieval.graph", __name__)
+
+    # Dispatcher
+    _dispatcher_exports = {"build_graph", "compile_graph", "reset_graph"}
+    if name in _dispatcher_exports:
+        mod = importlib.import_module(".dispatcher", __name__)
+        return getattr(mod, name)
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     # Dispatcher

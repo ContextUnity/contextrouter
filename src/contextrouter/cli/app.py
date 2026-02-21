@@ -45,7 +45,7 @@ def cli(ctx, verbose, config_path):
         config.log_level = LogLevel.DEBUG
 
     # Use plain text format for CLI (more readable than JSON)
-    setup_logging(config=config, json_format=False, service_name="contextrouter")
+    setup_logging(config=config, service_name="contextrouter")
 
     # Keep CLI output readable: suppress noisy LangChain deprecation warnings by default.
     # This is CLI-only; library/runtime users still get full warnings by default.
@@ -77,7 +77,7 @@ def cli(ctx, verbose, config_path):
             scan(Path(plugin_path))
         except Exception as e:
             logger = logging.getLogger(__name__)
-            logger.warning(f"Failed to scan plugin directory {plugin_path}: {e}")
+            logger.warning("Failed to scan plugin directory %s: %s", plugin_path, e)
 
 
 # Register builtin commands (side-effect imports)

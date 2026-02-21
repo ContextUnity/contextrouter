@@ -1,10 +1,10 @@
 """Vertex provider (storage).
 
-Per `.cursorrules` this module is the infrastructure boundary for Vertex:
+Infrastructure boundary for Vertex AI:
 - IRead: retrieval/search (Vertex AI Search)
 - IWrite: ingestion sink (future)
 
-Shared utilities for Vertex providers are exported here.
+Uses ContextUnit protocol for data transport.
 """
 
 from __future__ import annotations
@@ -12,9 +12,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from contextrouter.core.bisquit import BisquitEnvelope
+from contextcore import ContextToken, ContextUnit
+
 from contextrouter.core.interfaces import BaseProvider, IRead, IWrite, secured
-from contextrouter.core.tokens import BiscuitToken
 from contextrouter.modules.retrieval.rag.models import RetrievedDoc
 
 logger = logging.getLogger(__name__)
@@ -44,8 +44,8 @@ class VertexProvider(BaseProvider, IRead, IWrite):
         *,
         limit: int = 5,
         filters: dict[str, Any] | None = None,
-        token: BiscuitToken,
-    ) -> list[BisquitEnvelope]:
+        token: ContextToken,
+    ) -> list[ContextUnit]:
         # Lazy import to avoid circular dependency
         from .vertex_search import search_vertex_ai_async
 
@@ -57,25 +57,23 @@ class VertexProvider(BaseProvider, IRead, IWrite):
         docs = await search_vertex_ai_async(
             query=query, max_results=int(limit), source_type_filter=source_type
         )
-        out: list[BisquitEnvelope] = []
+        out: list[ContextUnit] = []
         for d in docs:
-            env = BisquitEnvelope(
-                content=d,
-                provenance=[],
-                metadata={"source": "vertex", "source_type": getattr(d, "source_type", None)},
+            unit = ContextUnit(
+                payload={"content": d, "source": "vertex"},
+                provenance=["provider:vertex"],
             )
-            env.add_trace("provider:vertex")
-            out.append(env)
+            out.append(unit)
         return out
 
     @secured()
-    async def write(self, data: BisquitEnvelope, *, token: BiscuitToken) -> None:
+    async def write(self, data: ContextUnit, *, token: ContextToken) -> None:
         _ = data, token
         raise NotImplementedError("VertexProvider.write is not implemented yet")
 
-    async def sink(self, envelope: BisquitEnvelope, *, token: BiscuitToken) -> Any:
+    async def sink(self, unit: ContextUnit, *, token: ContextToken) -> Any:
         # Default sink behavior delegates to write().
-        await self.write(envelope, token=token)
+        await self.write(unit, token=token)
         return None
 
 

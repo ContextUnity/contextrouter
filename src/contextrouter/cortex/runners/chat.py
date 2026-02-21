@@ -28,6 +28,10 @@ from typing import AsyncIterator, Sequence
 from langchain_core.messages import BaseMessage, HumanMessage
 
 from contextrouter.core import TokenBuilder, UserCtx, get_core_config
+from contextrouter.core.agent_config_cache import (
+    get_agent_config_cache,
+    intersect_permissions,
+)
 from contextrouter.cortex import compile_graph, get_last_user_query
 from contextrouter.cortex.callbacks.tool_handler import ToolEventCallbackHandler
 from contextrouter.modules.observability import get_langfuse_callbacks, trace_context
@@ -116,6 +120,68 @@ def _trace_tags(
     return tags
 
 
+async def _mint_access_token(
+    user_ctx: UserCtx | None,
+    agent_id: str = "",
+) -> object | None:
+    """Mint a ContextToken with agent-aware permissions.
+
+    If ``agent_id`` is provided, fetches the agent's max permissions from
+    ContextView (cached) and intersects with default permissions.
+    Otherwise uses default_permissions from config.
+
+    Returns None if security is disabled.
+    """
+    core_cfg = get_core_config()
+    if not core_cfg.security.enabled:
+        logger.debug("Security disabled: providers will run without token verification")
+        return None
+
+    default_perms = core_cfg.security.policies.default_permissions
+
+    # Agent-aware: intersect with agent's max permissions
+    if agent_id:
+        cache = get_agent_config_cache()
+        profile = await cache.get_agent_permissions(agent_id, default_permissions=default_perms)
+        effective_perms = intersect_permissions(
+            agent_max=profile.permissions,
+            request_permissions=default_perms,
+        )
+        logger.debug(
+            "Agent-aware permissions: agent=%s profile=%s effective=%d",
+            agent_id,
+            profile.profile_name or "(custom)",
+            len(effective_perms),
+        )
+    else:
+        effective_perms = default_perms
+
+    builder = TokenBuilder(enabled=True, private_key_path=core_cfg.security.private_key_path)
+    token = builder.mint_root(
+        user_ctx=user_ctx or {},
+        permissions=effective_perms,
+        ttl_s=300.0,
+    )
+    logger.debug(
+        "Minted access_token token_id=%s perms=%s",
+        getattr(token, "token_id", None),
+        list(getattr(token, "permissions", ()) or ()),
+    )
+
+    # Graph-level permission check
+    try:
+        from contextcore.permissions import has_graph_access
+
+        if not has_graph_access(token.permissions, "rag"):
+            raise PermissionError(
+                f"Token does not grant access to graph:rag. Permissions: {list(token.permissions)}"
+            )
+    except ImportError:
+        pass
+
+    return token
+
+
 async def invoke_agent(
     messages: Sequence[BaseMessage],
     session_id: str,
@@ -128,6 +194,7 @@ async def invoke_agent(
     rag_filter: str = "",
     runtime_settings: RuntimeRagSettings | None = None,
     enable_suggestions: bool = True,
+    agent_id: str = "",
 ) -> dict[str, object]:
     """Invoke the RAG agent (non-streaming)."""
     effective_user_id = user_ctx.get("user_id") if user_ctx else None
@@ -155,27 +222,10 @@ async def invoke_agent(
         "enable_suggestions": enable_suggestions,
     }
 
-    # Optional Biscuit token security (config-driven).
-    core_cfg = get_core_config()
-    if core_cfg.security.enabled:
-        builder = TokenBuilder(enabled=True, private_key_path=core_cfg.security.private_key_path)
-        token = builder.mint_root(
-            user_ctx=user_ctx or {},
-            permissions=(
-                core_cfg.security.policies.read_permission,
-                core_cfg.security.policies.write_permission,
-            ),
-            ttl_s=300.0,
-        )
+    # Mint token with agent-aware permissions
+    token = await _mint_access_token(user_ctx, agent_id=agent_id)
+    if token is not None:
         input_state["access_token"] = token
-        logger.debug(
-            "Security enabled: minted access_token token_id=%s perms=%s ttl_s=%s",
-            getattr(token, "token_id", None),
-            list(getattr(token, "permissions", ()) or ()),
-            300.0,
-        )
-    else:
-        logger.debug("Security disabled: providers will run without token verification")
 
     # IMPORTANT: `use_runtime_settings()` must be entered BEFORE we compute effective_config/tags.
     # Otherwise `get_config()` will reflect only env defaults and not the per-user UI settings.
@@ -214,6 +264,7 @@ async def stream_agent(
     web_allowed_domains: list[str] | None = None,
     max_web_results: int = 10,
     runtime_settings: RuntimeRagSettings | None = None,
+    agent_id: str = "",
 ) -> AsyncIterator[dict[str, object]]:
     """Stream the RAG agent response.
 
@@ -254,25 +305,11 @@ async def stream_agent(
         "search_suggestions_prompt_override": search_suggestions_prompt_override,
         "rag_filter": rag_filter,
     }
-    if core_cfg.security.enabled:
-        builder = TokenBuilder(enabled=True, private_key_path=core_cfg.security.private_key_path)
-        token = builder.mint_root(
-            user_ctx=user_ctx or {},
-            permissions=(
-                core_cfg.security.policies.read_permission,
-                core_cfg.security.policies.write_permission,
-            ),
-            ttl_s=300.0,
-        )
+
+    # Mint token with agent-aware permissions
+    token = await _mint_access_token(user_ctx, agent_id=agent_id)
+    if token is not None:
         input_state["access_token"] = token
-        logger.debug(
-            "Security enabled: minted access_token token_id=%s perms=%s ttl_s=%s",
-            getattr(token, "token_id", None),
-            list(getattr(token, "permissions", ()) or ()),
-            300.0,
-        )
-    else:
-        logger.debug("Security disabled: providers will run without token verification")
 
     # IMPORTANT: `use_runtime_settings()` must be entered BEFORE we compute effective_config/tags.
     with use_runtime_settings(runtime_settings):

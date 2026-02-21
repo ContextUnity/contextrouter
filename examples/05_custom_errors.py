@@ -1,9 +1,12 @@
 """Example of using custom errors with the error registry.
 
 This script demonstrates how to define, register, and use custom exceptions.
+All base exceptions come from contextcore.exceptions.
 """
 
-from contextrouter.core.exceptions import ContextrouterError, error_registry, register_error
+from contextcore.exceptions import error_registry, register_error
+
+from contextrouter.core.exceptions import ContextrouterError
 
 
 # 1. Define and register a custom error for a specific module

@@ -1,3 +1,7 @@
+# ContextRouter — The Mind of ContextUnity
+# Modular LangGraph agent orchestration, plugin architecture,
+# multi-model routing, and RAG pipeline coordination
+
 [tools]
 python = "3.13"
 uv = "latest"
@@ -9,67 +13,63 @@ PYTHON = "$(mise which python)"
 
 [tasks.sync]
 description = "Install all dependencies (dev + vertex + observability)"
-run = "uv sync --dev --extra vertex --extra observability"
+run = "uv sync --group dev --extra vertex --extra observability"
 
 [tasks.lint]
 description = "Lint + format-check all code (Ruff)"
-run = "uv run ruff check src/ && uv run ruff format --check src/"
+run = "uv run ruff check src/ tests/ && uv run ruff format --check src/ tests/"
 
 [tasks.format]
 description = "Format all code (Ruff)"
-run = "uv run ruff check --fix src/ && uv run ruff format src/"
+run = "uv run ruff check --fix src/ tests/ && uv run ruff format src/ tests/"
 
 [tasks.test]
 description = "Run all tests"
-run = "uv run python -m pytest tests/ -v"
+run = "uv run pytest tests/ -v"
 
 [tasks.test-unit]
 description = "Run unit tests only"
-run = "uv run python -m pytest tests/unit/ -v"
+run = "uv run pytest tests/ -v -m unit"
 
 [tasks.security]
 description = "Run security scan (Bandit)"
-run = "uv run python -m bandit -c .bandit -r src/"
+run = "uv run bandit -c .bandit -r src/"
 
 [tasks.check]
 description = "Run all checks (lint + security + test)"
-run = "uv sync --extra storage && uv pip install -e ../contextcore && mise run lint && mise run security && mise run test-unit"
+run = "mise run lint && mise run security && mise run test-unit"
 
 # =============================================================================
 # Server Commands
 # =============================================================================
 
 [tasks.serve]
-description = "Start Router server"
-run = "uv run contextrouter serve"
+description = "Start Router gRPC service"
+run = "uv run python -m contextrouter"
 
 [tasks.dev]
-description = "Start Router in development mode"
-run = "uv run contextrouter serve --reload"
+description = "Start Router gRPC service in development mode"
+run = "uv run python -m contextrouter"
 
 # =============================================================================
 # RAG Commands
 # =============================================================================
 
 [tasks.rag-query]
-description = "Query the RAG system"
+description = "Query the RAG system (e.g., mise run rag-query -- 'my question')"
 run = "uv run contextrouter rag query"
 
-[tasks.rag-chat]
-description = "Start interactive RAG chat"
-run = "uv run contextrouter rag chat"
+[tasks.rag-retrieve]
+description = "Retrieve documents without generation"
+run = "uv run contextrouter rag retrieve"
 
-# =============================================================================
-# Enrichment Queue Commands
-# =============================================================================
+[tasks.rag-test]
+description = "Run RAG test suite"
+run = "uv run contextrouter rag test"
 
-[tasks.queue-stats]
-description = "Show enrichment queue stats"
-run = "uv run python -c 'from contextrouter.cortex.queue import get_enrichment_queue; import asyncio; print(asyncio.run(get_enrichment_queue().get_queue_stats(\"traverse\")))'"
-
-[tasks.queue-process]
-description = "Process enrichment queue (Gardener)"
-run = "uv run python -m contextrouter.cortex.graphs.gardener --tenant traverse"
+[tasks.rag-benchmark]
+description = "Benchmark RAG performance"
+run = "uv run contextrouter rag benchmark"
 
 # =============================================================================
 # GCloud Commands
@@ -120,3 +120,7 @@ rm -rf .pytest_cache/ .ruff_cache/ build/ dist/ 2>/dev/null || true
 [tasks.build]
 description = "Build distribution packages"
 run = "uv build"
+
+[tasks.compile-protos]
+description = "Compile protobuf files (runs in contextcore)"
+run = "cd ../contextcore && ./compile_protos.sh"

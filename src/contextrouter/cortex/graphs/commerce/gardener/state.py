@@ -44,9 +44,12 @@ class GardenerState(TypedDict):
 
     # Config (passed from CommerceState)
     batch_size: int
-    db_url: str
+    brain_url: str  # Brain gRPC endpoint (e.g., "brain.contextunity.ts.net:50051")
     tenant_id: str
     prompts_dir: str
+
+    # Security
+    access_token: Optional[Any]  # ContextToken for authorization (from Router)
 
     # Products to process
     products: List[Product]

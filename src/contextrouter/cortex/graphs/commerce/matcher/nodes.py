@@ -26,8 +26,15 @@ class MatchingNode:
         site_product = state.get("product", {})
         query = f"Matching candidates for: {site_product.get('title')} {site_product.get('brand')}"
 
-        brain = BrainClient()
-        candidates = await brain.query_memory(ContextUnit(payload={"content": query}))
+        from contextrouter.core.brain_token import get_brain_service_token
+
+        brain = BrainClient(token=get_brain_service_token())
+        candidates = await brain.query_memory(
+            ContextUnit(
+                payload={"content": query},
+                provenance=["commerce:matcher:query_brain"],
+            )
+        )
 
         matches = []
         for cand in candidates:
@@ -93,5 +100,5 @@ async def link_or_queue_node(state: Dict[str, Any]) -> Dict[str, Any]:
         else:
             queued += 1
 
-    logger.info(f"Matcher: {auto_linked} auto-linked, {queued} queued for review")
+    logger.info("Matcher: %s auto-linked, %s queued for review", auto_linked, queued)
     return {"auto_linked": auto_linked, "queued": queued}

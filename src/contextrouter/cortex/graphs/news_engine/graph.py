@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 async def route_intent_node(state: NewsEngineState) -> Dict[str, Any]:
     """Route to appropriate subgraph based on intent."""
     intent = state.get("intent", "harvest")
-    logger.info(f"news_engine routing intent: {intent}")
+    logger.info("news_engine routing intent: %s", intent)
     return {"intent": intent}
 
 

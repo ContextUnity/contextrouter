@@ -274,43 +274,44 @@ agent_registry: Registry = Registry(name="agents", builtin_map=BUILTIN_AGENTS)
 logger = logging.getLogger(__name__)
 
 
-def scan(plugin_dir: Path) -> None:
-    """Scan a directory for Python plugins and import them.
+def scan(plugin_dir: Path) -> list[Any]:
+    """Scan a directory for manifest-based plugins.
 
-    This allows users to extend ContextRouter with custom components
-    (agents, tools, connectors, etc.) without modifying the core code.
+    Each plugin is a subdirectory containing a ``plugin.yaml`` manifest.
+    Plugins are loaded via :func:`contextrouter.core.plugins.load_plugin`
+    and receive a capability-gated :class:`PluginContext`.
 
     Args:
-        plugin_dir: Directory containing Python plugin modules
+        plugin_dir: Directory to scan for plugin subdirectories.
+
+    Returns:
+        List of loaded PluginContext instances.
     """
     if not plugin_dir.exists() or not plugin_dir.is_dir():
-        logger.debug(f"Plugin directory does not exist: {plugin_dir}")
-        return
+        logger.debug("Plugin directory does not exist: %s", plugin_dir)
+        return []
 
-    # Find all .py files in the directory
-    plugin_files = list(plugin_dir.glob("*.py"))
-    if not plugin_files:
-        logger.debug(f"No Python files found in plugin directory: {plugin_dir}")
-        return
+    loaded: list[Any] = []
 
-    logger.info(f"Scanning {len(plugin_files)} plugin files in {plugin_dir}")
-
-    # Import each plugin file
-    for plugin_file in plugin_files:
-        if plugin_file.name.startswith("_"):
-            continue  # Skip private files
+    for subdir in sorted(plugin_dir.iterdir()):
+        if not subdir.is_dir():
+            continue
+        manifest_file = subdir / "plugin.yaml"
+        if not manifest_file.exists():
+            manifest_file = subdir / "plugin.yml"
+        if not manifest_file.exists():
+            continue
 
         try:
-            module_name = plugin_file.stem
-            spec = importlib.util.spec_from_file_location(module_name, plugin_file)
-            if spec and spec.loader:
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                logger.info(f"Loaded plugin: {module_name} from {plugin_file}")
-            else:
-                logger.warning(f"Could not load plugin: {plugin_file}")
+            from contextrouter.core.plugins import load_plugin
+
+            ctx = load_plugin(subdir)
+            if ctx is not None:
+                loaded.append(ctx)
         except Exception as e:
-            logger.error(f"Failed to load plugin {plugin_file}: {e}")
+            logger.error("Failed to load plugin from %s: %s", subdir, e)
+
+    return loaded
 
 
 __all__ = [

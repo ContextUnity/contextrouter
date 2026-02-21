@@ -31,7 +31,7 @@ async def analyze_node(state: NewsEngineState) -> Dict[str, Any]:
     facts = state.get("facts", [])
     tenant_id = state.get("tenant_id", "default")
 
-    logger.info(f"[{tenant_id}] Analyzing {len(facts)} facts")
+    logger.info("[%s] Analyzing %s facts", tenant_id, len(facts))
 
     # Simple scoring based on available metadata
     scored_facts = []
@@ -83,7 +83,7 @@ async def plan_node(state: NewsEngineState) -> Dict[str, Any]:
     overrides = state.get("prompt_overrides", {})
     system_prompt = overrides.get("showrunner", DEFAULT_SHOWRUNNER_PROMPT)
 
-    logger.info(f"[{tenant_id}] LLM planning for {len(facts)} facts")
+    logger.info("[%s] LLM planning for %s facts", tenant_id, len(facts))
 
     try:
         model = model_registry.get_llm_with_fallback(
@@ -124,7 +124,7 @@ async def plan_node(state: NewsEngineState) -> Dict[str, Any]:
 
         # Parse response
         text = response.text
-        logger.debug(f"LLM plan raw response: {text}")
+        logger.debug("LLM plan raw response: %s", text)
 
         # Strip markdown code blocks if present
         if "```json" in text:
@@ -138,7 +138,7 @@ async def plan_node(state: NewsEngineState) -> Dict[str, Any]:
         if start >= 0 and end > start:
             try:
                 plan_data = json.loads(text[start:end])
-                logger.debug(f"Parsed plan keys: {list(plan_data.keys())}")
+                logger.debug("Parsed plan keys: %s", list(plan_data.keys()))
 
                 stories = []
                 raw_items = plan_data.get("stories", [])
@@ -148,10 +148,10 @@ async def plan_node(state: NewsEngineState) -> Dict[str, Any]:
                     if isinstance(plan_data["editorial_plan"], list):
                         raw_items = plan_data["editorial_plan"]
 
-                logger.info(f"[{tenant_id}] LLM returned {len(raw_items)} story assignments")
+                logger.info("[%s] LLM returned %s story assignments", tenant_id, len(raw_items))
 
                 if not raw_items:
-                    logger.warning(f"No stories in plan. Keys found: {list(plan_data.keys())}")
+                    logger.warning("No stories in plan. Keys found: %s", list(plan_data.keys()))
                     return heuristic_plan(facts)
 
                 for item in raw_items:
@@ -194,16 +194,20 @@ async def plan_node(state: NewsEngineState) -> Dict[str, Any]:
                             }
                         )
                     else:
-                        logger.debug(f"Could not match story: {item.get('story', '')[:50]}")
+                        logger.debug("Could not match story: %s", item.get("story", "")[:50])
 
                 if not stories:
                     logger.warning(
-                        f"LLM returned {len(raw_items)} items but 0 matched facts, falling back to heuristic"
+                        "LLM returned %s items but 0 matched facts, falling back to heuristic",
+                        len(raw_items),
                     )
                     return heuristic_plan(facts)
 
                 logger.info(
-                    f"[{tenant_id}] Matched {len(stories)}/{len(raw_items)} stories from LLM plan"
+                    "[%s] Matched %s/%s stories from LLM plan",
+                    tenant_id,
+                    len(stories),
+                    len(raw_items),
                 )
 
                 return {
@@ -215,15 +219,15 @@ async def plan_node(state: NewsEngineState) -> Dict[str, Any]:
                 }
             except json.JSONDecodeError as e:
                 logger.warning(
-                    f"Failed to parse LLM plan JSON: {e}. Response preview: {text[:200]}"
+                    "Failed to parse LLM plan JSON: %s. Response preview: %s", e, text[:200]
                 )
                 return heuristic_plan(facts)
         else:
-            logger.warning(f"No JSON found in LLM plan. Response preview: {text[:200]}")
+            logger.warning("No JSON found in LLM plan. Response preview: %s", text[:200])
             return heuristic_plan(facts)
 
     except Exception as e:
-        logger.error(f"LLM planning failed: {e}")
+        logger.error("LLM planning failed: %s", e)
         return heuristic_plan(facts)
 
 
@@ -232,7 +236,7 @@ async def finalize_node(state: NewsEngineState) -> Dict[str, Any]:
     stories = state.get("selected_stories", [])
     tenant_id = state.get("tenant_id", "default")
 
-    logger.info(f"[{tenant_id}] Finalized plan with {len(stories)} stories")
+    logger.info("[%s] Finalized plan with %s stories", tenant_id, len(stories))
 
     return {
         "stories": stories,  # Pass to agents subgraph

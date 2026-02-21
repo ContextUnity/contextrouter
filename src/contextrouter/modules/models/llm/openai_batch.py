@@ -157,7 +157,7 @@ class OpenAIBatchClient:
         finally:
             temp_path.unlink()
 
-        logger.info(f"Uploaded batch input file: {input_file_id}")
+        logger.info("Uploaded batch input file: %s", input_file_id)
 
         # Create batch job
         batch_response = await client.batches.create(
@@ -167,7 +167,7 @@ class OpenAIBatchClient:
             metadata={"description": description or "ContextRouter batch job"},
         )
 
-        logger.info(f"Created batch job: {batch_response.id}")
+        logger.info("Created batch job: %s", batch_response.id)
 
         return BatchJob(
             id=batch_response.id,
@@ -315,7 +315,7 @@ class OpenAIBatchClient:
             job = await self.get_batch(batch_id)
 
             if job.status == "completed":
-                logger.info(f"Batch {batch_id} completed")
+                logger.info("Batch %s completed", batch_id)
                 return job
 
             if job.status in ("failed", "expired", "cancelled"):
@@ -325,7 +325,7 @@ class OpenAIBatchClient:
             if elapsed > max_wait:
                 raise TimeoutError(f"Batch job timeout after {elapsed:.0f}s")
 
-            logger.debug(f"Batch {batch_id} status: {job.status}, waiting...")
+            logger.debug("Batch %s status: %s, waiting...", batch_id, job.status)
             await asyncio.sleep(poll_interval)
 
 
@@ -376,7 +376,7 @@ async def run_batch_completions(
     job = await client.create_batch(batch_requests, description=description)
 
     if not wait:
-        logger.info(f"Batch job created: {job.id} (not waiting)")
+        logger.info("Batch job created: %s (not waiting)", job.id)
         return []
 
     completed = await client.wait_for_completion(job.id)

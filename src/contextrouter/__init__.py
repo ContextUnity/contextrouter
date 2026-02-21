@@ -19,6 +19,10 @@ __all__ = [
     # Main entry points
     "stream_agent",
     "invoke_agent",
+    # Dispatcher agent
+    "invoke_dispatcher",
+    "stream_dispatcher",
+    "get_dispatcher_service",
     # Telemetry
     "get_langfuse_callbacks",
     "trace_context",
@@ -38,8 +42,11 @@ def __getattr__(name: str) -> Any:
     This is important for CLI usage (`python -m contextrouter.cli`) where we want
     `--help` to work without importing the entire brain and its optional deps.
     """
-    if name in {"invoke_agent", "stream_agent"}:
+    if name in {"invoke_agent", "stream_agent", "invoke_dispatcher", "stream_dispatcher"}:
         mod = importlib.import_module("contextrouter.cortex")
+        return getattr(mod, name)
+    if name == "get_dispatcher_service":
+        mod = importlib.import_module("contextrouter.cortex.services.dispatcher")
         return getattr(mod, name)
     if name in {"get_langfuse_callbacks", "trace_context"}:
         mod = importlib.import_module("contextrouter.modules.observability")

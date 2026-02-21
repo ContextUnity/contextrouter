@@ -1,13 +1,17 @@
-"""Postgres provider (storage + retrieval)."""
+"""Postgres provider (storage + retrieval).
+
+Uses ContextUnit protocol for data transport.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
+from contextcore import ContextToken, ContextUnit
+
 from contextrouter.core import get_core_config
-from contextrouter.core.bisquit import BisquitEnvelope
 from contextrouter.core.interfaces import BaseProvider, IRead, IWrite
-from contextrouter.core.tokens import AccessManager, BiscuitToken
+from contextrouter.core.tokens import AccessManager
 from contextrouter.core.types import coerce_struct_data
 from contextrouter.modules.models import model_registry
 from contextrouter.modules.retrieval.rag.models import RetrievedDoc
@@ -61,8 +65,8 @@ class PostgresProvider(BaseProvider, IRead, IWrite):
         *,
         limit: int = 5,
         filters: dict[str, Any] | None = None,
-        token: BiscuitToken,
-    ) -> list[BisquitEnvelope]:
+        token: ContextToken,
+    ) -> list[ContextUnit]:
         self._access.verify_read(token)
         cfg = get_core_config()
         rag_cfg = get_rag_retrieval_settings()
@@ -97,33 +101,39 @@ class PostgresProvider(BaseProvider, IRead, IWrite):
             tenant_id=str(tenant_id),
             user_id=str(user_id) if user_id else None,
         )
-        envelopes: list[BisquitEnvelope] = []
+        units: list[ContextUnit] = []
         for res in results:
             doc = self._to_retrieved_doc(res.node, score=res.score)
-            envelopes.append(BisquitEnvelope(content=doc).add_trace("provider:postgres"))
-        return envelopes
+            unit = ContextUnit(
+                payload={"content": doc},
+                provenance=["provider:postgres"],
+            )
+            units.append(unit)
+        return units
 
-    async def write(self, data: BisquitEnvelope, *, token: BiscuitToken) -> None:
-        self._access.verify_envelope_write(data, token)
+    async def write(self, data: ContextUnit, *, token: ContextToken) -> None:
+        self._access.verify_write(token)
         cfg = get_core_config()
-        content = data.content
+        payload = data.payload or {}
+        content = payload.get("content")
+
         if isinstance(content, RetrievedDoc):
             doc = content
         elif isinstance(content, dict):
             doc = RetrievedDoc.model_validate(content)
         else:
-            raise ValueError("PostgresProvider.write expects RetrievedDoc content")
+            raise ValueError("PostgresProvider.write expects RetrievedDoc content in payload")
 
-        tenant_id = data.metadata.get("tenant_id") if isinstance(data.metadata, dict) else None
+        tenant_id = payload.get("tenant_id")
         if cfg.security.enabled and not tenant_id:
             raise PermissionError("tenant_id is required for Postgres write")
         if not tenant_id:
             tenant_id = "public"
-        user_id = data.metadata.get("user_id") if isinstance(data.metadata, dict) else None
+        user_id = payload.get("user_id")
 
-        node_id = str(data.id or "").strip()
+        node_id = str(payload.get("id", "")).strip()
         if not node_id:
-            raise ValueError("PostgresProvider.write requires envelope.id")
+            raise ValueError("PostgresProvider.write requires payload.id")
         metadata = coerce_struct_data(doc.metadata or {})
         if not isinstance(metadata, dict):
             metadata = {}
@@ -142,8 +152,8 @@ class PostgresProvider(BaseProvider, IRead, IWrite):
         )
         await self._store.upsert_graph([node], [], tenant_id=str(tenant_id), user_id=user_id)
 
-    async def sink(self, envelope: BisquitEnvelope, *, token: BiscuitToken) -> Any:
-        await self.write(envelope, token=token)
+    async def sink(self, unit: ContextUnit, *, token: ContextToken) -> Any:
+        await self.write(unit, token=token)
         return None
 
     def _to_retrieved_doc(self, node: GraphNode, *, score: float) -> RetrievedDoc:

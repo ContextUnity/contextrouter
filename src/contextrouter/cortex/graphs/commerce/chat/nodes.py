@@ -55,7 +55,7 @@ async def trigger_harvester_node(state: ChatState) -> Dict[str, Any]:
     params = state.get("extracted_params", {})
     supplier = params.get("supplier", "all")
 
-    logger.info(f"Would trigger Harvester for {supplier}")
+    logger.info("Would trigger Harvester for %s", supplier)
     return {
         "sub_task_result": {"status": "triggered", "supplier": supplier},
         "actions_taken": [f"Triggered import for {supplier}"],
@@ -67,7 +67,7 @@ async def trigger_channel_sync_node(state: ChatState) -> Dict[str, Any]:
     params = state.get("extracted_params", {})
     channel = params.get("channel", "horoshop")
 
-    logger.info(f"Would trigger sync to {channel}")
+    logger.info("Would trigger sync to %s", channel)
     return {
         "sub_task_result": {"status": "triggered", "channel": channel},
         "actions_taken": [f"Triggered sync to {channel}"],

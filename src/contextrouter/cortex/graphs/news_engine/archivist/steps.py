@@ -31,7 +31,7 @@ async def filter_node(state: NewsEngineState) -> Dict[str, Any]:
     raw_items = state.get("raw_items", [])
     tenant_id = state.get("tenant_id", "default")
 
-    logger.info(f"[{tenant_id}] Filtering {len(raw_items)} items")
+    logger.info("[%s] Filtering %s items", tenant_id, len(raw_items))
 
     filtered = []
     rejected = 0
@@ -46,7 +46,7 @@ async def filter_node(state: NewsEngineState) -> Dict[str, Any]:
 
         filtered.append(item)
 
-    logger.info(f"[{tenant_id}] Keyword filter: {len(filtered)} passed, {rejected} rejected")
+    logger.info("[%s] Keyword filter: %s passed, %s rejected", tenant_id, len(filtered), rejected)
 
     return {
         "raw_items": filtered,
@@ -71,7 +71,7 @@ async def validate_node(state: NewsEngineState) -> Dict[str, Any]:
     overrides = state.get("prompt_overrides", {})
     system_prompt = overrides.get("archivist", DEFAULT_ARCHIVIST_PROMPT)
 
-    logger.info(f"[{tenant_id}] LLM validating {len(raw_items)} items")
+    logger.info("[%s] LLM validating %s items", tenant_id, len(raw_items))
 
     try:
         model = model_registry.get_llm_with_fallback(
@@ -115,33 +115,35 @@ Source: {item.get("url", "")}"""
                         validated.append(item)
                     else:
                         rejected += 1
-                        logger.debug(f"Rejected: {item.get('headline')} - {result.get('reason')}")
+                        logger.debug(
+                            "Rejected: %s - %s", item.get("headline"), result.get("reason")
+                        )
                 else:
                     # Log first 200 chars of response for debugging
                     preview = response.text[:200].replace("\n", " ") if response.text else "(empty)"
                     logger.warning(
-                        f"[No JSON Found] '{headline}...' - Could not extract JSON from response. "
-                        f"Preview: {preview}... Accepting item by default."
+                        "[No JSON Found] '%s...' - Could not extract JSON from response. Preview: %s... Accepting item by default.",
+                        headline,
+                        preview,
                     )
                     validated.append(item)
 
             except asyncio.CancelledError:
                 logger.warning(
-                    f"[Connection Timeout] '{headline}...' - OpenAI request was cancelled "
-                    "(likely timeout or connection issue). Accepting item by default."
+                    "[Connection Timeout] '%s...' - OpenAI request was cancelled ", headline
                 )
                 validated.append(item)
 
             except Exception as e:
                 error_type = type(e).__name__
-                logger.warning(
-                    f"[{error_type}] '{headline}...' - Validation failed: {e}. "
-                    "Accepting item by default."
-                )
+                logger.warning("[%s] '%s...' - Validation failed: %s. ", error_type, headline, e)
                 validated.append(item)
 
         logger.info(
-            f"[{tenant_id}] LLM validation: {len(validated)} accepted, {rejected} total rejected"
+            "[%s] LLM validation: %s accepted, %s total rejected",
+            tenant_id,
+            len(validated),
+            rejected,
         )
 
         return {
@@ -150,13 +152,13 @@ Source: {item.get("url", "")}"""
         }
 
     except Exception as e:
-        logger.error(f"LLM validation failed: {e}")
+        logger.error("LLM validation failed: %s", e)
         return {}
 
 
 async def dedupe_node(state: NewsEngineState) -> Dict[str, Any]:
     """Check for duplicates via semantic similarity (facts-based).
-    
+
     Note: URL-based deduplication was removed because:
     - Perplexity often returns generic homepage URLs
     - One URL can contain multiple different articles
@@ -168,7 +170,7 @@ async def dedupe_node(state: NewsEngineState) -> Dict[str, Any]:
     if not raw_items:
         return {"duplicate_count": 0}
 
-    logger.info(f"[{tenant_id}] Deduplicating {len(raw_items)} items (semantic only)")
+    logger.info("[%s] Deduplicating %s items (semantic only)", tenant_id, len(raw_items))
 
     config = get_core_config()
 
@@ -185,7 +187,7 @@ async def dedupe_node(state: NewsEngineState) -> Dict[str, Any]:
         headline_key = headline.strip().lower()
         if headline_key in seen_headlines:
             duplicates += 1
-            logger.debug(f"Exact headline duplicate in batch: '{headline[:50]}...'")
+            logger.debug("Exact headline duplicate in batch: '%s...'", headline[:50])
             continue
         seen_headlines.add(headline_key)
 
@@ -194,7 +196,9 @@ async def dedupe_node(state: NewsEngineState) -> Dict[str, Any]:
         try:
             from contextcore import BrainClient
 
-            client = BrainClient(host=config.brain.grpc_endpoint)
+            from contextrouter.core.brain_token import get_brain_service_token
+
+            client = BrainClient(host=config.brain.grpc_endpoint, token=get_brain_service_token())
 
             search_text = f"{headline} {summary}"[:500]
             similar = await client.search(
@@ -207,21 +211,27 @@ async def dedupe_node(state: NewsEngineState) -> Dict[str, Any]:
             for s in similar:
                 if s.score >= SIMILARITY_THRESHOLD:
                     is_duplicate = True
+                    score_str = format(s.score, ".2f")
                     logger.info(
-                        f"Semantic duplicate (score={s.score:.2f}): '{headline[:50]}...' "
-                        f"matches existing: '{s.content[:50]}...'"
+                        "Semantic duplicate (score=%s): '%s...' matches existing: '%s...'",
+                        score_str,
+                        headline[:50],
+                        s.content[:50],
                     )
                     duplicates += 1
                     break
         except Exception as e:
-            logger.debug(f"Semantic search unavailable: {e}")
+            logger.debug("Semantic search unavailable: %s", e)
 
         if not is_duplicate:
             unique_items.append(item)
 
     logger.info(
-        f"[{tenant_id}] Dedupe: {len(unique_items)} unique, {duplicates} duplicates "
-        f"(threshold={SIMILARITY_THRESHOLD})"
+        "[%s] Dedupe: %s unique, %s duplicates (threshold=%s)",
+        tenant_id,
+        len(unique_items),
+        duplicates,
+        SIMILARITY_THRESHOLD,
     )
 
     return {
@@ -230,13 +240,12 @@ async def dedupe_node(state: NewsEngineState) -> Dict[str, Any]:
     }
 
 
-
 async def store_node(state: NewsEngineState) -> Dict[str, Any]:
     """Convert raw items to facts and store in Brain via gRPC."""
     raw_items = state.get("raw_items", [])
     tenant_id = state.get("tenant_id", "default")
 
-    logger.info(f"[{tenant_id}] Storing {len(raw_items)} facts to Brain")
+    logger.info("[%s] Storing %s facts to Brain", tenant_id, len(raw_items))
 
     facts = []
     config = get_core_config()
@@ -247,7 +256,9 @@ async def store_node(state: NewsEngineState) -> Dict[str, Any]:
 
         from contextcore import BrainClient
 
-        client = BrainClient(host=config.brain.grpc_endpoint)
+        from contextrouter.core.brain_token import get_brain_service_token
+
+        client = BrainClient(host=config.brain.grpc_endpoint, token=get_brain_service_token())
 
         for item in raw_items:
             fact = {
@@ -284,11 +295,11 @@ async def store_node(state: NewsEngineState) -> Dict[str, Any]:
                     fact["brain_id"] = fact_id
 
             except Exception as e:
-                logger.warning(f"Failed to store fact to Brain: {e}")
+                logger.warning("Failed to store fact to Brain: %s", e)
 
             facts.append(fact)
 
-        logger.info(f"[{tenant_id}] Stored {stored_count}/{len(facts)} facts to Brain")
+        logger.info("[%s] Stored %s/%s facts to Brain", tenant_id, stored_count, len(facts))
 
     except ImportError:
         logger.warning("contextcore not available, facts won't be stored to Brain")
@@ -308,7 +319,7 @@ async def store_node(state: NewsEngineState) -> Dict[str, Any]:
             }
             facts.append(fact)
     except Exception as e:
-        logger.error(f"Brain storage error: {e}")
+        logger.error("Brain storage error: %s", e)
 
     return {
         "facts": facts,

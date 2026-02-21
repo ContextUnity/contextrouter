@@ -37,8 +37,9 @@ class BrainProvider(BaseProvider, IRead):
         else:
             logger.info("Initializing BrainProvider in GRPC mode (endpoint: %s)", self.endpoint)
             self.service = None
-            # Channel is usually managed externally or kept open
-            self._channel = grpc.aio.insecure_channel(self.endpoint)
+            from contextcore.grpc_utils import create_channel
+
+            self._channel = create_channel(self.endpoint)
             self._stub = brain_pb2_grpc.BrainServiceStub(self._channel)
 
     @secured()
