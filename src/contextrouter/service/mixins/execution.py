@@ -82,6 +82,34 @@ class ExecutionMixin:
         builder = graph_registry.get(graph_name)
         graph = builder()
 
+        # Extract user input for Shield firewall check
+        execution_input_copy = params.input.copy()
+        last_user_msg = ""
+
+        # Check messages list format
+        if "messages" in execution_input_copy and isinstance(
+            execution_input_copy["messages"], list
+        ):
+            for m in reversed(execution_input_copy["messages"]):
+                role = getattr(m, "role", None) or (m.get("role") if isinstance(m, dict) else None)
+                content = getattr(m, "content", None) or (
+                    m.get("content") if isinstance(m, dict) else None
+                )
+                if role == "user" and content:
+                    last_user_msg = str(content)
+                    break
+        elif "input" in execution_input_copy and isinstance(execution_input_copy["input"], str):
+            last_user_msg = execution_input_copy["input"]
+
+        if last_user_msg:
+            guard_result = await self._guard.check_input(
+                last_user_msg,
+                request_id=str(unit.trace_id),
+                tenant=tenant_id,
+            )
+            if guard_result.blocked:
+                raise PermissionError(f"Shield blocked: {guard_result.reason}")
+
         # Inject project config to preserve agent persona
         project_config = self._project_configs.get(tenant_id, {})
         execution_input = params.input.copy()
@@ -202,6 +230,34 @@ class ExecutionMixin:
 
         builder = graph_registry.get(graph_name)
         graph = builder()
+
+        # Extract user input for Shield firewall check
+        execution_input_copy = params.input.copy()
+        last_user_msg = ""
+
+        # Check messages list format
+        if "messages" in execution_input_copy and isinstance(
+            execution_input_copy["messages"], list
+        ):
+            for m in reversed(execution_input_copy["messages"]):
+                role = getattr(m, "role", None) or (m.get("role") if isinstance(m, dict) else None)
+                content = getattr(m, "content", None) or (
+                    m.get("content") if isinstance(m, dict) else None
+                )
+                if role == "user" and content:
+                    last_user_msg = str(content)
+                    break
+        elif "input" in execution_input_copy and isinstance(execution_input_copy["input"], str):
+            last_user_msg = execution_input_copy["input"]
+
+        if last_user_msg:
+            guard_result = await self._guard.check_input(
+                last_user_msg,
+                request_id=str(unit.trace_id),
+                tenant=tenant_id,
+            )
+            if guard_result.blocked:
+                raise PermissionError(f"Shield blocked: {guard_result.reason}")
 
         # Inject project config
         project_config = self._project_configs.get(tenant_id, {})
