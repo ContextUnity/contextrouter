@@ -60,7 +60,16 @@ class SQLToolConfig(BaseModel):
 # ── Validation (deterministic, no LLM) ──────────────────────────────
 
 _BUILTIN_FORBIDDEN = re.compile(
-    r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|EXECUTE|COPY)\b",
+    r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|EXECUTE|COPY|INTO)\b",
+    re.IGNORECASE,
+)
+
+_FORBIDDEN_FUNCTIONS = re.compile(
+    r"\b(pg_read_file|pg_read_binary_file|pg_ls_dir|pg_stat_file"
+    r"|lo_import|lo_export|lo_get|lo_put"
+    r"|dblink|dblink_exec|dblink_connect"
+    r"|pg_sleep|set_config"
+    r"|current_setting\s*\(\s*['\"]superuser)",
     re.IGNORECASE,
 )
 
@@ -139,6 +148,11 @@ def validate_sql(sql: str, *, config: SQLToolConfig | None = None) -> dict[str, 
     match = _BUILTIN_FORBIDDEN.search(clean)
     if match:
         return {"valid": False, "error": f"Forbidden keyword: {match.group()}"}
+
+    # Forbidden functions
+    func_match = _FORBIDDEN_FUNCTIONS.search(clean)
+    if func_match:
+        return {"valid": False, "error": f"Forbidden function: {func_match.group()}"}
 
     for kw in cfg.forbidden_keywords:
         if re.search(rf"\b{re.escape(kw)}\b", clean, re.IGNORECASE):

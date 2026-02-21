@@ -13,6 +13,7 @@ from typing import Any
 from langchain_core.tools import tool
 
 from contextrouter.core import get_core_config
+from contextrouter.cortex.runtime_context import get_current_access_token
 from contextrouter.modules.providers.redis import RedisProvider
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,14 @@ async def store_memory(
         Dict with success status and stored key
     """
     try:
+        # Override tenant_id with authoritative value from access token
+        # This prevents LLM prompt injection from spoofing tenant IDs
+        active_token = get_current_access_token()
+        if not active_token:
+            return {"success": False, "error": "No active access token found in runtime context."}
+
+        tenant_id = active_token.allowed_tenants[0] if active_token.allowed_tenants else "default"
+
         redis = get_redis_provider()
         memory_key = _make_memory_key(key, session_id, tenant_id)
 
@@ -147,6 +156,13 @@ async def retrieve_memory(
         Dict with value if found, or error if not found
     """
     try:
+        # Override tenant_id with authoritative value from access token
+        active_token = get_current_access_token()
+        if not active_token:
+            return {"success": False, "error": "No active access token found in runtime context."}
+
+        tenant_id = active_token.allowed_tenants[0] if active_token.allowed_tenants else "default"
+
         redis = get_redis_provider()
         memory_key = _make_memory_key(key, session_id, tenant_id)
 
@@ -197,6 +213,13 @@ async def cache_query_result(
         Dict with success status and cache key
     """
     try:
+        # Override tenant_id with authoritative value from access token
+        active_token = get_current_access_token()
+        if not active_token:
+            return {"success": False, "error": "No active access token found in runtime context."}
+
+        tenant_id = active_token.allowed_tenants[0] if active_token.allowed_tenants else "default"
+
         redis = get_redis_provider()
         cache_key = _make_query_cache_key(query, tenant_id)
 
@@ -237,6 +260,13 @@ async def get_cached_query(
         Dict with cached result if found, or not_found status
     """
     try:
+        # Override tenant_id with authoritative value from access token
+        active_token = get_current_access_token()
+        if not active_token:
+            return {"success": False, "error": "No active access token found in runtime context."}
+
+        tenant_id = active_token.allowed_tenants[0] if active_token.allowed_tenants else "default"
+
         redis = get_redis_provider()
         cache_key = _make_query_cache_key(query, tenant_id)
 
@@ -276,6 +306,13 @@ async def get_session_data(
         Dict with session data
     """
     try:
+        # Override tenant_id with authoritative value from access token
+        active_token = get_current_access_token()
+        if not active_token:
+            return {"success": False, "error": "No active access token found in runtime context."}
+
+        tenant_id = active_token.allowed_tenants[0] if active_token.allowed_tenants else "default"
+
         redis = get_redis_provider()
         session_key = _make_session_key(session_id, tenant_id)
 
@@ -324,6 +361,13 @@ async def clear_memory(
         Dict with success status
     """
     try:
+        # Override tenant_id with authoritative value from access token
+        active_token = get_current_access_token()
+        if not active_token:
+            return {"success": False, "error": "No active access token found in runtime context."}
+
+        tenant_id = active_token.allowed_tenants[0] if active_token.allowed_tenants else "default"
+
         redis = get_redis_provider()
 
         if key and session_id:

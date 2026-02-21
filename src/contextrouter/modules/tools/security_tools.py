@@ -196,6 +196,16 @@ async def check_policy(
         - matched_policy: Name of the policy that matched (if any)
         - evaluation_ms: How long evaluation took
     """
+    from contextrouter.cortex.runtime_context import get_current_access_token
+
+    active_token = get_current_access_token()
+    if active_token:
+        # Override tenant_id with authoritative value if available
+        tenant_id = active_token.allowed_tenants[0] if active_token.allowed_tenants else "default"
+        # Override permissions to what the token actually has
+        permissions = list(active_token.permissions)
+        token_id = active_token.token_id
+
     if _use_rpc():
         return _grpc_call(
             "EvaluatePolicy",
@@ -342,6 +352,13 @@ async def audit_event(
     Returns:
         Confirmation message with event details.
     """
+    from contextrouter.cortex.runtime_context import get_current_access_token
+
+    active_token = get_current_access_token()
+    if active_token:
+        # Override tenant_id with authoritative value if available
+        tenant_id = active_token.allowed_tenants[0] if active_token.allowed_tenants else "default"
+
     if _use_rpc():
         _grpc_call(
             "RecordAudit",

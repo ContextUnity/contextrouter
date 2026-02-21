@@ -79,6 +79,16 @@ async def spawn_subagent(
         trace_id = None  # Will be set by dispatcher graph integration
         access_token = get_current_access_token()
 
+        if not access_token:
+            return {
+                "subagent_id": None,
+                "status": "error",
+                "message": "No active access token found in runtime context.",
+            }
+
+        # Enforce tenant isolation by extracting authoritative tenant_id from token
+        tenant_id = access_token.allowed_tenants[0] if access_token.allowed_tenants else "default"
+
         subagent_id = await spawner.spawn_subagent(
             parent_agent_id="dispatcher",
             task=task,
