@@ -144,20 +144,15 @@ class StreamExecutorManager:
         # Fail-closed: if security is enabled and we can't resolve the
         # caller, reject rather than forwarding with empty context.
         if not caller_tenant:
-            try:
-                from contextcore.exceptions import SecurityError
+            from contextrouter.core import get_core_config
 
-                from contextrouter.core import get_core_config
-
-                config = get_core_config()
-                if config.security.enabled:
-                    raise SecurityError(
-                        f"Cannot forward execution to project '{project_id}': "
-                        f"no caller_tenant resolved. Security is enabled — "
-                        f"caller context is mandatory for stream execution."
-                    )
-            except ImportError:
-                pass
+            config = get_core_config()
+            if config.security.enabled:
+                raise PermissionError(
+                    f"Cannot forward execution to project '{project_id}': "
+                    f"no caller_tenant resolved. Security is enabled — "
+                    f"caller context is mandatory for stream execution."
+                )
 
         message = {
             "action": "execute",

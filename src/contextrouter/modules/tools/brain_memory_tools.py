@@ -73,21 +73,6 @@ async def remember_episode(
         Dict with episode_id and success status
     """
     try:
-        from contextrouter.cortex.runtime_context import get_current_access_token
-
-        active_token = get_current_access_token()
-        if not active_token:
-            return {"success": False, "error": "No active access token found in runtime context."}
-
-        if not active_token.can_access_tenant(tenant_id):
-            if getattr(active_token, "allowed_tenants", ()):
-                tenant_id = active_token.allowed_tenants[0]
-            else:
-                return {
-                    "success": False,
-                    "error": f"Access denied: unauthorized for tenant '{tenant_id}'.",
-                }
-
         brain = _get_brain_client()
         episode_id = await brain.add_episode(
             tenant_id=tenant_id,
@@ -127,21 +112,6 @@ async def recall_episodes(
         Dict with list of episodes (content, created_at, metadata)
     """
     try:
-        from contextrouter.cortex.runtime_context import get_current_access_token
-
-        active_token = get_current_access_token()
-        if not active_token:
-            return {"success": False, "error": "No active access token found in runtime context."}
-
-        if not active_token.can_access_tenant(tenant_id):
-            if getattr(active_token, "allowed_tenants", ()):
-                tenant_id = active_token.allowed_tenants[0]
-            else:
-                return {
-                    "success": False,
-                    "error": f"Access denied: unauthorized for tenant '{tenant_id}'.",
-                }
-
         brain = _get_brain_client()
         episodes = await brain.get_recent_episodes(
             tenant_id=tenant_id,
@@ -196,21 +166,6 @@ async def learn_user_fact(
         Dict with success status
     """
     try:
-        from contextrouter.cortex.runtime_context import get_current_access_token
-
-        active_token = get_current_access_token()
-        if not active_token:
-            return {"success": False, "error": "No active access token found in runtime context."}
-
-        if not active_token.can_access_tenant(tenant_id):
-            if getattr(active_token, "allowed_tenants", ()):
-                tenant_id = active_token.allowed_tenants[0]
-            else:
-                return {
-                    "success": False,
-                    "error": f"Access denied: unauthorized for tenant '{tenant_id}'.",
-                }
-
         brain = _get_brain_client()
         await brain.upsert_fact(
             tenant_id=tenant_id,
@@ -250,21 +205,6 @@ async def recall_user_facts(
         Dict with facts mapping (key -> value)
     """
     try:
-        from contextrouter.cortex.runtime_context import get_current_access_token
-
-        active_token = get_current_access_token()
-        if not active_token:
-            return {"success": False, "error": "No active access token found in runtime context."}
-
-        if not active_token.can_access_tenant(tenant_id):
-            if getattr(active_token, "allowed_tenants", ()):
-                tenant_id = active_token.allowed_tenants[0]
-            else:
-                return {
-                    "success": False,
-                    "error": f"Access denied: unauthorized for tenant '{tenant_id}'.",
-                }
-
         brain = _get_brain_client()
         facts = await brain.get_user_facts(
             tenant_id=tenant_id,

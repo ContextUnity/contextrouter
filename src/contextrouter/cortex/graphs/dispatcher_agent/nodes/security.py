@@ -76,22 +76,19 @@ async def security_guard_node(state: DispatcherState) -> dict[str, Any]:
 
         # 3. Token-based permission check
         if token_permissions is not None:
-            try:
-                from contextcore.permissions import has_tool_access
+            from contextcore.permissions import has_tool_access
 
-                if not has_tool_access(token_permissions, tool_name):
-                    blocked_calls.append(
-                        {
-                            "tool": tool_name,
-                            "reason": "permission_denied",
-                            "tool_call_id": tool_call.get("id"),
-                        }
-                    )
-                    security_flags.append({"event": "permission_denied", "tool": tool_name})
-                    logger.warning("Security: Token denies access to tool '%s'", tool_name)
-                    continue
-            except ImportError:
-                logger.debug("contextcore.permissions not available, falling back")
+            if not has_tool_access(token_permissions, tool_name):
+                blocked_calls.append(
+                    {
+                        "tool": tool_name,
+                        "reason": "permission_denied",
+                        "tool_call_id": tool_call.get("id"),
+                    }
+                )
+                security_flags.append({"event": "permission_denied", "tool": tool_name})
+                logger.warning("Security: Token denies access to tool '%s'", tool_name)
+                continue
 
         # 4. State-level whitelist fallback
         elif allowed_tools:
@@ -108,10 +105,10 @@ async def security_guard_node(state: DispatcherState) -> dict[str, Any]:
                 continue
 
         # 5. Tool scope / risk check (HITL for CONFIRM-risk tools)
-        try:
-            from contextcore.permissions import ToolRisk, check_tool_scope
+        from contextcore.permissions import ToolRisk, check_tool_scope
 
-            perms = token_permissions or ("*",)
+        perms = token_permissions or ("*",)
+        try:
             risk = check_tool_scope(perms, tool_name, "execute")
             if risk == ToolRisk.CONFIRM:
                 confirm_required.append(
@@ -124,7 +121,7 @@ async def security_guard_node(state: DispatcherState) -> dict[str, Any]:
                 )
                 security_flags.append({"event": "hitl_confirm_required", "tool": tool_name})
                 logger.info("Security: Tool '%s' requires HITL confirmation", tool_name)
-        except (ImportError, TypeError):
+        except TypeError:
             pass
 
         logger.debug("Security: Tool '%s' allowed", tool_name)
