@@ -110,7 +110,14 @@ async def store_memory(
         if not active_token:
             return {"success": False, "error": "No active access token found in runtime context."}
 
-        tenant_id = active_token.allowed_tenants[0] if active_token.allowed_tenants else "default"
+        if not active_token.can_access_tenant(tenant_id):
+            if getattr(active_token, "allowed_tenants", ()):
+                tenant_id = active_token.allowed_tenants[0]
+            else:
+                return {
+                    "success": False,
+                    "error": f"Access denied: unauthorized for tenant '{tenant_id}'.",
+                }
 
         redis = get_redis_provider()
         memory_key = _make_memory_key(key, session_id, tenant_id)
@@ -161,7 +168,14 @@ async def retrieve_memory(
         if not active_token:
             return {"success": False, "error": "No active access token found in runtime context."}
 
-        tenant_id = active_token.allowed_tenants[0] if active_token.allowed_tenants else "default"
+        if not active_token.can_access_tenant(tenant_id):
+            if getattr(active_token, "allowed_tenants", ()):
+                tenant_id = active_token.allowed_tenants[0]
+            else:
+                return {
+                    "success": False,
+                    "error": f"Access denied: unauthorized for tenant '{tenant_id}'.",
+                }
 
         redis = get_redis_provider()
         memory_key = _make_memory_key(key, session_id, tenant_id)
@@ -218,7 +232,14 @@ async def cache_query_result(
         if not active_token:
             return {"success": False, "error": "No active access token found in runtime context."}
 
-        tenant_id = active_token.allowed_tenants[0] if active_token.allowed_tenants else "default"
+        if not active_token.can_access_tenant(tenant_id):
+            if getattr(active_token, "allowed_tenants", ()):
+                tenant_id = active_token.allowed_tenants[0]
+            else:
+                return {
+                    "success": False,
+                    "error": f"Access denied: unauthorized for tenant '{tenant_id}'.",
+                }
 
         redis = get_redis_provider()
         cache_key = _make_query_cache_key(query, tenant_id)
@@ -265,7 +286,14 @@ async def get_cached_query(
         if not active_token:
             return {"success": False, "error": "No active access token found in runtime context."}
 
-        tenant_id = active_token.allowed_tenants[0] if active_token.allowed_tenants else "default"
+        if not active_token.can_access_tenant(tenant_id):
+            if getattr(active_token, "allowed_tenants", ()):
+                tenant_id = active_token.allowed_tenants[0]
+            else:
+                return {
+                    "success": False,
+                    "error": f"Access denied: unauthorized for tenant '{tenant_id}'.",
+                }
 
         redis = get_redis_provider()
         cache_key = _make_query_cache_key(query, tenant_id)
@@ -311,7 +339,14 @@ async def get_session_data(
         if not active_token:
             return {"success": False, "error": "No active access token found in runtime context."}
 
-        tenant_id = active_token.allowed_tenants[0] if active_token.allowed_tenants else "default"
+        if not active_token.can_access_tenant(tenant_id):
+            if getattr(active_token, "allowed_tenants", ()):
+                tenant_id = active_token.allowed_tenants[0]
+            else:
+                return {
+                    "success": False,
+                    "error": f"Access denied: unauthorized for tenant '{tenant_id}'.",
+                }
 
         redis = get_redis_provider()
         session_key = _make_session_key(session_id, tenant_id)
@@ -366,7 +401,14 @@ async def clear_memory(
         if not active_token:
             return {"success": False, "error": "No active access token found in runtime context."}
 
-        tenant_id = active_token.allowed_tenants[0] if active_token.allowed_tenants else "default"
+        if not active_token.can_access_tenant(tenant_id):
+            if getattr(active_token, "allowed_tenants", ()):
+                tenant_id = active_token.allowed_tenants[0]
+            else:
+                return {
+                    "success": False,
+                    "error": f"Access denied: unauthorized for tenant '{tenant_id}'.",
+                }
 
         redis = get_redis_provider()
 

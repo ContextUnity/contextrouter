@@ -86,8 +86,15 @@ async def spawn_subagent(
                 "message": "No active access token found in runtime context.",
             }
 
-        # Enforce tenant isolation by extracting authoritative tenant_id from token
-        tenant_id = access_token.allowed_tenants[0] if access_token.allowed_tenants else "default"
+        if not access_token.can_access_tenant(tenant_id):
+            if getattr(access_token, "allowed_tenants", ()):
+                tenant_id = access_token.allowed_tenants[0]
+            else:
+                return {
+                    "subagent_id": None,
+                    "status": "error",
+                    "message": f"Access denied: unauthorized for tenant '{tenant_id}'.",
+                }
 
         subagent_id = await spawner.spawn_subagent(
             parent_agent_id="dispatcher",
