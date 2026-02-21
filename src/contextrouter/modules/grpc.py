@@ -28,11 +28,13 @@ async def get_worker_client(token: Optional[ContextToken] = None) -> WorkerClien
 
     worker_url = get_core_config().router.worker_grpc_endpoint
 
+    if token:
+        # Always return a fresh client for token-specific requests to avoid
+        # cross-contamination and race conditions under concurrent execution.
+        return WorkerClient(host=worker_url, mode="grpc", token=token)
+
     if _worker_client is None:
-        _worker_client = WorkerClient(host=worker_url, mode="grpc", token=token)
-    elif token and _worker_client.token != token:
-        # Update token if different
-        _worker_client = WorkerClient(host=worker_url, mode="grpc", token=token)
+        _worker_client = WorkerClient(host=worker_url, mode="grpc", token=None)
 
     return _worker_client
 

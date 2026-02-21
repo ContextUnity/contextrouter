@@ -252,7 +252,9 @@ class RegistrationMixin:
         """
         from contextrouter.core.registry import graph_registry
 
-        name = graph_config.name
+        # Namespace the graph name to prevent replacing core system graphs
+        original_name = graph_config.name
+        name = f"project:{project_id}:{original_name}"
 
         if graph_config.template:
             template = graph_config.template
@@ -278,6 +280,7 @@ class RegistrationMixin:
                     f"Available: sql_analytics, dispatcher, rag_retrieval"
                 )
 
+            # Prevent overwriting since it's already properly namespaced and deregistered first
             graph_registry.register(name, builder, overwrite=True)
             self._project_graphs[project_id] = name
             if isinstance(config, dict):
@@ -288,7 +291,7 @@ class RegistrationMixin:
                 template,
                 project_id,
             )
-            return name
+            return original_name
 
         elif graph_config.nodes and graph_config.edges:
             raise ValueError(

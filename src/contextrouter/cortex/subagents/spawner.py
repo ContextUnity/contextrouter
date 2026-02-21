@@ -189,6 +189,11 @@ class SubAgentSpawner:
             token: Optional ContextToken for authorization
         """
         try:
+            if token is None:
+                from contextrouter.cortex.runtime_context import get_current_access_token
+
+                token = get_current_access_token()
+
             client = await self._get_worker_client(token=token)
 
             # Create ContextUnit for spawn request
