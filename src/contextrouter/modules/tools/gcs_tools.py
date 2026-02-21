@@ -188,12 +188,6 @@ async def gcs_list(
         if not token:
             return {"status": "error", "error": "No active access token found in runtime context."}
 
-        if not token.has_permission("storage:read"):
-            return {
-                "status": "error",
-                "error": f"Access denied: Token lacks 'storage:read' permission. Permissions: {token.permissions}",
-            }
-
         from google.cloud import storage  # type: ignore[import-not-found]
 
         client = storage.Client()
@@ -228,11 +222,10 @@ async def gcs_list(
 
 # ── Auto-register tools ──────────────────────────────────────────
 
-_GCS_TOOLS = [gcs_upload, gcs_download, gcs_list]
+register_tool(gcs_upload, permission="storage:write")
+register_tool(gcs_download, permission="storage:read")
+register_tool(gcs_list, permission="storage:read")
 
-for _t in _GCS_TOOLS:
-    register_tool(_t)
-
-logger.info("Registered %d GCS storage tools", len(_GCS_TOOLS))
+logger.info("Registered 3 GCS storage tools")
 
 __all__ = ["gcs_upload", "gcs_download", "gcs_list"]

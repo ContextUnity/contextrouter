@@ -336,13 +336,10 @@ class DispatcherService:
         if explicit:
             return explicit
         if token is not None and hasattr(token, "permissions") and token.permissions:
-            try:
-                from contextcore.permissions import extract_tool_names
+            from contextcore.permissions import extract_tool_names
 
-                names = extract_tool_names(token.permissions)
-                return sorted(names)  # deterministic ordering
-            except ImportError:
-                pass
+            names = extract_tool_names(token.permissions)
+            return sorted(names)  # deterministic ordering
         return []
 
     def reset(self) -> None:

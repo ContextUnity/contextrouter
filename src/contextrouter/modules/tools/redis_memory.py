@@ -13,7 +13,6 @@ from typing import Any
 from langchain_core.tools import tool
 
 from contextrouter.core import get_core_config
-from contextrouter.cortex.runtime_context import get_current_access_token
 from contextrouter.modules.providers.redis import RedisProvider
 
 logger = logging.getLogger(__name__)
@@ -149,20 +148,6 @@ async def retrieve_memory(
         Dict with value if found, or error if not found
     """
     try:
-        # Override tenant_id with authoritative value from access token
-        active_token = get_current_access_token()
-        if not active_token:
-            return {"success": False, "error": "No active access token found in runtime context."}
-
-        if not active_token.can_access_tenant(tenant_id):
-            if getattr(active_token, "allowed_tenants", ()):
-                tenant_id = active_token.allowed_tenants[0]
-            else:
-                return {
-                    "success": False,
-                    "error": f"Access denied: unauthorized for tenant '{tenant_id}'.",
-                }
-
         redis = get_redis_provider()
         memory_key = _make_memory_key(key, session_id, tenant_id)
 
@@ -213,20 +198,6 @@ async def cache_query_result(
         Dict with success status and cache key
     """
     try:
-        # Override tenant_id with authoritative value from access token
-        active_token = get_current_access_token()
-        if not active_token:
-            return {"success": False, "error": "No active access token found in runtime context."}
-
-        if not active_token.can_access_tenant(tenant_id):
-            if getattr(active_token, "allowed_tenants", ()):
-                tenant_id = active_token.allowed_tenants[0]
-            else:
-                return {
-                    "success": False,
-                    "error": f"Access denied: unauthorized for tenant '{tenant_id}'.",
-                }
-
         redis = get_redis_provider()
         cache_key = _make_query_cache_key(query, tenant_id)
 
@@ -267,20 +238,6 @@ async def get_cached_query(
         Dict with cached result if found, or not_found status
     """
     try:
-        # Override tenant_id with authoritative value from access token
-        active_token = get_current_access_token()
-        if not active_token:
-            return {"success": False, "error": "No active access token found in runtime context."}
-
-        if not active_token.can_access_tenant(tenant_id):
-            if getattr(active_token, "allowed_tenants", ()):
-                tenant_id = active_token.allowed_tenants[0]
-            else:
-                return {
-                    "success": False,
-                    "error": f"Access denied: unauthorized for tenant '{tenant_id}'.",
-                }
-
         redis = get_redis_provider()
         cache_key = _make_query_cache_key(query, tenant_id)
 
@@ -320,20 +277,6 @@ async def get_session_data(
         Dict with session data
     """
     try:
-        # Override tenant_id with authoritative value from access token
-        active_token = get_current_access_token()
-        if not active_token:
-            return {"success": False, "error": "No active access token found in runtime context."}
-
-        if not active_token.can_access_tenant(tenant_id):
-            if getattr(active_token, "allowed_tenants", ()):
-                tenant_id = active_token.allowed_tenants[0]
-            else:
-                return {
-                    "success": False,
-                    "error": f"Access denied: unauthorized for tenant '{tenant_id}'.",
-                }
-
         redis = get_redis_provider()
         session_key = _make_session_key(session_id, tenant_id)
 
@@ -382,20 +325,6 @@ async def clear_memory(
         Dict with success status
     """
     try:
-        # Override tenant_id with authoritative value from access token
-        active_token = get_current_access_token()
-        if not active_token:
-            return {"success": False, "error": "No active access token found in runtime context."}
-
-        if not active_token.can_access_tenant(tenant_id):
-            if getattr(active_token, "allowed_tenants", ()):
-                tenant_id = active_token.allowed_tenants[0]
-            else:
-                return {
-                    "success": False,
-                    "error": f"Access denied: unauthorized for tenant '{tenant_id}'.",
-                }
-
         redis = get_redis_provider()
 
         if key and session_id:
