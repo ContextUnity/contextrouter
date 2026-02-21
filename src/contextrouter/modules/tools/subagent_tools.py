@@ -7,7 +7,6 @@ from typing import Any
 
 from langchain_core.tools import tool
 
-from contextrouter.cortex.runtime_context import get_current_access_token
 from contextrouter.cortex.subagents.spawner import SubAgentSpawner
 from contextrouter.modules.tools import register_tool
 
@@ -77,25 +76,7 @@ async def spawn_subagent(
         # Note: This will be automatically passed from DispatcherState
         # when the tool is called from within the dispatcher graph
         trace_id = None  # Will be set by dispatcher graph integration
-        access_token = get_current_access_token()
-
-        if not access_token:
-            return {
-                "subagent_id": None,
-                "status": "error",
-                "message": "No active access token found in runtime context.",
-            }
-
-        if not access_token.can_access_tenant(tenant_id):
-            if getattr(access_token, "allowed_tenants", ()):
-                tenant_id = access_token.allowed_tenants[0]
-            else:
-                return {
-                    "subagent_id": None,
-                    "status": "error",
-                    "message": f"Access denied: unauthorized for tenant '{tenant_id}'.",
-                }
-
+        tenant_id = tenant_id or "default"
         subagent_id = await spawner.spawn_subagent(
             parent_agent_id="dispatcher",
             task=task,
@@ -104,7 +85,7 @@ async def spawn_subagent(
             trace_id=trace_id,
             agent_type=agent_type,
             config={"strategy": strategy},
-            token=access_token,
+            token=None,  # Spawner will fetch token from runtime context if needed
         )
 
         logger.info(

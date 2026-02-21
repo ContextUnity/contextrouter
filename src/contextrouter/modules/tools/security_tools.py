@@ -196,22 +196,7 @@ async def check_policy(
         - matched_policy: Name of the policy that matched (if any)
         - evaluation_ms: How long evaluation took
     """
-    from contextrouter.cortex.runtime_context import get_current_access_token
-
-    active_token = get_current_access_token()
-    if not active_token:
-        return {
-            "allowed": False,
-            "reason": "No active access token found in runtime context.",
-            "matched_policy": "",
-            "evaluation_ms": 0.0,
-        }
-
-    # Override tenant_id with authoritative value if available
-    tenant_id = active_token.allowed_tenants[0] if active_token.allowed_tenants else "default"
-    # Override permissions to what the token actually has
-    permissions = list(active_token.permissions)
-    token_id = active_token.token_id
+    tenant_id = tenant_id or "default"
 
     if _use_rpc():
         return _grpc_call(
@@ -359,14 +344,7 @@ async def audit_event(
     Returns:
         Confirmation message with event details.
     """
-    from contextrouter.cortex.runtime_context import get_current_access_token
-
-    active_token = get_current_access_token()
-    if not active_token:
-        return "Error: No active access token found in runtime context. Cannot record audit event."
-
-    # Override tenant_id with authoritative value if available
-    tenant_id = active_token.allowed_tenants[0] if active_token.allowed_tenants else "default"
+    tenant_id = tenant_id or "default"
 
     if _use_rpc():
         _grpc_call(

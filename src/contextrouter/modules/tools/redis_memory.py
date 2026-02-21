@@ -104,21 +104,7 @@ async def store_memory(
         Dict with success status and stored key
     """
     try:
-        # Override tenant_id with authoritative value from access token
-        # This prevents LLM prompt injection from spoofing tenant IDs
-        active_token = get_current_access_token()
-        if not active_token:
-            return {"success": False, "error": "No active access token found in runtime context."}
-
-        if not active_token.can_access_tenant(tenant_id):
-            if getattr(active_token, "allowed_tenants", ()):
-                tenant_id = active_token.allowed_tenants[0]
-            else:
-                return {
-                    "success": False,
-                    "error": f"Access denied: unauthorized for tenant '{tenant_id}'.",
-                }
-
+        tenant_id = tenant_id or "default"
         redis = get_redis_provider()
         memory_key = _make_memory_key(key, session_id, tenant_id)
 

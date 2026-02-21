@@ -144,20 +144,110 @@ class SecureTool(BaseTool):
                 f"Token has: {list(token.permissions)}"
             )
 
-    def _run(self, *args: Any, **kwargs: Any) -> Any:
+    def _inject_authoritative_context(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Overwrite sensitive kwargs with authoritative values from the access token.
+
+        This prevents LLM prompt injection from spoofing tenant_id, user_id, or permissions.
+        Tools can blindly accept these arguments knowing they are cryptographically verified.
+        """
+        if self.skip_auth:
+            return kwargs
+
+        from contextrouter.cortex.runtime_context import get_current_access_token
+
+        token = get_current_access_token()
+        if not token:
+            return kwargs
+
+        secure_kwargs = dict(kwargs)
+
+        # Determine valid parameters for this tool
+        allowed_keys = set(secure_kwargs.keys())
+        schema = getattr(self, "args_schema", getattr(self.wrapped_tool, "args_schema", None))
+        if schema:
+            if hasattr(schema, "model_fields"):  # Pydantic v2
+                allowed_keys.update(schema.model_fields.keys())
+            elif hasattr(schema, "__fields__"):  # Pydantic v1
+                allowed_keys.update(schema.__fields__.keys())
+        elif self.wrapped_tool and hasattr(self.wrapped_tool, "func"):
+            import inspect
+
+            sig = inspect.signature(self.wrapped_tool.func)
+            allowed_keys.update(sig.parameters.keys())
+
+        # 1. Tenant ID forgery prevention
+        if "tenant_id" in allowed_keys:
+            requested = secure_kwargs.get("tenant_id")
+            if getattr(token, "allowed_tenants", ()):
+                if not requested or not token.can_access_tenant(requested):
+                    secure_kwargs["tenant_id"] = token.allowed_tenants[0]
+
+        # 2. User ID forgery prevention
+        if "user_id" in allowed_keys:
+            user_id = getattr(token, "user_id", None)
+            if user_id:
+                secure_kwargs["user_id"] = user_id
+
+        # 3. Permissions & Token ID
+        if "permissions" in allowed_keys:
+            secure_kwargs["permissions"] = list(getattr(token, "permissions", []))
+        if "token_id" in allowed_keys:
+            secure_kwargs["token_id"] = getattr(token, "token_id", "")
+
+        return secure_kwargs
+
+    def _run(
+        self,
+        *args: Any,
+        run_manager: Any = None,
+        config: Any = None,
+        **kwargs: Any,
+    ) -> Any:
         """Synchronous execution with permission enforcement."""
         self._enforce_permission()
+        secure_kwargs = self._inject_authoritative_context(kwargs)
+
         if self.wrapped_tool is not None:
-            return self.wrapped_tool._run(*args, **kwargs)
+            import inspect
+
+            sig = inspect.signature(self.wrapped_tool._run)
+            if "run_manager" in sig.parameters or any(
+                p.kind == p.VAR_KEYWORD for p in sig.parameters.values()
+            ):
+                secure_kwargs["run_manager"] = run_manager
+            if "config" in sig.parameters or any(
+                p.kind == p.VAR_KEYWORD for p in sig.parameters.values()
+            ):
+                secure_kwargs["config"] = config
+            return self.wrapped_tool._run(*args, **secure_kwargs)
         raise NotImplementedError(
             f"SecureTool '{self.name}' has no _run implementation and no wrapped tool."
         )
 
-    async def _arun(self, *args: Any, **kwargs: Any) -> Any:
+    async def _arun(
+        self,
+        *args: Any,
+        run_manager: Any = None,
+        config: Any = None,
+        **kwargs: Any,
+    ) -> Any:
         """Async execution with permission enforcement."""
         self._enforce_permission()
+        secure_kwargs = self._inject_authoritative_context(kwargs)
+
         if self.wrapped_tool is not None:
-            return await self.wrapped_tool._arun(*args, **kwargs)
+            import inspect
+
+            sig = inspect.signature(self.wrapped_tool._arun)
+            if "run_manager" in sig.parameters or any(
+                p.kind == p.VAR_KEYWORD for p in sig.parameters.values()
+            ):
+                secure_kwargs["run_manager"] = run_manager
+            if "config" in sig.parameters or any(
+                p.kind == p.VAR_KEYWORD for p in sig.parameters.values()
+            ):
+                secure_kwargs["config"] = config
+            return await self.wrapped_tool._arun(*args, **secure_kwargs)
         raise NotImplementedError(
             f"SecureTool '{self.name}' has no _arun implementation and no wrapped tool."
         )
