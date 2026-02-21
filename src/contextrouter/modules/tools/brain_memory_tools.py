@@ -76,7 +76,10 @@ async def remember_episode(
         from contextrouter.cortex.runtime_context import get_current_access_token
 
         active_token = get_current_access_token()
-        if active_token and not active_token.can_access_tenant(tenant_id):
+        if not active_token:
+            return {"success": False, "error": "No active access token found in runtime context."}
+
+        if not active_token.can_access_tenant(tenant_id):
             if getattr(active_token, "allowed_tenants", ()):
                 tenant_id = active_token.allowed_tenants[0]
             else:
@@ -127,7 +130,10 @@ async def recall_episodes(
         from contextrouter.cortex.runtime_context import get_current_access_token
 
         active_token = get_current_access_token()
-        if active_token and not active_token.can_access_tenant(tenant_id):
+        if not active_token:
+            return {"success": False, "error": "No active access token found in runtime context."}
+
+        if not active_token.can_access_tenant(tenant_id):
             if getattr(active_token, "allowed_tenants", ()):
                 tenant_id = active_token.allowed_tenants[0]
             else:
@@ -193,7 +199,10 @@ async def learn_user_fact(
         from contextrouter.cortex.runtime_context import get_current_access_token
 
         active_token = get_current_access_token()
-        if active_token and not active_token.can_access_tenant(tenant_id):
+        if not active_token:
+            return {"success": False, "error": "No active access token found in runtime context."}
+
+        if not active_token.can_access_tenant(tenant_id):
             if getattr(active_token, "allowed_tenants", ()):
                 tenant_id = active_token.allowed_tenants[0]
             else:
@@ -244,7 +253,10 @@ async def recall_user_facts(
         from contextrouter.cortex.runtime_context import get_current_access_token
 
         active_token = get_current_access_token()
-        if active_token and not active_token.can_access_tenant(tenant_id):
+        if not active_token:
+            return {"success": False, "error": "No active access token found in runtime context."}
+
+        if not active_token.can_access_tenant(tenant_id):
             if getattr(active_token, "allowed_tenants", ()):
                 tenant_id = active_token.allowed_tenants[0]
             else:

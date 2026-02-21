@@ -48,7 +48,7 @@ async def gcs_upload(
     Returns:
         Dictionary with upload status and GCS URI.
     """
-    from contextcore import ContextToken, ContextUnit
+    from contextcore import ContextUnit
 
     from contextrouter.modules.providers.storage.gcs import GCSProvider
 
@@ -64,10 +64,11 @@ async def gcs_upload(
         return {"status": "error", "error": "No GCS bucket specified. Set GCS_DEFAULT_BUCKET env."}
 
     provider = GCSProvider(default_bucket=bucket)
-    token = ContextToken(
-        token_id="tool-gcs-upload",
-        permissions=("storage:write",),
-    )
+    from contextrouter.cortex.runtime_context import get_current_access_token
+
+    token = get_current_access_token()
+    if not token:
+        return {"status": "error", "error": "No active access token found in runtime context."}
 
     unit = ContextUnit(
         payload={
@@ -110,7 +111,6 @@ async def gcs_download(
     Returns:
         Dictionary with content and metadata, or error.
     """
-    from contextcore import ContextToken
 
     from contextrouter.modules.providers.storage.gcs import GCSProvider
 
@@ -126,10 +126,11 @@ async def gcs_download(
         return {"status": "error", "error": "No GCS bucket specified. Set GCS_DEFAULT_BUCKET env."}
 
     provider = GCSProvider(default_bucket=bucket)
-    token = ContextToken(
-        token_id="tool-gcs-download",
-        permissions=("storage:read",),
-    )
+    from contextrouter.cortex.runtime_context import get_current_access_token
+
+    token = get_current_access_token()
+    if not token:
+        return {"status": "error", "error": "No active access token found in runtime context."}
 
     try:
         results = await provider.read(path, token=token, filters={"bucket": bucket})
@@ -181,6 +182,18 @@ async def gcs_list(
         return {"status": "error", "error": "No GCS bucket specified. Set GCS_DEFAULT_BUCKET env."}
 
     try:
+        from contextrouter.cortex.runtime_context import get_current_access_token
+
+        token = get_current_access_token()
+        if not token:
+            return {"status": "error", "error": "No active access token found in runtime context."}
+
+        if not token.has_permission("storage:read"):
+            return {
+                "status": "error",
+                "error": f"Access denied: Token lacks 'storage:read' permission. Permissions: {token.permissions}",
+            }
+
         from google.cloud import storage  # type: ignore[import-not-found]
 
         client = storage.Client()
