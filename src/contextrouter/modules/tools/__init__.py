@@ -160,7 +160,17 @@ def register_tool(
 
     name = tool_instance.name
     if name in _tool_registry:
-        logger.info("Tool '%s' already registered, overwriting", name)
+        existing = _tool_registry[name]
+        existing_tenant = existing.bound_tenant or ""
+        new_tenant = tool_instance.bound_tenant or ""
+
+        if existing_tenant != new_tenant:
+            raise PermissionError(
+                f"Tool name collision: '{name}' is already registered "
+                f"by tenant '{existing_tenant or 'global'}'. Cannot overwrite from "
+                f"tenant '{new_tenant or 'global'}'."
+            )
+        logger.info("Tool '%s' already registered by same tenant, overwriting", name)
     _tool_registry[name] = tool_instance
     logger.debug("Registered tool: %s", name)
 

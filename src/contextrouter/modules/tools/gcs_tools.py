@@ -52,7 +52,14 @@ async def gcs_upload(
 
     from contextrouter.modules.providers.storage.gcs import GCSProvider
 
-    bucket = bucket or _get_default_bucket()
+    _default = _get_default_bucket()
+    if bucket and bucket != _default:
+        return {
+            "status": "error",
+            "error": f"Access denied: cannot upload to arbitrary bucket '{bucket}'.",
+        }
+    bucket = _default
+
     if not bucket:
         return {"status": "error", "error": "No GCS bucket specified. Set GCS_DEFAULT_BUCKET env."}
 
@@ -107,7 +114,14 @@ async def gcs_download(
 
     from contextrouter.modules.providers.storage.gcs import GCSProvider
 
-    bucket = bucket or _get_default_bucket()
+    _default = _get_default_bucket()
+    if bucket and bucket != _default:
+        return {
+            "status": "error",
+            "error": f"Access denied: cannot download from arbitrary bucket '{bucket}'.",
+        }
+    bucket = _default
+
     if not bucket:
         return {"status": "error", "error": "No GCS bucket specified. Set GCS_DEFAULT_BUCKET env."}
 
@@ -155,7 +169,14 @@ async def gcs_list(
     Returns:
         Dictionary with list of blob names and metadata.
     """
-    bucket = bucket or _get_default_bucket()
+    _default = _get_default_bucket()
+    if bucket and bucket != _default:
+        return {
+            "status": "error",
+            "error": f"Access denied: cannot list arbitrary bucket '{bucket}'.",
+        }
+    bucket = _default
+
     if not bucket:
         return {"status": "error", "error": "No GCS bucket specified. Set GCS_DEFAULT_BUCKET env."}
 

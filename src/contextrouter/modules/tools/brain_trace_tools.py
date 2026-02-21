@@ -49,6 +49,7 @@ def _get_brain_client():
                 Permissions.MEMORY_WRITE,
                 Permissions.MEMORY_READ,
             ),
+            allowed_tenants=["*"],
         )
         _brain_client = BrainClient(host=brain_host, mode="grpc", token=token)
     return _brain_client
@@ -117,6 +118,18 @@ async def log_execution_trace(
         Dict with trace_id and success status.
     """
     try:
+        from contextrouter.cortex.runtime_context import get_current_access_token
+
+        active_token = get_current_access_token()
+        if active_token and not active_token.can_access_tenant(tenant_id):
+            if getattr(active_token, "allowed_tenants", ()):
+                tenant_id = active_token.allowed_tenants[0]
+            else:
+                return {
+                    "success": False,
+                    "error": f"Access denied: unauthorized for tenant '{tenant_id}'.",
+                }
+
         brain = _get_brain_client()
 
         # ── Build rich metadata ──
@@ -256,6 +269,18 @@ async def record_execution_episode(
         Dict with episode_id and success status.
     """
     try:
+        from contextrouter.cortex.runtime_context import get_current_access_token
+
+        active_token = get_current_access_token()
+        if active_token and not active_token.can_access_tenant(tenant_id):
+            if getattr(active_token, "allowed_tenants", ()):
+                tenant_id = active_token.allowed_tenants[0]
+            else:
+                return {
+                    "success": False,
+                    "error": f"Access denied: unauthorized for tenant '{tenant_id}'.",
+                }
+
         brain = _get_brain_client()
 
         task_summary = (user_query[:500] + "...") if len(user_query) > 500 else user_query
