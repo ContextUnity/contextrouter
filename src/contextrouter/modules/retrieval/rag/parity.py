@@ -91,7 +91,8 @@ class DualReadHarness:
             elif isinstance(content, dict):
                 try:
                     docs.append(RetrievedDoc.model_validate(content))
-                except Exception:
+                except Exception as e:
+                    logger.debug("Failed to validate RetrievedDoc: %s", e)
                     continue
         elapsed_ms = (time.perf_counter() - t0) * 1000
         return docs, elapsed_ms

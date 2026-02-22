@@ -65,7 +65,7 @@ def _grpc_call(rpc_name: str, payload: dict) -> dict:
     """
     from contextcore import ContextUnit, context_unit_pb2
     from contextcore.token_utils import create_grpc_metadata_with_token
-    from contextcore.tokens import ContextToken
+    from contextcore.tokens import mint_service_token
 
     stub = _get_grpc_stub()
     if stub is None:
@@ -78,8 +78,8 @@ def _grpc_call(rpc_name: str, payload: dict) -> dict:
     req = unit.to_protobuf(context_unit_pb2)
 
     # Service-level token with Zero permissions
-    token = ContextToken(
-        token_id="router-zero-service",
+    token = mint_service_token(
+        "router-zero-service",
         permissions=("zero:anonymize", "zero:deanonymize"),
     )
     metadata = create_grpc_metadata_with_token(token)

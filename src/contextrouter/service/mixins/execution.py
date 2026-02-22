@@ -120,8 +120,8 @@ class ExecutionMixin:
         if not metadata.get("system_prompt") and project_config.get("planner_prompt"):
             metadata["system_prompt"] = project_config["planner_prompt"]
         # Ensure trace node sees tenant/agent from top-level params
-        metadata.setdefault("tenant_id", tenant_id)
-        metadata.setdefault("agent_id", params.agent_id or "")
+        metadata["tenant_id"] = tenant_id
+        metadata["agent_id"] = params.agent_id or ""
         execution_input["metadata"] = metadata
 
         effective_user_id = getattr(token, "user_id", None) if token else None
@@ -268,8 +268,8 @@ class ExecutionMixin:
         if not metadata.get("system_prompt") and project_config.get("planner_prompt"):
             metadata["system_prompt"] = project_config["planner_prompt"]
         # Ensure trace node sees tenant/agent from top-level params
-        metadata.setdefault("tenant_id", tenant_id)
-        metadata.setdefault("agent_id", params.agent_id or "")
+        metadata["tenant_id"] = tenant_id
+        metadata["agent_id"] = params.agent_id or ""
         execution_input["metadata"] = metadata
 
         effective_user_id = getattr(token, "user_id", None) if token else None

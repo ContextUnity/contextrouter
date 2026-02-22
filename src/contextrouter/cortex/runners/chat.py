@@ -156,11 +156,14 @@ async def _mint_access_token(
     else:
         effective_perms = default_perms
 
+    tenant_id = user_ctx.get("tenant_id") if user_ctx else None
     builder = TokenBuilder(enabled=True, private_key_path=core_cfg.security.private_key_path)
     token = builder.mint_root(
         user_ctx=user_ctx or {},
         permissions=effective_perms,
         ttl_s=300.0,
+        user_id=user_ctx.get("user_id") if user_ctx else None,
+        allowed_tenants=[tenant_id] if tenant_id else None,
     )
     logger.debug(
         "Minted access_token token_id=%s perms=%s",

@@ -6,7 +6,7 @@ Uses BrainClient SDK for all persistent memory operations.
 import logging
 from typing import Any, Dict, Optional
 
-from contextcore.sdk import BrainClient
+from contextcore.sdk import SmartBrainClient
 
 from .config import Config
 
@@ -21,11 +21,12 @@ class MemoryManager:
 
     def __init__(self, config: Config):
         self.config = config
-        brain_host = getattr(config.providers, "brain_host", "localhost:50051")
 
         from contextrouter.core.brain_token import get_brain_service_token
 
-        self.brain = BrainClient(host=brain_host, token=get_brain_service_token())
+        # Use the first tenant defined for the router, or None (shared mode)
+        tenant_id = config.router.tenants[0] if getattr(config.router, "tenants", None) else None
+        self.brain = SmartBrainClient(tenant_id=tenant_id, token=get_brain_service_token())
 
     async def compile_context(
         self,

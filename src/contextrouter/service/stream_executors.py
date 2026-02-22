@@ -138,6 +138,8 @@ class StreamExecutorManager:
             if token:
                 caller_tenant = (getattr(token, "allowed_tenants", None) or ("",))[0]
                 caller_user = getattr(token, "user_id", "") or ""
+        except ImportError:
+            raise PermissionError("contextcore module unavailable (fail-closed)")
         except Exception:
             pass  # Best-effort extraction
 

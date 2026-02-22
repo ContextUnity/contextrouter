@@ -22,21 +22,20 @@ def _get_brain_client():
     global _brain_client
     if _brain_client is None:
         from contextcore.permissions import Permissions
-        from contextcore.sdk import BrainClient
-        from contextcore.tokens import ContextToken
+        from contextcore.sdk import SmartBrainClient
+        from contextcore.tokens import mint_service_token
 
         from contextrouter.core import get_core_config
 
         brain_host = get_core_config().brain.grpc_endpoint
-        token = ContextToken(
-            token_id="router-memory-service",
+        token = mint_service_token(
+            "router-memory-service",
             permissions=(
                 Permissions.MEMORY_WRITE,
                 Permissions.MEMORY_READ,
             ),
-            allowed_tenants=["*"],
         )
-        _brain_client = BrainClient(host=brain_host, mode="grpc", token=token)
+        _brain_client = SmartBrainClient(tenant_id=None, host=brain_host, token=token)
     return _brain_client
 
 

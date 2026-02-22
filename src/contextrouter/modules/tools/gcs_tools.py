@@ -64,11 +64,9 @@ async def gcs_upload(
         return {"status": "error", "error": "No GCS bucket specified. Set GCS_DEFAULT_BUCKET env."}
 
     provider = GCSProvider(default_bucket=bucket)
-    from contextrouter.cortex.runtime_context import get_current_access_token
 
-    token = get_current_access_token()
-    if not token:
-        return {"status": "error", "error": "No active access token found in runtime context."}
+    # Token enforcement is handled by SecureTool wrapper (register_tool).
+    # No manual get_current_access_token() here — Secure by Default.
 
     unit = ContextUnit(
         payload={
@@ -81,7 +79,7 @@ async def gcs_upload(
     )
 
     try:
-        await provider.write(unit, token=token)
+        await provider.write(unit)
         gcs_uri = f"gs://{bucket}/{path}"
         return {
             "status": "uploaded",
@@ -126,14 +124,12 @@ async def gcs_download(
         return {"status": "error", "error": "No GCS bucket specified. Set GCS_DEFAULT_BUCKET env."}
 
     provider = GCSProvider(default_bucket=bucket)
-    from contextrouter.cortex.runtime_context import get_current_access_token
 
-    token = get_current_access_token()
-    if not token:
-        return {"status": "error", "error": "No active access token found in runtime context."}
+    # Token enforcement is handled by SecureTool wrapper (register_tool).
+    # No manual get_current_access_token() here — Secure by Default.
 
     try:
-        results = await provider.read(path, token=token, filters={"bucket": bucket})
+        results = await provider.read(path, filters={"bucket": bucket})
         if not results:
             return {"status": "not_found", "path": path, "bucket": bucket}
 
@@ -182,13 +178,10 @@ async def gcs_list(
         return {"status": "error", "error": "No GCS bucket specified. Set GCS_DEFAULT_BUCKET env."}
 
     try:
-        from contextrouter.cortex.runtime_context import get_current_access_token
-
-        token = get_current_access_token()
-        if not token:
-            return {"status": "error", "error": "No active access token found in runtime context."}
-
         from google.cloud import storage  # type: ignore[import-not-found]
+
+        # Token enforcement is handled by SecureTool wrapper (register_tool).
+        # No manual get_current_access_token() here — Secure by Default.
 
         client = storage.Client()
         bucket_obj = client.bucket(bucket)
