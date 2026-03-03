@@ -27,6 +27,7 @@ from .models import (
 from .providers import (
     AnthropicConfig,
     GoogleCSEConfig,
+    InceptionConfig,
     LangfuseConfig,
     LocalOpenAIConfig,
     OpenAIConfig,
@@ -64,6 +65,7 @@ __all__ = [
     "OpenAIConfig",
     "AnthropicConfig",
     "OpenRouterConfig",
+    "InceptionConfig",
     "LocalOpenAIConfig",
     "GoogleCSEConfig",
     "LangfuseConfig",

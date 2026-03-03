@@ -178,7 +178,12 @@ class Registry:
 
 
 # Initialize graph registry after Registry class is defined
-graph_registry = Registry(name="graphs", builtin_map={})
+graph_registry = Registry(
+    name="graphs",
+    builtin_map={
+        "commerce": "contextrouter.cortex.graphs.commerce.graph:build_commerce_graph",
+    },
+)
 
 # ---- Component Registration (Dynamic Registries) ----
 

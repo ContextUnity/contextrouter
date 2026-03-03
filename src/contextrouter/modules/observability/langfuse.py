@@ -1,30 +1,104 @@
-"""Langfuse telemetry for LangGraph/LangChain."""
+"""Langfuse telemetry for LangGraph/LangChain.
+
+Per-project isolation via request-level credentials
+----------------------------------------------------
+Each request can carry its own Langfuse settings in the execution metadata:
+
+    metadata = {
+        "langfuse_enabled": True,           # False → skip tracing entirely
+        "langfuse_project_id": "proj-xxx",  # Project ID for dashboard URL
+        "langfuse_secret_key": "sk-...",    # optional; falls back to router global
+        "langfuse_public_key": "pk-...",    # optional; falls back to router global
+        "langfuse_host": "https://...",     # optional; falls back to router global
+    }
+
+These are passed from the project's client code (e.g. RouterClient.execute_agent)
+via the request payload.  The router reads them before creating any traces.
+
+Client cache
+------------
+Langfuse clients are cached by (host, public_key) so a per-project client is
+created once and reused for subsequent requests from the same project.
+"""
 
 from __future__ import annotations
 
 import importlib.util
 import logging
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Generator
 
 from contextrouter.core import get_core_config
 
 logger = logging.getLogger(__name__)
 
-_initialized = False
 _warned_missing_langfuse = False
+_global_initialized = False
+_global_client: object | None = None
+
+# Cache: (host, public_key) → Langfuse client | None
+_client_cache: dict[tuple[str, str], object | None] = {}
 
 
-def _enabled() -> bool:
-    cfg = get_core_config()
-    enabled_by_keys = bool(cfg.langfuse.public_key and cfg.langfuse.secret_key)
-    if not enabled_by_keys:
-        return False
+# ---------------------------------------------------------------------------
+# Per-request Langfuse context — passed down from request metadata
+# ---------------------------------------------------------------------------
 
-    # Langfuse is an optional dependency (installed via `contextrouter[observability]`).
-    # If users set keys but didn't install the extra, degrade gracefully.
+
+@dataclass
+class LangfuseRequestCtx:
+    """Langfuse settings extracted from request metadata.
+
+    This is the clean alternative to env-var-per-tenant hacks.
+    The project provides these values in the request payload metadata.
+    """
+
+    enabled: bool = False
+    secret_key: str = ""  # project-specific; falls back to global if empty
+    public_key: str = ""  # project-specific; falls back to global if empty
+    project_id: str = ""  # project-specific; falls back to global if empty
+    host: str = ""  # project-specific; falls back to global if empty
+
+    @classmethod
+    def from_metadata(cls, metadata: dict | None) -> "LangfuseRequestCtx":
+        """Extract Langfuse settings from request execution metadata."""
+        if not metadata:
+            return cls()
+        enabled_raw = metadata.get("langfuse_enabled", True)
+        if isinstance(enabled_raw, str):
+            enabled = enabled_raw.lower() not in ("0", "false", "no", "off")
+        else:
+            enabled = bool(enabled_raw)
+        return cls(
+            enabled=enabled,
+            secret_key=metadata.get("langfuse_secret_key", "") or "",
+            public_key=metadata.get("langfuse_public_key", "") or "",
+            project_id=metadata.get("langfuse_project_id", "") or "",
+            host=metadata.get("langfuse_host", "") or "",
+        )
+
+    def effective_secret_key(self) -> str:
+        return self.secret_key or get_core_config().langfuse.secret_key
+
+    def effective_public_key(self) -> str:
+        return self.public_key or get_core_config().langfuse.public_key
+
+    def effective_host(self) -> str:
+        return self.host or get_core_config().langfuse.host
+
+    def effective_project_id(self) -> str:
+        return self.project_id or get_core_config().langfuse.project_id
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _langfuse_available() -> bool:
+    global _warned_missing_langfuse
     if importlib.util.find_spec("langfuse") is None:
-        global _warned_missing_langfuse
         if not _warned_missing_langfuse:
             _warned_missing_langfuse = True
             logger.warning(
@@ -32,46 +106,119 @@ def _enabled() -> bool:
                 "Install with `pip install contextrouter[observability]` to enable tracing."
             )
         return False
-
     return True
 
 
-def _get_environment() -> str:
-    return get_core_config().langfuse.environment
+def _enabled(ctx: LangfuseRequestCtx | None = None) -> bool:
+    """Return True if tracing is enabled for this request context."""
+    if ctx is not None and not ctx.enabled:
+        return False
+    if ctx is not None:
+        has_creds = bool(ctx.effective_secret_key() and ctx.effective_public_key())
+    else:
+        cfg = get_core_config()
+        has_creds = bool(cfg.langfuse.secret_key and cfg.langfuse.public_key)
+    if not has_creds:
+        return False
+    return _langfuse_available()
 
 
-def _get_service_name() -> str:
-    return get_core_config().langfuse.service_name
+def _ensure_threading_instrumented() -> None:
+    try:
+        from opentelemetry.instrumentation.threading import (  # type: ignore[import-not-found]
+            ThreadingInstrumentor,
+        )
+
+        ThreadingInstrumentor().instrument()
+        logger.debug("ThreadingInstrumentor enabled for context propagation")
+    except ImportError:
+        logger.debug("opentelemetry-instrumentation-threading not available")
+    except Exception as e:
+        logger.warning("Failed to instrument threading for tracing: %s", e)
 
 
-def _ensure_initialized() -> None:
-    global _initialized
-    if _initialized or not _enabled():
-        return
+def _get_or_create_client(ctx: LangfuseRequestCtx | None) -> object | None:
+    """Return the Langfuse client for the given request context.
+
+    Uses the global client when the project doesn't supply its own credentials.
+    Caches per (host, public_key) pair.
+    """
+    global _global_initialized, _global_client
+
+    if ctx is None:
+        _ctx = LangfuseRequestCtx()
+    else:
+        _ctx = ctx
+
+    secret_key = _ctx.effective_secret_key()
+    public_key = _ctx.effective_public_key()
+    host = _ctx.effective_host()
+
+    if not secret_key or not public_key:
+        return None
+    if not _langfuse_available():
+        return None
+
+    cache_key = (host, public_key)
+
+    if cache_key in _client_cache:
+        return _client_cache[cache_key]
+
+    # Check if this is the global client (same creds as router config)
+    cfg = get_core_config()
+    is_global = (
+        secret_key == cfg.langfuse.secret_key
+        and public_key == cfg.langfuse.public_key
+        and host == cfg.langfuse.host
+    )
+
+    if is_global and _global_initialized:
+        _client_cache[cache_key] = _global_client
+        return _global_client
+
+    # Need to instrument threading exactly once
+    if not _global_initialized:
+        import os
+
+        service_name = cfg.langfuse.service_name
+        if service_name and not os.environ.get("OTEL_SERVICE_NAME"):
+            os.environ["OTEL_SERVICE_NAME"] = service_name
+        _ensure_threading_instrumented()
 
     try:
-        try:
-            from opentelemetry.instrumentation.threading import (  # type: ignore[import-not-found]
-                ThreadingInstrumentor,
-            )
+        from langfuse import Langfuse  # type: ignore[import-not-found]
 
-            ThreadingInstrumentor().instrument()
-            logger.debug("ThreadingInstrumentor enabled for context propagation")
-        except ImportError:
-            logger.debug("opentelemetry-instrumentation-threading not available")
-        except Exception as e:
-            logger.warning("Failed to instrument threading for tracing: %s", e)
-
-        from langfuse import get_client  # type: ignore[import-not-found]
-
-        lf = get_client()
+        lf = Langfuse(secret_key=secret_key, public_key=public_key, host=host)
         if not lf.auth_check():
-            logger.warning("Langfuse auth_check failed; traces may not be exported")
+            logger.warning(
+                "Langfuse auth_check failed for public_key=%s; traces may not export",
+                public_key[:12] + "...",
+            )
         else:
-            logger.info("Langfuse initialized successfully")
-        _initialized = True
+            logger.info("Langfuse client ready (host=%s pk=%s...)", host, public_key[:12])
+
+        _client_cache[cache_key] = lf
+
+        if is_global:
+            _global_client = lf
+            _global_initialized = True
+
+        return lf
     except Exception:
-        logger.exception("Langfuse initialization failed")
+        logger.exception("Langfuse client initialization failed")
+        _client_cache[cache_key] = None
+        if is_global:
+            _global_initialized = True
+        return None
+
+
+def _log_error_cleanly(context: str, exc: Exception) -> None:
+    logger.error("%s failed: %s: %s", context, type(exc).__name__, exc)
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 
 def get_langfuse_callbacks(
@@ -80,35 +227,34 @@ def get_langfuse_callbacks(
     user_id: str | None = None,
     platform: str | None = None,
     tags: list[str] | None = None,
+    langfuse_ctx: LangfuseRequestCtx | None = None,
 ) -> list[object]:
-    if not _enabled():
+    """Return LangChain callback handlers for Langfuse tracing.
+
+    Pass ``langfuse_ctx`` built from the request metadata to apply
+    project-specific settings (enabled flag, credentials, project_id).
+    """
+    if not _enabled(langfuse_ctx):
         return []
 
     _ = session_id, user_id, platform, tags
     try:
-        _ensure_initialized()
-        try:
-            from langfuse.langchain import (  # type: ignore[import-not-found]
-                CallbackHandler,  # type: ignore[import-not-found]
-            )
-        except ModuleNotFoundError as exc:
-            logger.info(
-                "Langfuse callback handler disabled (optional dependency missing): %s",
-                exc,
-            )
+        lf = _get_or_create_client(langfuse_ctx)
+        if lf is None:
             return []
-
-        handler = CallbackHandler()
+        try:
+            from langfuse.langchain import CallbackHandler  # type: ignore[import-not-found]
+        except ModuleNotFoundError as exc:
+            logger.info("Langfuse callback handler disabled (optional dependency missing): %s", exc)
+            return []
+        try:
+            handler = CallbackHandler(client=lf)
+        except TypeError:
+            handler = CallbackHandler()
         return [handler]
     except Exception:
         logger.exception("Failed to create Langfuse callback handler")
         return []
-
-
-def _log_error_cleanly(context: str, exc: Exception) -> None:
-    error_type = type(exc).__name__
-    error_msg = str(exc)
-    logger.error("%s failed: %s: %s", context, error_type, error_msg)
 
 
 def get_current_trace_context() -> dict[str, str] | None:
@@ -142,27 +288,26 @@ def trace_context(
     tenant_id: str | None = None,
     agent_id: str | None = None,
     graph_name: str | None = None,
+    langfuse_ctx: LangfuseRequestCtx | None = None,
 ) -> Generator[object | None, None, None]:
-    if not _enabled():
+    if not _enabled(langfuse_ctx):
+        yield None
+        return
+
+    lf = _get_or_create_client(langfuse_ctx)
+    if lf is None:
         yield None
         return
 
     try:
-        _ensure_initialized()
-        from langfuse import get_client, propagate_attributes  # type: ignore[import-not-found]
-
-        lf = get_client()
+        from langfuse import propagate_attributes  # type: ignore[import-not-found]
     except Exception as e:
         _log_error_cleanly("trace_context initialization", e)
         yield None
         return
 
-    # Prepare OTel context for Langfuse if trace_id is provided
-    # Langfuse uses OTel context to link observations.
     context = None
     if trace_id:
-        # Langfuse/OTel trace_id MUST be 32-char hex.
-        # If we got a UUID with dashes, strip them.
         hex_id = trace_id.replace("-", "")
         if len(hex_id) == 32:
             context = {"trace_id": hex_id}
@@ -171,13 +316,11 @@ def trace_context(
         else:
             logger.warning("Invalid trace_id for Langfuse (must be 32 hex chars): %s", trace_id)
 
-    environment = _get_environment()
-    service_name = _get_service_name()
-    _ = service_name
+    cfg = get_core_config()
+    environment = cfg.langfuse.environment
 
-    # Build tags: tenant, agent, graph (filterable in Langfuse UI)
     if trace_tags is None:
-        tags = []
+        tags: list[str] = []
         if tenant_id:
             tags.append(f"tenant:{tenant_id}")
         if agent_id:
@@ -191,7 +334,7 @@ def trace_context(
 
     span_initialized = False
     try:
-        with lf.start_as_current_observation(
+        with lf.start_as_current_observation(  # type: ignore[union-attr]
             as_type="span", name=name, trace_context=context
         ) as span:
             span_initialized = True
@@ -229,7 +372,6 @@ def trace_context(
     except GeneratorExit:
         raise
     except Exception as e:
-        # If we failed before yielding, degrade gracefully.
         if not span_initialized:
             _log_error_cleanly(f"trace_context({name}) initialization", e)
             yield None
@@ -238,33 +380,30 @@ def trace_context(
 
 @contextmanager
 def retrieval_span(
-    *, name: str, input_data: dict[str, object] | None = None
+    *,
+    name: str,
+    input_data: dict[str, object] | None = None,
+    langfuse_ctx: LangfuseRequestCtx | None = None,
 ) -> Generator[dict[str, object], None, None]:
-    """Create a Langfuse span for a retrieval-like operation.
-
-    Callers may mutate the yielded dict (commonly `ctx["output"] = {...}`).
-    """
-    # Callers may set:
-    # - ctx["output"]: JSON-serializable span output
-    # - ctx["metadata"]: JSON-serializable span metadata
+    """Create a Langfuse span for a retrieval-like operation."""
     ctx: dict[str, object] = {"output": None, "metadata": None}
-    if not _enabled():
+    if not _enabled(langfuse_ctx):
+        yield ctx
+        return
+
+    lf = _get_or_create_client(langfuse_ctx)
+    if lf is None:
         yield ctx
         return
 
     span_initialized = False
     try:
-        _ensure_initialized()
-        from langfuse import get_client  # type: ignore[import-not-found]
-
-        lf = get_client()
-        with lf.start_as_current_observation(as_type="span", name=name) as span:
+        with lf.start_as_current_observation(as_type="span", name=name) as span:  # type: ignore[union-attr]
             span_initialized = True
             try:
                 span.update(input=input_data or {})  # type: ignore[attr-defined]
             except Exception as e:
                 logger.debug("Failed to update span with input data: %s", e)
-
             try:
                 yield ctx
             except GeneratorExit:
@@ -272,7 +411,6 @@ def retrieval_span(
             except Exception as e:
                 _log_error_cleanly(f"retrieval_span({name})", e)
                 raise
-
             try:
                 span.update(output=ctx.get("output"))  # type: ignore[attr-defined]
             except Exception as e:
@@ -291,48 +429,46 @@ def retrieval_span(
         raise
 
 
-def flush() -> None:
+def flush(langfuse_ctx: LangfuseRequestCtx | None = None) -> None:
     """Flush pending Langfuse events."""
-    if not _enabled():
+    if not _enabled(langfuse_ctx):
+        return
+    lf = _get_or_create_client(langfuse_ctx)
+    if lf is None:
         return
     try:
-        from langfuse import get_client  # type: ignore[import-not-found]
-
-        get_client().flush()
+        lf.flush()  # type: ignore[union-attr]
     except Exception:
         logger.exception("Langfuse flush failed")
 
 
 def get_langfuse_trace_id() -> str:
-    """Extract the current Langfuse/OTel trace ID (32 hex chars).
-
-    Call this inside a ``trace_context()`` block to get the active trace ID.
-    Returns empty string if no active trace or Langfuse is disabled.
-    """
+    """Extract the current Langfuse/OTel trace ID (32 hex chars)."""
     ctx = get_current_trace_context()
     if ctx:
         return ctx.get("trace_id", "")
     return ""
 
 
-def get_langfuse_trace_url() -> str:
-    """Build a direct Langfuse dashboard URL for the current active trace.
-
-    Call inside a ``trace_context()`` block.  Returns empty string if
-    Langfuse is disabled or no active trace exists.
-    """
+def get_langfuse_trace_url(langfuse_ctx: LangfuseRequestCtx | None = None) -> str:
+    """Build a direct Langfuse dashboard URL for the current active trace."""
     trace_id = get_langfuse_trace_id()
     if not trace_id:
         return ""
-    cfg = get_core_config()
-    host = cfg.langfuse.host.rstrip("/")
-    project_id = cfg.langfuse.project_id
+    if langfuse_ctx:
+        host = langfuse_ctx.effective_host().rstrip("/")
+        project_id = langfuse_ctx.effective_project_id()
+    else:
+        cfg = get_core_config()
+        host = cfg.langfuse.host.rstrip("/")
+        project_id = cfg.langfuse.project_id
     if project_id:
         return f"{host}/project/{project_id}/traces?peek={trace_id}"
     return f"{host}/traces?peek={trace_id}"
 
 
 __all__ = [
+    "LangfuseRequestCtx",
     "get_langfuse_callbacks",
     "trace_context",
     "retrieval_span",

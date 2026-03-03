@@ -9,7 +9,7 @@ Violations:
 2. Hardcoded provider checks like `config.openai.api_key` (provider-agnostic)
 """
 
-import subprocess
+import subprocess  # nosec B404 — used for rg/grep architecture checks, not user input
 import sys
 from pathlib import Path
 
@@ -62,7 +62,7 @@ def run_grep(pattern: str, path: str, exclude: list[str]) -> list[str]:
     cmd = ["rg", "--no-heading", "--line-number", "--color=never", pattern, path]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # nosec B603 B607
         if result.returncode == 0:
             lines = result.stdout.strip().split("\n")
             # Filter out excluded files
@@ -80,7 +80,7 @@ def run_grep(pattern: str, path: str, exclude: list[str]) -> list[str]:
     except FileNotFoundError:
         # ripgrep not available, try grep
         cmd = ["grep", "-rn", "-E", pattern, path]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # nosec B603 B607
         if result.returncode == 0:
             return result.stdout.strip().split("\n")
         return []

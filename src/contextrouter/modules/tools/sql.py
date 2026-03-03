@@ -191,6 +191,11 @@ def execute_sql(sql: str, *, config: SQLToolConfig) -> dict[str, Any]:
         logger.warning("SQL execution failed: %s | SQL: %.100s…", e, clean_sql)
         return {"error": f"SQL execution error: {e}"}
 
+    # Propagate error from db_executor (e.g. stream returned {"error": "..."})
+    if isinstance(data, dict) and data.get("error"):
+        logger.warning("SQL execution error: %s | SQL: %.100s…", data["error"], clean_sql)
+        return {"error": data["error"]}
+
     elapsed = (time.monotonic() - start) * 1000
 
     return {

@@ -21,9 +21,7 @@ async def agent_node(state: DispatcherState) -> dict[str, Any]:
     if not state.get("_start_ts"):
         updates["_start_ts"] = time.monotonic()
 
-    meta = state.get("metadata") or {}
-    model_key = meta.get("model_key")
-    llm = model_registry.get_llm_with_fallback(key=model_key)
+    llm = model_registry.get_llm_with_fallback()
 
     # Self-healing trigger
     if state.get("error_detected") and not state.get("healing_triggered"):
@@ -75,7 +73,7 @@ async def agent_node(state: DispatcherState) -> dict[str, Any]:
 
     from langchain_core.messages import SystemMessage
 
-    system_prompt = meta.get("system_prompt") or SYSTEM_PROMPT
+    system_prompt = (state.get("meta") or {}).get("system_prompt") or SYSTEM_PROMPT
     full_messages = [SystemMessage(content=system_prompt)] + list(state["messages"])
 
     response = await llm_with_tools.ainvoke(full_messages)

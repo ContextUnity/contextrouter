@@ -57,6 +57,8 @@ BUILTIN_LLMS: dict[str, str] = {
     # Anthropic is provider-wildcarded like OpenAI/OpenRouter: any model name becomes `model_name`.
     "anthropic/*": "contextrouter.modules.models.llm.anthropic.AnthropicLLM",
     "groq/*": "contextrouter.modules.models.llm.groq.GroqLLM",
+    # Inception Labs: Mercury-2 diffusion LLM (OpenAI-compatible)
+    "inception/*": "contextrouter.modules.models.llm.inception.InceptionLLM",
     "runpod/*": "contextrouter.modules.models.llm.runpod.RunPodLLM",
     "hf-hub/*": "contextrouter.modules.models.llm.hf_hub.HuggingFaceHubLLM",
     # HuggingFace transformers: allow `hf/<model_id>`.
@@ -236,6 +238,7 @@ class ModelRegistry:
         fallback_keys: list[str] | None = None,
         strategy: ModelSelectionStrategy = "fallback",
         config: Config | None = None,
+        **kwargs: object,
     ) -> BaseModel:
         """Get a model with fallback support.
 
@@ -252,12 +255,14 @@ class ModelRegistry:
             ModelCapabilityError: If no model supports required modalities
         """
         cfg = config or get_core_config()
+        primary_key = key or cfg.models.default_llm
 
         # Build candidate list: primary + fallbacks
-        primary_key = key or cfg.models.default_llm
         candidate_keys = [primary_key]
         if fallback_keys:
             candidate_keys.extend(fallback_keys)
+        elif cfg.models.allow_global_fallback and cfg.models.fallback_llms:
+            candidate_keys.extend(cfg.models.fallback_llms)
 
         # Remove duplicates while preserving order
         seen = set()
@@ -274,6 +279,7 @@ class ModelRegistry:
             candidate_keys=unique_keys,
             strategy=strategy,
             config=cfg,
+            **kwargs,
         )
 
 
@@ -286,11 +292,13 @@ class FallbackModel(BaseModel):
         candidate_keys: list[str],
         strategy: ModelSelectionStrategy,
         config: Config,
+        **kwargs: object,
     ) -> None:
         self._registry = registry
         self._candidate_keys = candidate_keys
         self._strategy = strategy
         self._config = config
+        self._kwargs = kwargs
         self._candidates: list[tuple[str, BaseModel]] | None = None
 
     @property
@@ -303,9 +311,36 @@ class FallbackModel(BaseModel):
         """Lazy initialization of candidate models."""
         if self._candidates is None:
             self._candidates = []
+
+            tenant_id = self._kwargs.get("tenant_id")
+            if not tenant_id:
+                try:
+                    from contextrouter.cortex.runtime_context import get_current_access_token
+
+                    ctx_token = get_current_access_token()
+                    if ctx_token and getattr(ctx_token, "allowed_tenants", ()):
+                        tenant_id = ctx_token.allowed_tenants[0]
+                except Exception:
+                    pass
+
             for key in self._candidate_keys:
                 try:
-                    model = self._registry.create_llm(key, config=self._config)
+                    model_kwargs = dict(self._kwargs)
+                    model_kwargs.pop("api_key_shield_path", None)  # ignore old hardcoded paths
+
+                    if tenant_id:
+                        provider = key.split("/")[0] if "/" in key else key
+                        shield_path = f"{tenant_id}/api_keys/{provider}"
+                        try:
+                            from contextrouter.service.shield_client import shield_get_secret
+
+                            secret_val = shield_get_secret(shield_path, tenant_id=tenant_id)
+                            if secret_val:
+                                model_kwargs["api_key"] = secret_val
+                        except Exception as e:
+                            logger.warning("Failed to fetch API key from shield for %s: %s", key, e)
+
+                    model = self._registry.create_llm(key, config=self._config, **model_kwargs)
                     self._candidates.append((key, model))
                 except Exception as e:
                     logger.warning("Failed to initialize model %s: %s", key, e)
@@ -363,7 +398,11 @@ class FallbackModel(BaseModel):
 
         for key, model in candidates:
             try:
-                logger.debug("Trying model %s for generation", key)
+                if key == candidates[0][0]:
+                    logger.info("Executing Primary Model: %s", key)
+                else:
+                    logger.warning("Executing Fallback Model: %s", key)
+
                 response = await model.generate(request, token=token)
                 if response.usage:
                     logger.debug(

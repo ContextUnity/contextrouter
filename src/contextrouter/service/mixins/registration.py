@@ -163,11 +163,14 @@ class RegistrationMixin:
             graph_name or "none",
         )
 
+        from contextrouter.service.shield_client import _get_shield_url
+
         response_payload = {
             "registered_tools": registered_tools,
             "graph": graph_name,
             "status": "ok",
             "stream_secret": stream_secret,
+            "shield_url": _get_shield_url(),
         }
 
         return make_response(

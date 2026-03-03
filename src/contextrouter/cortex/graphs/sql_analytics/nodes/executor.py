@@ -9,9 +9,7 @@ from decimal import Decimal
 from langchain_core.tools import BaseTool
 
 from contextrouter.cortex.graphs.sql_analytics.helpers import (
-    StepTimer,
     is_debug,
-    step,
     validate_sql_syntax,
 )
 from contextrouter.cortex.graphs.sql_analytics.state import SqlAnalyticsState
@@ -25,6 +23,9 @@ def make_execute_node(*, sql_tool: BaseTool | None, tool_names: list[str]):
     Args:
         sql_tool: Resolved SQL tool instance.
         tool_names: Original tool binding names (for error messages).
+
+    Tracing: sql_tool.ainvoke() fires LangChain on_tool_start/end callbacks,
+    so BrainAutoTracer captures it automatically — no manual _steps needed.
     """
 
     async def execute_node(state: SqlAnalyticsState):
@@ -33,7 +34,6 @@ def make_execute_node(*, sql_tool: BaseTool | None, tool_names: list[str]):
             return {
                 "error": "No SQL tool configured",
                 "sql_result": {},
-                "_steps": [step("execute_sql", status="error", reason="no_tool")],
             }
 
         sql = state.get("sql")
@@ -42,7 +42,6 @@ def make_execute_node(*, sql_tool: BaseTool | None, tool_names: list[str]):
             return {
                 "error": "No SQL to execute",
                 "sql_result": {},
-                "_steps": [step("execute_sql", status="error", reason="no_sql")],
             }
 
         # Pre-validate SQL for common syntax errors
@@ -51,24 +50,14 @@ def make_execute_node(*, sql_tool: BaseTool | None, tool_names: list[str]):
             logger.warning("execute_node: pre-validation failed: %s", syntax_err)
             return {
                 "error": f"SQL syntax error: {syntax_err}",
-                "_steps": [
-                    step(
-                        "execute_sql",
-                        status="error",
-                        reason="syntax",
-                        request={"sql": sql[:500]},
-                    )
-                ],
             }
 
         logger.info("execute_node: running SQL tool '%s'", sql_tool.name)
         if is_debug():
             logger.debug("execute_node: sql=%s", sql[:500])
 
-        timer = StepTimer()
         try:
-            with timer:
-                res = await sql_tool.ainvoke(sql)
+            res = await sql_tool.ainvoke(sql)
             logger.debug("execute_node: tool returned type=%s", type(res).__name__)
 
             if isinstance(res, str):
@@ -82,51 +71,18 @@ def make_execute_node(*, sql_tool: BaseTool | None, tool_names: list[str]):
 
             if res.get("error"):
                 logger.warning("execute_node: tool error: %s", res["error"])
-                return {
-                    "error": res["error"],
-                    "_steps": [
-                        step(
-                            "execute_sql",
-                            status="error",
-                            timer=timer,
-                            request={"sql": sql[:500]},
-                            result={"error": str(res["error"])[:500]},
-                        )
-                    ],
-                }
+                return {"error": res["error"]}
 
             row_count = len(res.get("rows", []))
             logger.info("execute_node: success, %d rows returned", row_count)
             return {
                 "sql_result": _sanitize(res),
                 "error": "",
-                "_steps": [
-                    step(
-                        "execute_sql",
-                        timer=timer,
-                        request={"sql": sql[:500]},
-                        result={
-                            "row_count": row_count,
-                            "columns": res.get("columns", []),
-                        },
-                        row_count=row_count,
-                    )
-                ],
             }
 
         except Exception as e:
             logger.error("execute_node: exception: %s", e)
-            return {
-                "error": str(e),
-                "_steps": [
-                    step(
-                        "execute_sql",
-                        status="error",
-                        timer=timer,
-                        request={"sql": sql[:500]},
-                    )
-                ],
-            }
+            return {"error": str(e)}
 
     return execute_node
 

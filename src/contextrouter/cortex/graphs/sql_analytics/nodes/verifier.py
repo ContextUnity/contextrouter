@@ -9,13 +9,11 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 
 from contextrouter.cortex.graphs.sql_analytics.helpers import (
-    StepTimer,
     acc_tokens,
     extract_json,
     invoke_model,
-    step,
 )
-from contextrouter.cortex.graphs.sql_analytics.pii import pii_anonymize, pii_deanonymize
+from contextrouter.cortex.graphs.sql_analytics.pii import PiiSession
 from contextrouter.cortex.graphs.sql_analytics.state import SqlAnalyticsState
 from contextrouter.modules.models import model_registry
 
@@ -26,6 +24,7 @@ def make_verifier_node(
     *,
     verifier_prompt: str | None,
     default_model_key: str | None,
+    fallback_keys: list[str] | None = None,
     pii_masking: bool = False,
     anonymize_tool: BaseTool | None = None,
     deanonymize_tool: BaseTool | None = None,
@@ -33,16 +32,19 @@ def make_verifier_node(
     """Create the verifier node closure.
 
     Atomic PII: anonymize prompt → LLM → deanonymize output.
+
+    Tracing: All tool/LLM calls go through LangChain and are captured
+    automatically by BrainAutoTracer callbacks — no manual _steps needed.
     """
 
     async def verifier_node(state: SqlAnalyticsState):
         if not verifier_prompt:
-            return {"validation": {"valid": True}, "_steps": [step("verifier", status="skipped")]}
+            return {"validation": {"valid": True}}
 
         sql = state.get("sql")
         sql_result = state.get("sql_result") or {}
         if not sql or not sql_result:
-            return {"validation": {"valid": True}, "_steps": [step("verifier", status="skipped")]}
+            return {"validation": {"valid": True}}
 
         user_q = ""
         for m in reversed(state["messages"]):
@@ -65,56 +67,43 @@ def make_verifier_node(
             f"Всього рядків: {row_count}"
         )
 
-        # ── Anonymize → LLM → Deanonymize ──
         metadata = state.get("metadata") or {}
         session_id = metadata.get("session_id", "")
 
-        if pii_masking:
-            prompt = await pii_anonymize(prompt, tool=anonymize_tool, session_id=session_id)
+        async with PiiSession(
+            sub_steps=[],  # unused — callbacks handle tracing
+            session_id=session_id,
+            anonymize_tool=anonymize_tool if pii_masking else None,
+            deanonymize_tool=deanonymize_tool if pii_masking else None,
+        ) as pii:
+            prompt = await pii.hide(prompt)
 
-        messages = [SystemMessage(content=verifier_prompt), HumanMessage(content=prompt)]
+            messages = [SystemMessage(content=verifier_prompt), HumanMessage(content=prompt)]
 
-        model_key = metadata.get("model_key") or default_model_key
-        llm = model_registry.get_llm_with_fallback(key=model_key)
+            llm = model_registry.get_llm_with_fallback(
+                default_model_key, fallback_keys=fallback_keys
+            )
 
-        timer = StepTimer()
-        try:
-            with timer:
+            try:
                 response, usage = await invoke_model(llm, messages)
+                content = response.content
+                content = await pii.reveal(content)
 
-            content = response.content
-            if pii_masking:
-                content = await pii_deanonymize(
-                    content, tool=deanonymize_tool, session_id=session_id
-                )
+                data = extract_json(content)
+                issues = data.get("issues", [])
+                logger.info("verifier_node: valid=%s, issues=%d", data.get("valid"), len(issues))
+                if issues and not data.get("valid", True):
+                    logger.warning("verifier_node: issues=%s", issues[:3])
 
-            data = extract_json(content)
-            issues = data.get("issues", [])
-            logger.info("verifier_node: valid=%s, issues=%d", data.get("valid"), len(issues))
-            if issues and not data.get("valid", True):
-                logger.warning("verifier_node: issues=%s", issues[:3])
-            return {
-                "validation": data,
-                "_token_usage": acc_tokens(state, usage),
-                "_steps": [
-                    step(
-                        "verifier",
-                        timer=timer,
-                        request={"sql": sql[:500], "question": user_q[:500]},
-                        result={"valid": data.get("valid"), "issues": issues[:5]},
-                        valid=data.get("valid"),
-                        issues=len(issues),
-                    )
-                ],
-            }
-        except Exception as e:
-            logger.warning("Verifier failed (treating as valid): %s", e)
-            return {
-                "validation": {"valid": True, "warning": str(e)},
-                "_steps": [
-                    step("verifier", status="error", timer=timer, request={"sql": sql[:500]}),
-                ],
-            }
+                return {
+                    "validation": data,
+                    "_token_usage": acc_tokens(state, usage),
+                }
+            except Exception as e:
+                logger.warning("Verifier failed (treating as valid): %s", e)
+                return {
+                    "validation": {"valid": True, "warning": str(e)},
+                }
 
     return verifier_node
 

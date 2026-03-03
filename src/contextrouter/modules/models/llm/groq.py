@@ -6,6 +6,7 @@ It is OpenAI-compatible at the HTTP level.
 
 from __future__ import annotations
 
+import logging
 from typing import AsyncIterator
 
 from contextrouter.core import Config
@@ -23,10 +24,9 @@ from ..types import (
     ProviderInfo,
     TextDeltaEvent,
 )
-from ._openai_compat import (
-    build_openai_messages,
-    generate_asr_openai_compat,
-)
+from ._openai_compat import build_native_openai_messages, generate_asr_openai_compat
+
+logger = logging.getLogger(__name__)
 
 
 @model_registry.register_llm("groq", "*")
@@ -38,17 +38,21 @@ class GroqLLM(BaseModel):
 
     def __init__(self, config: Config, *, model_name: str | None = None, **kwargs: object) -> None:
         try:
-            from langchain_openai import ChatOpenAI
-        except Exception as e:  # pragma: no cover
-            raise ImportError("GroqLLM requires `contextrouter[models-openai]`.") from e
+            from langfuse.openai import AsyncOpenAI
+        except ImportError:
+            try:
+                from openai import AsyncOpenAI
+            except ImportError as e:
+                raise ImportError(
+                    "GroqLLM requires `openai` package. Install with `pip install openai`."
+                ) from e
 
         self._cfg = config
         self._model_name = (model_name or "").strip() or "llama-3.3-70b-versatile"
         self._base_url = (config.groq.base_url or "").strip() or "https://api.groq.com/openai/v1"
 
-        self._model = ChatOpenAI(
-            model=self._model_name,
-            api_key=(config.groq.api_key or None),
+        self._client = AsyncOpenAI(
+            api_key=(config.groq.api_key or "skip"),
             base_url=self._base_url,
             max_retries=config.llm.max_retries,
             **kwargs,
@@ -75,17 +79,23 @@ class GroqLLM(BaseModel):
                 whisper_model="whisper-large-v3",
             )
 
-        messages = build_openai_messages(request)
-        model = self._model.bind(
-            temperature=request.temperature,
-            max_tokens=request.max_output_tokens,
-            timeout=request.timeout_sec,
-        )
-        msg = await model.ainvoke(messages)
-        text = getattr(msg, "content", "")
+        messages = build_native_openai_messages(request)
+        kwargs = {
+            "model": self._model_name,
+            "messages": messages,
+            "timeout": request.timeout_sec,
+        }
+        if request.temperature is not None:
+            kwargs["temperature"] = request.temperature
+        if request.max_output_tokens is not None:
+            kwargs["max_tokens"] = request.max_output_tokens
+
+        response = await self._client.chat.completions.create(**kwargs)
+        choice = response.choices[0]
+        text = str(choice.message.content or "")
 
         return ModelResponse(
-            text=str(text or ""),
+            text=text,
             raw_provider=ProviderInfo(
                 provider="groq",
                 model_name=self._model_name,
@@ -97,19 +107,26 @@ class GroqLLM(BaseModel):
         self, request: ModelRequest, *, token: ContextToken | None = None
     ) -> AsyncIterator[ModelStreamEvent]:
         _ = token
-        messages = build_openai_messages(request)
-        model = self._model.bind(
-            temperature=request.temperature,
-            max_tokens=request.max_output_tokens,
-            timeout=request.timeout_sec,
-        )
+        messages = build_native_openai_messages(request)
+        kwargs = {
+            "model": self._model_name,
+            "messages": messages,
+            "timeout": request.timeout_sec,
+            "stream": True,
+        }
+        if request.temperature is not None:
+            kwargs["temperature"] = request.temperature
+        if request.max_output_tokens is not None:
+            kwargs["max_tokens"] = request.max_output_tokens
 
         full = ""
-        async for chunk in model.astream(messages):
-            delta = getattr(chunk, "content", None)
-            if isinstance(delta, str) and delta:
-                full += delta
-                yield TextDeltaEvent(delta=delta)
+        stream = await self._client.chat.completions.create(**kwargs)
+        async for chunk in stream:
+            if chunk.choices and len(chunk.choices) > 0:
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    full += delta
+                    yield TextDeltaEvent(delta=delta)
         yield FinalTextEvent(text=full)
 
 

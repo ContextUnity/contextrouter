@@ -134,6 +134,59 @@ class UsageStats(BaseModel):
     output_cost: float | None = None
     total_cost: float | None = None
 
+    # ── Cost estimation per 1M tokens: (input_usd, output_usd) ──
+    # Source: https://pricepertoken.com  |  API: https://www.llm-prices.com/current-v1.json
+    # Last verified: 2026-02-23
+    # Only models actually configured in our providers (see modules/models/llm/).
+    _PRICE_TABLE: dict[str, tuple[float, float]] = {
+        # OpenAI  (openai.py default: gpt-5.1)
+        "gpt-5.1": (1.25, 10.0),
+        "gpt-5.1-mini": (0.25, 2.0),
+        "gpt-5.1-nano": (0.05, 0.40),
+        "gpt-5-mini": (0.25, 2.0),  # RLM default
+        "gpt-5-nano": (0.05, 0.40),
+        # Anthropic  (anthropic.py default: claude-sonnet-4.5)
+        "claude-sonnet-4-20250514": (3.0, 15.0),
+        "claude-sonnet-4.5": (3.0, 15.0),
+        "claude-sonnet-4.6": (3.0, 15.0),
+        "claude-3-5-haiku": (0.80, 4.0),
+        # Google Vertex  (vertex.py default: gemini-2.5-flash)
+        "gemini-2.5-flash": (0.30, 2.50),
+        "gemini-2.5-flash-lite": (0.10, 0.40),
+        "gemini-2.5-pro": (1.25, 10.0),
+        # Groq  (groq.py default: llama-3.3-70b-versatile)
+        "llama-3.3-70b-versatile": (0.59, 0.79),
+        # Mercury 2
+        "mercury-2": (0.25, 0.75),
+    }
+
+    def estimate_cost(self, model_name: str) -> "UsageStats":
+        """Fill in cost fields from token counts and model price table.
+
+        Mutates self and returns self for chaining:
+            usage = UsageStats(input_tokens=100, ...).estimate_cost("gpt-4o")
+        """
+        if self.total_cost is not None:
+            return self  # Already set by provider
+
+        # Fuzzy match: try exact, then prefix match
+        prices = self._PRICE_TABLE.get(model_name)
+        if not prices:
+            for key, val in self._PRICE_TABLE.items():
+                if model_name.startswith(key) or key.startswith(model_name):
+                    prices = val
+                    break
+        if not prices:
+            return self
+
+        in_price, out_price = prices
+        inp = self.input_tokens or 0
+        out = self.output_tokens or 0
+        self.input_cost = round(inp * in_price / 1_000_000, 8)
+        self.output_cost = round(out * out_price / 1_000_000, 8)
+        self.total_cost = round(self.input_cost + self.output_cost, 8)
+        return self
+
 
 class ProviderInfo(BaseModel):
     """Normalized provider information."""

@@ -59,6 +59,7 @@ class ModelsConfig(BaseModel):
     # Fallback LLM chain - used when default_llm fails (e.g., quota exceeded)
     # Set via CONTEXTROUTER_FALLBACK_LLMS="anthropic/claude-sonnet-4,google/gemini-2.5-flash"
     fallback_llms: list[str] = Field(default_factory=list)
+    allow_global_fallback: bool = False
 
     # Canonical per-component configuration:
     rag: RagModelsConfig = Field(default_factory=RagModelsConfig)

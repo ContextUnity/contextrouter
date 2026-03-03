@@ -43,12 +43,15 @@ def make_response(
     elif parent_unit:
         provenance = list(parent_unit.provenance) + provenance
 
-    unit = ContextUnit(
-        payload=payload,
-        trace_id=trace_id or uuid.uuid4(),
-        provenance=provenance,
-        security=security,
-    )
+    kwargs: dict[str, Any] = {
+        "payload": payload,
+        "trace_id": trace_id or uuid.uuid4(),
+        "provenance": provenance,
+    }
+    if security is not None:
+        kwargs["security"] = security
+
+    unit = ContextUnit(**kwargs)
     return unit.to_protobuf(context_unit_pb2)
 
 

@@ -45,8 +45,10 @@ def create_tool_from_config(
     """
     if tool_type == "sql":
         return _create_sql_tools(name, description, config)
+    elif tool_type in ("bidi", "commerce"):
+        return _create_bidi_tool(name, description, config)
     else:
-        raise ValueError(f"Unknown tool type: {tool_type}. Supported: sql")
+        raise ValueError(f"Unknown tool type: {tool_type}. Supported: sql, bidi")
 
 
 def _create_sql_tools(
@@ -155,6 +157,77 @@ def _create_sql_tools(
         statement_timeout_ms,
     )
     return tools
+
+
+def _create_bidi_tool(
+    name: str,
+    description: str,
+    config: dict[str, Any],
+) -> list[BaseTool]:
+    """Create a BiDi tool that delegates execution via ToolExecutorStream.
+
+    The tool runs entirely in the project's process. Router only forwards
+    the call and returns the result.
+
+    Config keys:
+        project_id: Project ID for stream routing
+    """
+    project_id = config.get("project_id", config.get("tenant_id", ""))
+
+    _main_loop: "Any" = None
+    try:
+        import asyncio as _asyncio
+
+        _main_loop = _asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+
+    def bidi_executor(**kwargs: Any) -> dict[str, Any]:
+        """Execute tool via BiDi stream in the project's process."""
+        nonlocal _main_loop
+        from contextrouter.service.stream_executors import get_stream_executor_manager
+
+        manager = get_stream_executor_manager()
+
+        if not manager.is_available(project_id, name):
+            return {
+                "error": (
+                    f"No stream executor for project '{project_id}', tool '{name}'. "
+                    f"Project must open ToolExecutorStream."
+                )
+            }
+
+        import asyncio
+
+        if _main_loop is None:
+            try:
+                _main_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+
+        if _main_loop is not None and _main_loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(
+                manager.execute(project_id, name, kwargs),
+                _main_loop,
+            )
+            return future.result(timeout=120)
+        else:
+            return asyncio.run(manager.execute(project_id, name, kwargs))
+
+    from langchain_core.tools import StructuredTool
+
+    tool = StructuredTool.from_function(
+        func=bidi_executor,
+        name=name,
+        description=description or f"BiDi tool: {name}",
+    )
+
+    logger.info(
+        "Created BiDi tool '%s' (project=%s)",
+        name,
+        project_id,
+    )
+    return [tool]
 
 
 __all__ = ["create_tool_from_config"]

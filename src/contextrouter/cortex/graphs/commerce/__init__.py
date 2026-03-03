@@ -16,7 +16,7 @@ from .chat import ChatState, create_chat_subgraph, invoke_chat
 from .gardener import GardenerState, create_gardener_subgraph
 from .graph import build_commerce_graph
 from .lexicon import create_lexicon_subgraph
-from .matcher import MatcherState, MatchingNode, create_matcher_subgraph
+from .matcher import MatcherState, create_matcher_subgraph, create_rlm_bulk_matcher_subgraph
 from .state import CommerceState
 
 __all__ = [
@@ -34,6 +34,6 @@ __all__ = [
     "create_lexicon_subgraph",
     # Matcher
     "create_matcher_subgraph",
+    "create_rlm_bulk_matcher_subgraph",
     "MatcherState",
-    "MatchingNode",
 ]

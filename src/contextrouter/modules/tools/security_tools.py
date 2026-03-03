@@ -59,6 +59,8 @@ def _grpc_call(rpc_name: str, payload: dict) -> dict:
     """Make a gRPC call to ShieldService and return response payload."""
     from contextcore import ContextUnit, context_unit_pb2
 
+    from contextrouter.service.shield_client import _shield_metadata
+
     stub = _get_grpc_stub()
     if stub is None:
         raise RuntimeError("CONTEXTSHIELD_GRPC_HOST not configured")
@@ -69,8 +71,10 @@ def _grpc_call(rpc_name: str, payload: dict) -> dict:
     )
     req = unit.to_protobuf(context_unit_pb2)
 
+    metadata = _shield_metadata()
+
     rpc = getattr(stub, rpc_name)
-    resp = rpc(req)
+    resp = rpc(req, metadata=metadata)
 
     resp_unit = ContextUnit.from_protobuf(resp)
     return resp_unit.payload or {}
@@ -78,9 +82,7 @@ def _grpc_call(rpc_name: str, payload: dict) -> dict:
 
 def _use_rpc() -> bool:
     """Whether to use gRPC mode (remote Shield service)."""
-    from contextrouter.core import get_core_config
-
-    return bool(get_core_config().router.contextshield_grpc_host)
+    return _get_grpc_stub() is not None
 
 
 # ============================================================================

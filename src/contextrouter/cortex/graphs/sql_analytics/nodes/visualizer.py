@@ -24,13 +24,14 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 
 from contextrouter.cortex.graphs.sql_analytics.helpers import (
-    StepTimer,
     acc_tokens,
     extract_json,
     invoke_model,
-    step,
 )
-from contextrouter.cortex.graphs.sql_analytics.pii import pii_anonymize, pii_deanonymize
+from contextrouter.cortex.graphs.sql_analytics.pii import (
+    PiiSession,
+    pii_deanonymize,
+)
 from contextrouter.cortex.graphs.sql_analytics.state import SqlAnalyticsState
 from contextrouter.modules.models import model_registry
 
@@ -71,6 +72,7 @@ def make_visualizer_node(
     visualizer_prompt: str | None,
     visualizer_sub_prompts: dict[str, str] | None = None,
     default_model_key: str | None,
+    fallback_keys: list[str] | None = None,
     pii_masking: bool = False,
     anonymize_tool: BaseTool | None = None,
     deanonymize_tool: BaseTool | None = None,
@@ -109,7 +111,6 @@ def make_visualizer_node(
             col_objs = [{"key": c, "label": c} for c in columns] if columns else []
             return {
                 "components": [{"type": "table", "columns": col_objs, "rows": rows[:200]}],
-                "_steps": [step("visualizer", status="skipped", reason="no_prompt")],
             }
 
         metadata = state.get("metadata") or {}
@@ -132,96 +133,56 @@ def make_visualizer_node(
 
         data_context = _build_data_context(user_q, columns, rows, data_rows, data_note, summary)
 
-        # ── PII anonymize shared context ──
         session_id = metadata.get("session_id", "")
-        sub_steps: list[dict] = []
-        if pii_masking:
-            anon_timer = StepTimer()
-            ctx_before = data_context[:200]
-            with anon_timer:
-                data_context = await pii_anonymize(
-                    data_context,
-                    tool=anonymize_tool,
-                    session_id=session_id,
-                )
-            sub_steps.append(
-                step(
-                    "pii_anonymize",
-                    timer=anon_timer,
-                    request={"context_preview": ctx_before},
-                    result={"masked_preview": data_context[:200]},
-                )
+
+        async with PiiSession(
+            sub_steps=[],  # unused — callbacks handle tracing
+            session_id=session_id,
+            anonymize_tool=anonymize_tool if pii_masking else None,
+            deanonymize_tool=deanonymize_tool if pii_masking else None,
+        ) as pii:
+            data_context = await pii.hide(data_context)
+
+            llm = model_registry.get_llm_with_fallback(
+                default_model_key, fallback_keys=fallback_keys
             )
 
-        model_key = metadata.get("model_key") or default_model_key
-        llm = model_registry.get_llm_with_fallback(key=model_key)
-
-        timer = StepTimer()
-        try:
-            if use_parallel:
-                comps, usage, sub_steps = await _parallel_path(
-                    llm,
-                    visualizer_sub_prompts,
-                    data_context,
-                    rows,
-                    columns,
-                    timer,
-                    sub_steps,
-                    model_key,
-                )
-            else:
-                comps, usage, sub_steps = await _single_path(
-                    llm,
-                    visualizer_prompt,
-                    data_context,
-                    rows,
-                    user_q,
-                    timer,
-                    sub_steps,
-                    model_key,
-                )
-
-            # ── PII deanonymize after generation ──
-            if pii_masking and comps:
-                deanon_timer = StepTimer()
-                count_before = len(comps)
-                with deanon_timer:
-                    comps = await _deanonymize_components(
-                        comps,
-                        deanonymize_tool,
-                        session_id,
+            try:
+                if use_parallel:
+                    comps, usage = await _parallel_path(
+                        llm,
+                        visualizer_sub_prompts,
+                        data_context,
+                        rows,
+                        columns,
                     )
-                sub_steps.append(
-                    step(
-                        "pii_deanonymize",
-                        timer=deanon_timer,
-                        request={"components_count": count_before},
-                        result={"components_count": len(comps)},
+                else:
+                    comps, usage = await _single_path(
+                        llm,
+                        visualizer_prompt,
+                        data_context,
+                        rows,
                     )
-                )
 
-            return {
-                "components": comps,
-                "messages": [
-                    AIMessage(
-                        content=json.dumps({"components": comps}, ensure_ascii=False, default=str)[
-                            :2000
-                        ]
-                    )
-                ],
-                "_token_usage": acc_tokens(state, usage),
-                "_steps": sub_steps,
-            }
-        except Exception as e:
-            logger.error("Visualizer failed: %s", e)
-            sub_steps.append(
-                step("visualizer", status="error", timer=timer if "timer" in dir() else None)
-            )
-            col_objs = [{"key": c, "label": c} for c in columns] if columns else []
-            return {
-                "components": [{"type": "table", "columns": col_objs, "rows": rows[:200]}],
-                "_steps": sub_steps,
-            }
+                comps = await pii.reveal(comps)
+
+                return {
+                    "components": comps,
+                    "messages": [
+                        AIMessage(
+                            content=json.dumps(
+                                {"components": comps}, ensure_ascii=False, default=str
+                            )[:2000]
+                        )
+                    ],
+                    "_token_usage": acc_tokens(state, usage),
+                }
+            except Exception as e:
+                logger.error("Visualizer failed: %s", e)
+                col_objs = [{"key": c, "label": c} for c in columns] if columns else []
+                return {
+                    "components": [{"type": "table", "columns": col_objs, "rows": rows[:200]}],
+                }
 
     return visualizer_node
 
@@ -234,16 +195,10 @@ async def _single_path(
     prompt: str,
     data_context: str,
     rows: list,
-    user_q: str,
-    timer: StepTimer,
-    sub_steps: list[dict],
-    model_key: str | None,
-) -> tuple[list[dict], dict, list[dict]]:
+) -> tuple[list[dict], dict]:
     """Single LLM call path."""
     messages = [SystemMessage(content=prompt), HumanMessage(content=data_context)]
-
-    with timer:
-        response, usage = await invoke_model(llm, messages)
+    response, usage = await invoke_model(llm, messages)
 
     data = extract_json(response.content)
     comps = data.get("components", []) if data else []
@@ -253,17 +208,7 @@ async def _single_path(
         if isinstance(comp, dict) and comp.get("type") == "table" and rows:
             comp["rows"] = rows[:200]
 
-    comp_types = [c.get("type") for c in comps if isinstance(c, dict)][:5]
-    sub_steps.append(
-        step(
-            "visualizer",
-            timer=timer,
-            request={"question": user_q[:500], "row_count": len(rows)},
-            result={"components": comp_types, "count": len(comps)},
-            components=len(comps),
-        )
-    )
-    return comps, usage, sub_steps
+    return comps, usage
 
 
 async def _parallel_path(
@@ -272,10 +217,7 @@ async def _parallel_path(
     data_context: str,
     rows: list,
     columns: list,
-    timer: StepTimer,
-    sub_steps: list[dict],
-    model_key: str | None,
-) -> tuple[list[dict], dict, list[dict]]:
+) -> tuple[list[dict], dict]:
     """Parallel LLM calls path — runs report/table/chart concurrently."""
     # Determine which sub-calls to run
     tasks: dict[str, str] = {"report": sub_prompts["report"]}
@@ -284,40 +226,11 @@ async def _parallel_path(
     if _needs_chart(rows, columns) and "chart" in sub_prompts:
         tasks["chart"] = sub_prompts["chart"]
 
-    with timer:
-        results = await _run_parallel_calls(llm, tasks, data_context)
-
-    # Record sub-steps for each parallel LLM call
-    for call_name, (comps, usage) in results.items():
-        sub_steps.append(
-            step(
-                f"llm_{call_name}",
-                timer=timer,  # shares wall-clock (parallel)
-                request={"prompt": call_name, "model": str(model_key)},
-                result={
-                    "components": len(comps),
-                    "types": [c.get("type") for c in comps if isinstance(c, dict)][:5],
-                },
-                tokens=usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
-                cost_usd=usage.get("total_cost", 0),
-            )
-        )
+    results = await _run_parallel_calls(llm, tasks, data_context)
 
     # Merge components in order and accumulate usage
     all_components, total_usage = _merge_results(results, rows)
-
-    merge_step = step(
-        "component_merge",
-        timer=timer,
-        request={"parallel_calls": list(tasks.keys())},
-        result={
-            "total_components": len(all_components),
-            "sub_calls": {k: len(v[0]) for k, v in results.items()},
-        },
-    )
-    sub_steps.append(merge_step)
-
-    return all_components, total_usage, sub_steps
+    return all_components, total_usage
 
 
 # ── Internal helpers ────────────────────────────────────────────────

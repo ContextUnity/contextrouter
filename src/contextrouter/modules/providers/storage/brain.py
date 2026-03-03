@@ -26,7 +26,6 @@ class BrainProvider(BaseProvider, IRead):
     def __init__(self, **kwargs: Any) -> None:
         cfg = get_core_config()
         self.mode = cfg.brain.mode
-        self.endpoint = cfg.brain.grpc_endpoint
 
         if self.mode == "local":
             logger.info("Initializing BrainProvider in LOCAL mode")
@@ -35,6 +34,15 @@ class BrainProvider(BaseProvider, IRead):
             self.service = BrainService()
             self._stub = None
         else:
+            self.endpoint = cfg.brain.grpc_endpoint
+
+            if self.endpoint and self.endpoint.startswith("postgres"):
+                raise ValueError(
+                    f"Invalid Brain gRPC endpoint: expected a host:port for gRPC, but got a database URL "
+                    f"('{self.endpoint}'). Check CONTEXT_BRAIN_URL or BRAIN_GRPC_ENDPOINT in your environment "
+                    "or setup discovery via Redis."
+                )
+
             logger.info("Initializing BrainProvider in GRPC mode (endpoint: %s)", self.endpoint)
             self.service = None
             from contextcore.grpc_utils import create_channel

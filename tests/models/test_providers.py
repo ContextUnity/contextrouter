@@ -192,42 +192,46 @@ class TestOpenAILLM:
     @pytest.mark.anyio
     async def test_generate(self, mock_config):
         """Test generate."""
-        with patch("langchain_openai.ChatOpenAI") as mock_chat:
-            mock_model = MagicMock()
-            mock_message = MagicMock()
-            mock_message.content = "OpenAI response"
+        from unittest.mock import AsyncMock
 
-            async def _mock_ainvoke(*args, **kwargs):
-                return mock_message
+        model = OpenAILLM(mock_config)
 
-            mock_model.bind.return_value.ainvoke = _mock_ainvoke
-            mock_chat.return_value = mock_model
+        mock_choice = MagicMock()
+        mock_choice.message.content = "OpenAI response"
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
 
-            model = OpenAILLM(mock_config)
-            request = ModelRequest(parts=[TextPart(text="test")])
-            response = await model.generate(request)
-            assert response.text == "OpenAI response"
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+        model._openai_client = mock_client
+
+        request = ModelRequest(parts=[TextPart(text="test")])
+        response = await model.generate(request)
+        assert response.text == "OpenAI response"
 
     @pytest.mark.anyio
     async def test_stream(self, mock_config):
         """Test stream."""
-        with patch("langchain_openai.ChatOpenAI") as mock_chat:
-            mock_model = MagicMock()
-            mock_chunk = MagicMock()
-            mock_chunk.content = "chunk"
+        from unittest.mock import AsyncMock
 
-            async def _mock_astream(*args, **kwargs):
-                yield mock_chunk
+        model = OpenAILLM(mock_config)
 
-            mock_model.bind.return_value.astream = _mock_astream
-            mock_chat.return_value = mock_model
+        mock_chunk = MagicMock()
+        mock_chunk.choices = [MagicMock()]
+        mock_chunk.choices[0].delta.content = "chunk"
 
-            model = OpenAILLM(mock_config)
-            request = ModelRequest(parts=[TextPart(text="test")])
-            events = []
-            async for event in model.stream(request):
-                events.append(event)
-            assert len(events) >= 1
+        async def _mock_iter():
+            yield mock_chunk
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(return_value=_mock_iter())
+        model._openai_client = mock_client
+
+        request = ModelRequest(parts=[TextPart(text="test")])
+        events = []
+        async for event in model.stream(request):
+            events.append(event)
+        assert len(events) >= 1
 
 
 class TestHuggingFaceLLM:

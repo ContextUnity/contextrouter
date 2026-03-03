@@ -73,6 +73,10 @@ class TestModelRegistry:
         config.llm.temperature = 0.7
         config.llm.max_output_tokens = 1024
         config.llm.timeout_sec = 60
+        config.models = MagicMock()
+        config.models.default_llm = "good/model"
+        config.models.allow_global_fallback = False
+        config.models.fallback_llms = []
         return config
 
     def test_register_and_create_llm(self, registry, mock_config):

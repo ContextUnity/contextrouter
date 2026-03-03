@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .langfuse import (
+    LangfuseRequestCtx,
     flush,
     get_current_trace_context,
     get_langfuse_callbacks,
@@ -13,6 +14,7 @@ from .langfuse import (
 )
 
 __all__ = [
+    "LangfuseRequestCtx",
     "get_langfuse_callbacks",
     "trace_context",
     "retrieval_span",

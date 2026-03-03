@@ -14,7 +14,68 @@ if TYPE_CHECKING:
     from ..types import ModelRequest, ModelResponse
 
 
-def build_openai_messages(request: "ModelRequest") -> list[object]:
+def build_native_openai_messages(
+    request: "ModelRequest", is_reasoning_model: bool = False
+) -> list[dict[str, object]]:
+    """Build native OpenAI API compatible messages with multimodal support.
+
+    This handles native `dict` message building for direct SDK/HTTP use,
+    replacing the legacy LangChain-based `build_openai_messages`.
+
+    Handles:
+    - System/Developer messages (based on model reasoning family)
+    - Text-only content (simple string)
+    - Multimodal content with images (content array format)
+
+    Args:
+        request: The model request containing parts and system prompt.
+        is_reasoning_model: If True, uses 'developer' role instead of 'system'.
+
+    Returns:
+        List of dict message objects ready for OpenAI SDK context arrays.
+    """
+    from ..types import ImagePart, TextPart
+
+    messages: list[dict[str, object]] = []
+
+    if request.system:
+        role = "developer" if is_reasoning_model else "system"
+        messages.append({"role": role, "content": request.system})
+
+    has_images = any(isinstance(p, ImagePart) for p in request.parts)
+
+    if has_images:
+        content: list[dict[str, object]] = []
+        for part in request.parts:
+            if isinstance(part, TextPart):
+                content.append({"type": "text", "text": part.text})
+            elif isinstance(part, ImagePart):
+                if part.uri:
+                    content.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": part.uri},
+                        }
+                    )
+                elif part.data_b64:
+                    data_url = f"data:{part.mime or 'image/jpeg'};base64,{part.data_b64}"
+                    content.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": data_url},
+                        }
+                    )
+        messages.append({"role": "user", "content": content})
+    else:
+        # Fallback to pure string processing if no images
+        messages.append({"role": "user", "content": request.to_text_prompt()})
+
+    return messages
+
+
+def build_openai_messages(
+    request: "ModelRequest", is_reasoning_model: bool = False
+) -> list[object]:
     """Build OpenAI-compatible messages with multimodal support.
 
     This handles:
@@ -33,15 +94,22 @@ def build_openai_messages(request: "ModelRequest") -> list[object]:
     from ..types import ImagePart, TextPart
 
     messages: list[object] = []
-    if request.system:
+    if request.system and not is_reasoning_model:
         messages.append(SystemMessage(content=request.system))
 
     # Check if we have images
     has_images = any(isinstance(p, ImagePart) for p in request.parts)
 
+    system_prefix = f"{request.system}\n\n" if (request.system and is_reasoning_model) else ""
+
     if has_images:
         # Build multimodal content array for vision models
         content: list[dict[str, object]] = []
+
+        # Prepend system message to first text block if reasoning model
+        if system_prefix:
+            content.append({"type": "text", "text": system_prefix.strip()})
+
         for part in request.parts:
             if isinstance(part, TextPart):
                 content.append({"type": "text", "text": part.text})
@@ -65,6 +133,8 @@ def build_openai_messages(request: "ModelRequest") -> list[object]:
     else:
         # Text-only: simple string content
         text = request.to_text_prompt()
+        if system_prefix:
+            text = system_prefix + text
         messages.append(HumanMessage(content=text))
 
     return messages

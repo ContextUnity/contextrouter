@@ -29,10 +29,7 @@ from ..types import (
     TextDeltaEvent,
     UsageStats,
 )
-from ._openai_compat import (
-    build_openai_messages,
-    generate_asr_openai_compat,
-)
+from ._openai_compat import build_native_openai_messages, generate_asr_openai_compat
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +50,6 @@ class OpenAILLM(BaseModel):
     def __init__(
         self,
         config: Config,
-        *,
         model_name: str | None = None,
         enable_web_search: bool = False,
         **kwargs: object,
@@ -61,50 +57,13 @@ class OpenAILLM(BaseModel):
         self._cfg = config
         self._model_name = (model_name or "gpt-5.1").strip() or "gpt-5.1"
         self._enable_web_search = enable_web_search
-        self._langchain_model = None
         self._openai_client = None
 
-        # Initialize appropriate client based on mode
-        if enable_web_search:
-            # Use native OpenAI client for Responses API
-            self._init_openai_client()
-        else:
-            # Use LangChain for Chat Completions API
-            self._init_langchain_model(**kwargs)
+        self._init_openai_client(**kwargs)
 
         self._capabilities = ModelCapabilities(
             supports_text=True, supports_image=True, supports_audio=True
         )
-
-    def _init_langchain_model(self, **kwargs: object) -> None:
-        """Initialize LangChain ChatOpenAI for standard chat completions."""
-        try:
-            from langchain_openai import ChatOpenAI
-        except Exception as e:  # pragma: no cover
-            raise ImportError("OpenAILLM requires `contextrouter[models-openai]`.") from e
-
-        # Disable SDK retries - we handle fallback ourselves via FallbackModel
-        self._langchain_model = ChatOpenAI(
-            model=self._model_name,
-            api_key=(self._cfg.openai.api_key or None),
-            organization=self._cfg.openai.organization,
-            max_retries=0,  # No SDK retries - fallback handles it
-            **kwargs,
-        )
-
-    def _init_openai_client(self) -> None:
-        """Initialize native OpenAI client for Responses API with web search."""
-        try:
-            from openai import AsyncOpenAI
-        except Exception as e:  # pragma: no cover
-            raise ImportError(
-                "OpenAI web search requires `openai>=1.0.0`. Install with: pip install openai"
-            ) from e
-
-        if not self._cfg.openai.api_key:
-            raise ValueError("OPENAI_API_KEY is required for web search")
-
-        self._openai_client = AsyncOpenAI(api_key=self._cfg.openai.api_key)
 
     @property
     def capabilities(self) -> ModelCapabilities:
@@ -187,10 +146,32 @@ class OpenAILLM(BaseModel):
             raw_provider=provider_info,
         )
 
+    def _init_openai_client(self, **kwargs: object) -> None:
+        """Initialize native OpenAI client."""
+        try:
+            from langfuse.openai import AsyncOpenAI
+        except ImportError:
+            try:
+                from openai import AsyncOpenAI
+            except ImportError as e:
+                raise ImportError(
+                    "OpenAILLM requires `openai` package. Install with `pip install openai`."
+                ) from e
+
+        api_key = kwargs.pop("api_key", self._cfg.openai.api_key or None)
+        base_url = kwargs.pop("base_url", None)
+
+        self._openai_client = AsyncOpenAI(
+            api_key=api_key,
+            organization=self._cfg.openai.organization,
+            base_url=base_url,
+            max_retries=0,
+            **kwargs,
+        )
+
     async def _generate_chat_completions(
         self, request: ModelRequest, *, token: ContextToken | None = None
     ) -> ModelResponse:
-        """Generate using standard Chat Completions API via LangChain."""
         from ..types import ModelQuotaExhaustedError, ModelRateLimitError
 
         _ = token
@@ -203,29 +184,41 @@ class OpenAILLM(BaseModel):
                 whisper_model="whisper-1",
             )
 
-        messages = build_openai_messages(request)
+        # o1/o3: need developer role + max_completion_tokens + reasoning_effort
+        # gpt-5: need system role + max_completion_tokens + reasoning_effort (NOT max_tokens)
+        # others: system role + max_tokens + temperature
+        name_lower = self._model_name.lower()
+        uses_developer_role = any(x in name_lower for x in ["o1-", "o1_", "o3-", "o3_"])
+        uses_completion_tokens = any(x in name_lower for x in ["gpt-5", "o1-", "o1_", "o3-", "o3_"])
 
-        # Reasoning models (gpt-5*, o1*) require max_completion_tokens, not max_tokens
-        is_reasoning_model = any(
-            x in self._model_name.lower() for x in ["gpt-5", "o1-", "o1_", "o3-", "o3_"]
-        )
+        messages = build_native_openai_messages(request, is_reasoning_model=uses_developer_role)
 
-        bind_kwargs: dict = {
+        kwargs = {
+            "model": self._model_name,
+            "messages": messages,
             "timeout": request.timeout_sec,
         }
 
-        if is_reasoning_model:
-            bind_kwargs["max_completion_tokens"] = request.max_output_tokens
-            reasoning_effort = self._cfg.openai.reasoning_effort or "minimal"
-            bind_kwargs["reasoning"] = {"effort": reasoning_effort}
+        if uses_completion_tokens:
+            if request.max_output_tokens:
+                kwargs["max_completion_tokens"] = request.max_output_tokens
+            kwargs["reasoning_effort"] = self._cfg.openai.reasoning_effort or "minimal"
         else:
-            bind_kwargs["max_tokens"] = request.max_output_tokens
-            bind_kwargs["temperature"] = request.temperature
+            if request.max_output_tokens:
+                kwargs["max_tokens"] = request.max_output_tokens
+            kwargs["temperature"] = request.temperature
 
-        if request.response_format == "json_object" and not is_reasoning_model:
-            bind_kwargs["response_format"] = {"type": "json_object"}
-
-        model = self._langchain_model.bind(**bind_kwargs)
+        if request.response_format == "json_object":
+            kwargs["response_format"] = {"type": "json_object"}
+            # OpenAI requires the word "json" in messages when using json_object format
+            all_text = " ".join(
+                m.get("content", "") for m in messages if isinstance(m.get("content"), str)
+            )
+            if "json" not in all_text.lower():
+                for m in reversed(messages):
+                    if m.get("role") == "user" and isinstance(m.get("content"), str):
+                        m["content"] += "\nRespond in JSON."
+                        break
 
         provider_info = ProviderInfo(
             provider="openai",
@@ -233,106 +226,94 @@ class OpenAILLM(BaseModel):
             model_key=f"openai/{self._model_name}",
         )
 
+        logger.info(
+            "OpenAI Chat API call: model=%s, msgs=[%s], reasoning_effort=%s, response_format=%s",
+            self._model_name,
+            ", ".join(f"{m.get('role')}({len(str(m.get('content', '')))!s}ch)" for m in messages),
+            kwargs.get("reasoning_effort", "N/A"),
+            kwargs.get("response_format", "N/A"),
+        )
+
         try:
-            msg = await model.ainvoke(messages)
+            response = await self._openai_client.chat.completions.create(**kwargs)
         except Exception as e:
             error_str = str(e).lower()
             if "insufficient_quota" in error_str or "billing" in error_str:
                 raise ModelQuotaExhaustedError(
-                    f"OpenAI quota exhausted: {e}",
-                    provider_info=provider_info,
+                    f"OpenAI quota exhausted: {e}", provider_info=provider_info
                 ) from e
             elif "rate_limit" in error_str or "too many requests" in error_str:
                 raise ModelRateLimitError(
-                    f"OpenAI rate limited: {e}",
-                    provider_info=provider_info,
+                    f"OpenAI rate limited: {e}", provider_info=provider_info
                 ) from e
             raise
 
-        text = getattr(msg, "content", "")
+        choice = response.choices[0]
+        text = str(choice.message.content or "")
 
-        # Handle reasoning model responses
-        if isinstance(text, list):
-            text_parts = []
-            for block in text:
-                if isinstance(block, dict):
-                    if block.get("type") == "text":
-                        text_parts.append(block.get("text", ""))
-                elif isinstance(block, str):
-                    text_parts.append(block)
-            text = "".join(text_parts)
-
-        if not text:
-            logger.warning("OpenAI returned empty content. Full response: %s", msg)
-            if hasattr(msg, "refusal") and msg.refusal:
-                logger.warning("OpenAI REFUSED to respond: %s", msg.refusal)
-
-        usage = self._extract_usage(msg)
+        usage_val = None
+        if hasattr(response, "usage") and response.usage:
+            usage_val = UsageStats(
+                input_tokens=getattr(response.usage, "prompt_tokens", 0),
+                output_tokens=getattr(response.usage, "completion_tokens", 0),
+                total_tokens=getattr(response.usage, "total_tokens", 0),
+            ).estimate_cost(self._model_name)
 
         return ModelResponse(
-            text=str(text or ""),
-            usage=usage,
+            text=text,
+            usage=usage_val,
             raw_provider=provider_info,
         )
 
     async def stream(
         self, request: ModelRequest, *, token: ContextToken | None = None
     ) -> AsyncIterator[ModelStreamEvent]:
-        """Stream tokens (only supported for Chat Completions API)."""
         if self._enable_web_search:
-            # Web search doesn't support streaming - fall back to generate
             response = await self.generate(request, token=token)
             yield FinalTextEvent(text=response.text)
             return
 
-        _ = token
-        messages = build_openai_messages(request)
-        bind_kwargs: dict = {
-            "max_tokens": request.max_output_tokens,
+        name_lower = self._model_name.lower()
+        uses_developer_role = any(x in name_lower for x in ["o1-", "o1_", "o3-", "o3_"])
+        uses_completion_tokens = any(x in name_lower for x in ["gpt-5", "o1-", "o1_", "o3-", "o3_"])
+        messages = build_native_openai_messages(request, is_reasoning_model=uses_developer_role)
+
+        kwargs = {
+            "model": self._model_name,
+            "messages": messages,
             "timeout": request.timeout_sec,
+            "stream": True,
         }
-        if "gpt-5-mini" not in self._model_name:
-            bind_kwargs["temperature"] = request.temperature
-        model = self._langchain_model.bind(**bind_kwargs)
+
+        if uses_completion_tokens:
+            if request.max_output_tokens:
+                kwargs["max_completion_tokens"] = request.max_output_tokens
+            kwargs["reasoning_effort"] = self._cfg.openai.reasoning_effort or "minimal"
+        else:
+            if request.max_output_tokens:
+                kwargs["max_tokens"] = request.max_output_tokens
+            kwargs["temperature"] = request.temperature
+
+        if request.response_format == "json_object":
+            kwargs["response_format"] = {"type": "json_object"}
 
         full = ""
-        async for chunk in model.astream(messages):
-            delta = getattr(chunk, "content", None)
-            if isinstance(delta, str) and delta:
-                full += delta
-                yield TextDeltaEvent(delta=delta)
+        try:
+            stream = await self._openai_client.chat.completions.create(**kwargs)
+            async for chunk in stream:
+                if chunk.choices and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta.content
+                    if delta:
+                        full += delta
+                        yield TextDeltaEvent(delta=delta)
+        except Exception:
+            # handle gracefully or re-raise based on logic
+            raise
+
         yield FinalTextEvent(text=full)
 
-    def _extract_usage(self, msg: object) -> UsageStats | None:
-        """Extract usage stats from LangChain message metadata.
-
-        Handles two formats:
-        - Chat Completions API: response_metadata.token_usage.{prompt,completion}_tokens
-        - Responses API (gpt-5/o-series with reasoning): usage_metadata.{input,output}_tokens
-        """
-        try:
-            # 1. Chat Completions format (response_metadata.token_usage)
-            meta = getattr(msg, "response_metadata", None) or {}
-            if isinstance(meta, dict):
-                u = meta.get("token_usage")
-                if isinstance(u, dict) and u.get("prompt_tokens") is not None:
-                    return UsageStats(
-                        input_tokens=int(u.get("prompt_tokens") or 0),
-                        output_tokens=int(u.get("completion_tokens") or 0),
-                        total_tokens=int(u.get("total_tokens") or 0),
-                    )
-
-            # 2. LangChain usage_metadata (works for both APIs)
-            um = getattr(msg, "usage_metadata", None)
-            if isinstance(um, dict) and um.get("input_tokens") is not None:
-                return UsageStats(
-                    input_tokens=int(um.get("input_tokens") or 0),
-                    output_tokens=int(um.get("output_tokens") or 0),
-                    total_tokens=int(um.get("total_tokens") or 0),
-                )
-        except Exception:
-            pass
-        return None
+    def _extract_usage(self, msg: object):
+        pass
 
 
 __all__ = ["OpenAILLM"]

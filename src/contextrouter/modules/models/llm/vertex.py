@@ -23,6 +23,7 @@ from ..types import (
     ProviderInfo,
     TextDeltaEvent,
     TextPart,
+    UsageStats,
     VideoPart,
 )
 
@@ -170,10 +171,55 @@ class VertexLLM(BaseModel):
         content = getattr(msg, "content", "")
         text_result = content if isinstance(content, str) else str(content)
 
+        usage = self._extract_usage(msg)
+
         return ModelResponse(
             text=text_result,
+            usage=usage,
             raw_provider=self._get_provider_info(),
         )
+
+    def _extract_usage(self, msg: object) -> UsageStats | None:
+        """Extract token usage from LangChain Gemini response metadata."""
+        try:
+            # LangChain usage_metadata (works for Vertex AI)
+            um = getattr(msg, "usage_metadata", None)
+            if um:
+                inp = getattr(um, "input_tokens", None) or (
+                    um.get("input_tokens") if isinstance(um, dict) else None
+                )
+                out = getattr(um, "output_tokens", None) or (
+                    um.get("output_tokens") if isinstance(um, dict) else None
+                )
+                tot = getattr(um, "total_tokens", None) or (
+                    um.get("total_tokens") if isinstance(um, dict) else None
+                )
+                if inp is not None or out is not None:
+                    stats = UsageStats(
+                        input_tokens=int(inp or 0),
+                        output_tokens=int(out or 0),
+                        total_tokens=int(tot or 0) or int(inp or 0) + int(out or 0),
+                    )
+                    model_name = getattr(self._model, "model_name", "")
+                    stats.estimate_cost(model_name)
+                    return stats
+
+            # Fallback: response_metadata.token_usage
+            rm = getattr(msg, "response_metadata", None) or {}
+            if isinstance(rm, dict):
+                tu = rm.get("token_usage", {})
+                if isinstance(tu, dict) and tu.get("prompt_tokens") is not None:
+                    stats = UsageStats(
+                        input_tokens=int(tu.get("prompt_tokens") or 0),
+                        output_tokens=int(tu.get("completion_tokens") or 0),
+                        total_tokens=int(tu.get("total_tokens") or 0),
+                    )
+                    model_name = getattr(self._model, "model_name", "")
+                    stats.estimate_cost(model_name)
+                    return stats
+        except Exception:
+            logger.debug("Failed to extract usage from Vertex response", exc_info=True)
+        return None
 
     async def stream(
         self,

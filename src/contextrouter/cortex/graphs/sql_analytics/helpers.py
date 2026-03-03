@@ -72,39 +72,76 @@ async def invoke_model(
     Extracts system prompt from SystemMessage, concatenates remaining
     messages into a single TextPart, and returns result as AIMessage.
     """
-    system = None
+    system_parts: list[str] = []
     parts_text: list[str] = []
 
     for msg in messages:
         if isinstance(msg, SystemMessage):
-            system = msg.content
+            if isinstance(msg.content, str):
+                system_parts.append(msg.content.strip())
+            elif isinstance(msg.content, list):
+                # Handle edge cases where content might be a list
+                system_parts.append(str(msg.content).strip())
         elif isinstance(msg, (HumanMessage, AIMessage)):
             role = "user" if isinstance(msg, HumanMessage) else "assistant"
             parts_text.append(f"{role}: {msg.content}")
         else:
             parts_text.append(str(msg.content))
 
+    system = "\n\n".join(system_parts) if system_parts else None
+
+    user_text = "\n\n".join(parts_text)
+    logger.info(
+        "invoke_model: system_len=%s, user_text_len=%d",
+        len(system) if system else 0,
+        len(user_text),
+    )
+
     request = ModelRequest(
-        parts=[TextPart(text="\n\n".join(parts_text))],
+        parts=[TextPart(text=user_text)],
         system=system,
         response_format="json_object",
     )
+    logger.info("invoke_model: request.system len=%s", len(request.system) if request.system else 0)
     response = await model.generate(request)
     usage = response.usage
-    usage_dict = {
-        "input_tokens": usage.input_tokens or 0 if usage else 0,
-        "output_tokens": usage.output_tokens or 0 if usage else 0,
-        "total_cost": usage.total_cost or 0.0 if usage else 0.0,
-    }
-    return AIMessage(content=response.text), usage_dict
+    if usage:
+        usage_dict = {
+            "input_tokens": usage.input_tokens or 0,
+            "output_tokens": usage.output_tokens or 0,
+            "total_cost": usage.total_cost or 0.0,
+        }
+    else:
+        usage_dict = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_cost": 0.0,
+        }
+    return AIMessage(
+        content=response.text,
+        usage_metadata={
+            "input_tokens": usage_dict["input_tokens"],
+            "output_tokens": usage_dict["output_tokens"],
+            "total_tokens": usage_dict["input_tokens"] + usage_dict["output_tokens"],
+        },
+        response_metadata={
+            "model_name": response.raw_provider.model_name
+            if getattr(response, "raw_provider", None)
+            else "unknown",
+            "total_cost": usage_dict["total_cost"],
+        },
+    ), usage_dict
 
 
 def acc_tokens(state: dict, usage: dict) -> dict:
     """Merge new usage into accumulated _token_usage."""
     prev = state.get("_token_usage") or {}
+    in_tok = prev.get("input_tokens", 0) + usage.get("input_tokens", 0)
+    out_tok = prev.get("output_tokens", 0) + usage.get("output_tokens", 0)
     return {
-        "input_tokens": prev.get("input_tokens", 0) + usage.get("input_tokens", 0),
-        "output_tokens": prev.get("output_tokens", 0) + usage.get("output_tokens", 0),
+        "input_tokens": in_tok,
+        "output_tokens": out_tok,
+        "total_tokens": in_tok + out_tok,
         "total_cost": prev.get("total_cost", 0.0) + usage.get("total_cost", 0.0),
     }
 
@@ -123,92 +160,10 @@ def validate_sql_syntax(sql: str) -> str | None:
     return None
 
 
-class StepTimer:
-    """Context manager that measures wall-clock time for a graph node.
-
-    Usage::
-
-        timer = StepTimer()
-        with timer:
-            result = await do_work()
-        return {"_steps": [step("planner", timer=timer, request={...}, result={...})]}
-    """
-
-    def __init__(self) -> None:
-        import time
-
-        self._start: float = time.monotonic()
-        self.elapsed_ms: int = 0
-
-    def __enter__(self) -> "StepTimer":
-        import time
-
-        self._start = time.monotonic()
-        return self
-
-    def __exit__(self, *_: Any) -> None:
-        import time
-
-        self.elapsed_ms = int((time.monotonic() - self._start) * 1000)
-
-
-def step(
-    name: str,
-    *,
-    status: str = "ok",
-    timer: StepTimer | None = None,
-    request: dict[str, Any] | str | None = None,
-    result: dict[str, Any] | str | None = None,
-    **extra: Any,
-) -> dict[str, Any]:
-    """Create a rich trace step record for the _steps accumulator.
-
-    The record format is compatible with ContextView's ``metadata.steps``
-    rendering (Graph Journey, Conversation Flow, per-tool timing).
-
-    Args:
-        name: Node/tool name (e.g. ``"planner"``, ``"execute_sql"``).
-        status: ``"ok"`` | ``"error"`` | ``"skipped"``.
-        timer: Optional :class:`StepTimer` — adds ``timing_ms``.
-        request: Optional request/input data (truncated to 3 000 chars).
-        result: Optional result/output data (truncated to 10 000 chars).
-        **extra: Additional arbitrary metadata (e.g. ``row_count=42``).
-
-    Usage in a node::
-
-        timer = StepTimer()
-        with timer:
-            response, usage = await invoke_model(llm, msgs)
-        return {
-            "_steps": [step("planner", timer=timer,
-                            request={"question": q}, result={"sql": sql})],
-        }
-    """
-    import time
-
-    record: dict[str, Any] = {
-        "tool": name,
-        "status": status,
-        "ts": time.time(),
-    }
-    if timer is not None:
-        record["timing_ms"] = timer.elapsed_ms
-    if request is not None:
-        req_s = str(request) if not isinstance(request, str) else request
-        record["request"] = req_s[:3000]
-    if result is not None:
-        res_s = str(result) if not isinstance(result, str) else result
-        record["result"] = res_s[:10000]
-    record.update(extra)
-    return record
-
-
 __all__ = [
-    "StepTimer",
     "acc_tokens",
     "extract_json",
     "invoke_model",
     "is_debug",
-    "step",
     "validate_sql_syntax",
 ]

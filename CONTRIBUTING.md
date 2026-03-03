@@ -136,7 +136,7 @@ class NewProviderLLM(BaseModel):
             model_name=self._model_name,
             model_key=f"newprovider/{self._model_name}",
         )
-        
+
         try:
             # Your implementation here
             ...
@@ -179,7 +179,7 @@ from pydantic import Field
 class NewProviderConfig(BaseSettings):
     api_key: str = Field(default="", alias="NEWPROVIDER_API_KEY")
     base_url: str = Field(default="https://api.newprovider.com", alias="NEWPROVIDER_BASE_URL")
-    
+
     model_config = {"env_prefix": ""}
 ```
 
@@ -220,10 +220,10 @@ from pydantic import Field
 
 class MyFeatureConfig(BaseSettings):
     """Configuration for MyFeature."""
-    
+
     enabled: bool = Field(default=False, alias="MYFEATURE_ENABLED")
     timeout_sec: int = Field(default=30, alias="MYFEATURE_TIMEOUT")
-    
+
     model_config = {"env_prefix": ""}
 ```
 
@@ -282,11 +282,11 @@ from .steps import process_node
 
 def create_graph():
     workflow = StateGraph(MyGraphState)
-    
+
     workflow.add_node("process", process_node)
     workflow.set_entry_point("process")
     workflow.add_edge("process", END)
-    
+
     return workflow.compile()
 ```
 
@@ -330,12 +330,12 @@ def build_custom_graph():
     """Build graph from external package."""
     from .state import CustomState
     from .steps import process_step
-    
+
     workflow = StateGraph(CustomState)
     workflow.add_node("process", process_step)
     workflow.set_entry_point("process")
     workflow.add_edge("process", END)
-    
+
     return workflow  # Return uncompiled StateGraph
 ```
 
@@ -409,11 +409,11 @@ from contextrouter.modules.tools import tool_registry
 async def mytool(query: str, limit: int = 10) -> dict:
     """
     Search for information.
-    
+
     Args:
         query: Search query
         limit: Max results
-        
+
     Returns:
         Search results
     """

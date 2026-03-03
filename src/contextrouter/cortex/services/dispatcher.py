@@ -10,7 +10,11 @@ from contextcore import ContextToken
 
 from contextrouter.core import get_core_config
 from contextrouter.cortex.graphs.dispatcher_agent import compile_dispatcher_graph
-from contextrouter.modules.observability import get_langfuse_callbacks, trace_context
+from contextrouter.modules.observability import (
+    LangfuseRequestCtx,
+    get_langfuse_callbacks,
+    trace_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -218,16 +222,18 @@ class DispatcherService:
             "access_token": access_token,
         }
 
-        # Add Langfuse callbacks
+        # Add Langfuse callbacks — built from request metadata (project controls its tracing)
         effective_user_id = getattr(access_token, "user_id", None) if access_token else None
+        meta = metadata or {}
+        langfuse_ctx = LangfuseRequestCtx.from_metadata(meta)
         callbacks = get_langfuse_callbacks(
             session_id=session_id,
             user_id=effective_user_id,
             platform=platform,
+            langfuse_ctx=langfuse_ctx,
         )
         config["callbacks"] = callbacks
 
-        meta = metadata or {}
         with trace_context(
             session_id=session_id,
             platform=platform,
@@ -239,6 +245,7 @@ class DispatcherService:
             tenant_id=tenant_id,
             agent_id=meta.get("agent_id"),
             graph_name=meta.get("graph_name"),
+            langfuse_ctx=langfuse_ctx,
         ):
             result = await self._graph.ainvoke(state, config=config)
         return result
@@ -299,16 +306,18 @@ class DispatcherService:
             "access_token": access_token,
         }
 
-        # Add Langfuse callbacks
+        # Add Langfuse callbacks — built from request metadata (project controls its tracing)
         effective_user_id = getattr(access_token, "user_id", None) if access_token else None
+        meta = metadata or {}
+        langfuse_ctx = LangfuseRequestCtx.from_metadata(meta)
         callbacks = get_langfuse_callbacks(
             session_id=session_id,
             user_id=effective_user_id,
             platform=platform,
+            langfuse_ctx=langfuse_ctx,
         )
         config["callbacks"] = callbacks
 
-        meta = metadata or {}
         with trace_context(
             session_id=session_id,
             platform=platform,
@@ -320,6 +329,7 @@ class DispatcherService:
             tenant_id=tenant_id,
             agent_id=meta.get("agent_id"),
             graph_name=meta.get("graph_name"),
+            langfuse_ctx=langfuse_ctx,
         ):
             async for event in self._graph.astream(state, config=config):
                 yield event

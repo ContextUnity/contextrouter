@@ -1,9 +1,9 @@
 [project]
 name = "contextrouter"
-version = "0.17.1"
+version = "0.17.3"
 description = "The Mind of ContextUnity — modular LangGraph agent orchestration, plugin architecture, multi-model routing, and RAG pipeline coordination"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = "==3.13.*"
 authors = [
     { name = "Pylypchuk Oleksii", email = "oleksii.pylypchuk@tuta.com" },
 ]
@@ -20,7 +20,7 @@ dependencies = [
     "langgraph>=0.2.0",
     "langchain-core>=0.3.0",
     "langchain-community>=0.3.0",
-    "langchain-openai>=0.1.0",
+
     "langchain-anthropic>=0.1.0",
     "pydantic>=2.0.0",
     "click>=8.0.0",
@@ -83,6 +83,7 @@ integrations = [
 # Observability
 observability = [
     "langfuse>=2.0.0",
+    "opentelemetry-api>=1.20.0",
     "opentelemetry-instrumentation-threading>=0.48b0",
 ]
 # Additional LLM providers
@@ -122,7 +123,7 @@ all_experimental = [
 # Used for deep product matching, bulk taxonomy classification
 # Ref: https://arxiv.org/abs/2512.24601
 rlm = [
-    "rlms>=0.1.0",
+    "rlms>=0.1.1",
 ]
 
 [project.scripts]
@@ -162,8 +163,6 @@ dev = [
     "psycopg[binary]>=3.1.0",
     "psycopg-pool>=3.2.0",
     "contextcore",
-    "contextzero",
-    "contextshield",
 ]
 
 [tool.pytest.ini_options]

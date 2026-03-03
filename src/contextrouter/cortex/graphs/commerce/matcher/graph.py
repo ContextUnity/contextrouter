@@ -14,6 +14,8 @@ from typing import Any, Dict, List, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from contextrouter.core.registry import register_graph
+
 from .nodes import fetch_unmatched_node, link_or_queue_node, match_products_node
 
 logger = logging.getLogger(__name__)
@@ -46,6 +48,14 @@ class RLMBulkMatcherState(TypedDict):
     tenant_id: str
     confidence_threshold: float
     rlm_environment: str  # local, docker, modal, prime
+    dealer_code: str
+    target_brand: str
+    custom_prompt: str
+    force_not_matched: bool
+
+    # RLM model config (project-scoped, passed from Commerce payload)
+    rlm_api_key: str
+    rlm_model: str
 
     # Input products (can be very large)
     supplier_products: List[Dict[str, Any]]
@@ -80,6 +90,7 @@ def create_matcher_subgraph():
     return graph.compile()
 
 
+@register_graph("rlm_bulk_matcher")
 def create_rlm_bulk_matcher_subgraph():
     """Create RLM Bulk Matcher subgraph for large-scale matching.
 

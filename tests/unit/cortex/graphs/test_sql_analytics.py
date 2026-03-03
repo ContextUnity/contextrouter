@@ -35,7 +35,6 @@ class TestSqlAnalyticsState:
             "retry_count",
             "_start_ts",
             "_token_usage",
-            "_steps",
         }
         assert required.issubset(annotations.keys()), (
             f"Missing keys: {required - annotations.keys()}"
@@ -302,12 +301,10 @@ class TestSqlAnalyticsExports:
         from contextrouter.cortex.graphs.sql_analytics.helpers import __all__
 
         expected = {
-            "StepTimer",
             "acc_tokens",
             "extract_json",
             "invoke_model",
             "is_debug",
-            "step",
             "validate_sql_syntax",
         }
         assert set(__all__) == expected

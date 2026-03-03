@@ -23,16 +23,16 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Default Shield endpoint — overridden by core config or env
-_DEFAULT_SHIELD_URL = "localhost:50060"
+_DEFAULT_SHIELD_URL = "localhost:50054"
 
 
 def _get_shield_url() -> str:
-    """Get Shield URL from core config or fallback to default."""
+    """Get Shield URL from core config (resolved at startup) or fallback to default."""
     try:
         from contextrouter.core import get_core_config
 
         config = get_core_config()
-        return getattr(config, "shield_url", _DEFAULT_SHIELD_URL) or _DEFAULT_SHIELD_URL
+        return config.router.contextshield_grpc_host or _DEFAULT_SHIELD_URL
     except Exception:
         return _DEFAULT_SHIELD_URL
 
@@ -46,6 +46,27 @@ def _shield_stub(shield_url: str | None = None):
     channel = create_channel_sync(url)
     stub = shield_pb2_grpc.ShieldServiceStub(channel)
     return stub, channel
+
+
+def _shield_metadata():
+    """Create gRPC metadata with service token for Shield authentication.
+
+    Single source of truth for all Router → Shield gRPC calls.
+    """
+    from contextcore.token_utils import create_grpc_metadata_with_token
+    from contextcore.tokens import mint_service_token
+
+    token = mint_service_token(
+        "router-shield-client",
+        permissions=(
+            "shield:check",
+            "shield:scan",
+            "shield:put_secret",
+            "shield:get_secret",
+            "shield:secrets:read",
+        ),
+    )
+    return create_grpc_metadata_with_token(token)
 
 
 def shield_put_secret(
@@ -76,8 +97,10 @@ def shield_put_secret(
     )
     pb = unit.to_protobuf(context_unit_pb2)
 
+    metadata = _shield_metadata()
+
     try:
-        response = stub.PutSecret(pb)
+        response = stub.PutSecret(pb, metadata=metadata)
         result = MessageToDict(response.payload)
         if result.get("error"):
             raise RuntimeError(f"Shield PutSecret error: {result.get('message', result['error'])}")
@@ -107,8 +130,10 @@ def shield_get_secret(
     )
     pb = unit.to_protobuf(context_unit_pb2)
 
+    metadata = _shield_metadata()
+
     try:
-        response = stub.GetSecret(pb)
+        response = stub.GetSecret(pb, metadata=metadata)
         result = MessageToDict(response.payload)
         if result.get("error"):
             logger.warning("Shield GetSecret failed: path=%s error=%s", path, result.get("error"))

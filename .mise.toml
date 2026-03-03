@@ -7,6 +7,8 @@ python = "3.13"
 uv = "latest"
 gcloud = "latest"
 
+env_shell_expand = true
+
 [env]
 _.file = { path = ".env", tools = true }
 PYTHON = "$(mise which python)"
@@ -43,7 +45,7 @@ run = "mise run lint && mise run security && mise run test-unit"
 # Server Commands
 # =============================================================================
 
-[tasks.serve]
+[tasks.router]
 description = "Start Router gRPC service"
 run = "uv run python -m contextrouter"
 

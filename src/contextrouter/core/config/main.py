@@ -20,6 +20,7 @@ from .providers import (
     GoogleCSEConfig,
     GroqConfig,
     HuggingFaceHubConfig,
+    InceptionConfig,
     LangfuseConfig,
     LocalOpenAIConfig,
     OpenAIConfig,
@@ -101,6 +102,7 @@ class Config(BaseModel):
     anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
     openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)
     groq: GroqConfig = Field(default_factory=GroqConfig)
+    inception: InceptionConfig = Field(default_factory=InceptionConfig)
     runpod: RunPodConfig = Field(default_factory=RunPodConfig)
     hf_hub: HuggingFaceHubConfig = Field(default_factory=HuggingFaceHubConfig)
     local: LocalOpenAIConfig = Field(default_factory=LocalOpenAIConfig)
@@ -184,7 +186,53 @@ class Config(BaseModel):
         # Override with environment variables
         config._apply_env_overrides()
 
+        # Resolve all service endpoints once (env → Redis → defaults)
+        config._resolve_service_endpoints()
+
         return config
+
+    def _resolve_service_endpoints(self) -> None:
+        """Resolve all external service endpoints once at startup.
+
+        Strategy per service (env var → Redis auto-discovery → default):
+          - brain:  BRAIN_GRPC_ENDPOINT / CONTEXT_BRAIN_URL → Redis "brain" → localhost:50051
+          - worker: CONTEXT_WORKER_URL → Redis "worker" → localhost:50052
+          - zero:   CONTEXTZERO_GRPC_HOST → Redis "zero" → "" (optional)
+          - shield: CONTEXTSHIELD_GRPC_HOST → Redis "shield" → "" (optional)
+        """
+        from contextcore.discovery import resolve_service_endpoint
+
+        logger = logging.getLogger(__name__)
+
+        self.brain.grpc_endpoint = resolve_service_endpoint(
+            "brain",
+            configured_host=self.brain.grpc_endpoint,
+            default_host="localhost:50051",
+        )
+
+        self.router.worker_grpc_endpoint = resolve_service_endpoint(
+            "worker",
+            configured_host=self.router.worker_grpc_endpoint,
+            default_host="localhost:50052",
+        )
+
+        self.router.contextzero_grpc_host = resolve_service_endpoint(
+            "zero",
+            configured_host=self.router.contextzero_grpc_host,
+        )
+
+        self.router.contextshield_grpc_host = resolve_service_endpoint(
+            "shield",
+            configured_host=self.router.contextshield_grpc_host,
+        )
+
+        logger.info(
+            "Service endpoints resolved: brain=%s, worker=%s, zero=%s, shield=%s",
+            self.brain.grpc_endpoint or "(none)",
+            self.router.worker_grpc_endpoint or "(none)",
+            self.router.contextzero_grpc_host or "(disabled)",
+            self.router.contextshield_grpc_host or "(disabled)",
+        )
 
     def _apply_env_overrides(self) -> None:
         """Apply environment variable overrides to config."""
@@ -209,6 +257,8 @@ class Config(BaseModel):
         # Fallback LLM chain - comma-separated list of model keys
         if fallback_val := get_env("CONTEXTROUTER_FALLBACK_LLMS"):
             self.models.fallback_llms = [m.strip() for m in fallback_val.split(",") if m.strip()]
+        if global_fallback_val := get_env("CONTEXTROUTER_ALLOW_GLOBAL_FALLBACK"):
+            self.models.allow_global_fallback = global_fallback_val.lower() in ("1", "true", "yes")
 
         # Vertex configuration
         # Primary (in-repo) env names:
@@ -332,6 +382,14 @@ class Config(BaseModel):
         if hf_base_url := get_env("HF_BASE_URL"):
             self.hf_hub.base_url = hf_base_url
 
+        # Inception Labs configuration (Mercury-2)
+        if inception_key := get_env("INCEPTION_API_KEY"):
+            self.inception.api_key = inception_key
+        if inception_base_url := get_env("INCEPTION_BASE_URL"):
+            self.inception.base_url = inception_base_url
+        if inception_effort := get_env("INCEPTION_REASONING_EFFORT"):
+            self.inception.reasoning_effort = inception_effort
+
         # Local OpenAI-compatible servers (vLLM/Ollama)
         if v := get_env("LOCAL_OLLAMA_BASE_URL"):
             self.local.ollama_base_url = v
@@ -360,36 +418,31 @@ class Config(BaseModel):
         if langfuse_service := get_env("LANGFUSE_SERVICE_NAME"):
             self.langfuse.service_name = langfuse_service
 
-        # Security configuration — uses unified SECURITY_ENABLED from contextcore
-        security_enabled = get_bool_env("SECURITY_ENABLED")
-        if security_enabled is not None:
-            self.security.enabled = security_enabled
+        # Use shared configuration from contextcore where applicable
+        from contextcore.config import get_core_config as get_shared_core_config
+
+        shared_config = get_shared_core_config()
+
+        if shared_config.security.enabled is not None:
+            self.security.enabled = shared_config.security.enabled
         if private_key_path := get_env("CONTEXTROUTER_PRIVATE_KEY_PATH"):
             self.security.private_key_path = private_key_path
         if env_name := (get_env("CONTEXTROUTER_ENVIRONMENT") or get_env("ENVIRONMENT")):
             self.security.environment = env_name.lower()
 
-        # Redis configuration
-        if v := get_env("REDIS_HOST"):
-            self.redis.host = v
-        if v := get_env("REDIS_PORT"):
-            try:
-                self.redis.port = int(v)
-            except ValueError:
-                pass
-        if v := get_env("REDIS_DB"):
-            try:
-                self.redis.db = int(v)
-            except ValueError:
-                pass
-        if v := get_env("REDIS_PASSWORD"):
-            self.redis.password = v
+        # Redis configuration (from shared core)
+        if shared_config.redis_url:
+            self.redis.url = shared_config.redis_url
 
         # Debug/Logging
         if debug_val := get_bool_env("CONTEXTROUTER_DEBUG"):
             self.debug = debug_val
+
+        # ContextRouter specific log level overrides shared core log level
         if log_level := get_env("CONTEXTROUTER_LOG_LEVEL"):
             self.log_level = log_level
+        else:
+            self.log_level = shared_config.log_level
 
         # News Engine configuration
         if v := get_bool_env("NEWS_ENGINE_LANGUAGE_TOOL_ENABLED"):

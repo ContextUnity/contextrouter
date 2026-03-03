@@ -20,7 +20,6 @@ from langgraph.graph import END, StateGraph
 from contextrouter.cortex.graphs.sql_analytics.nodes import (
     make_execute_node,
     make_planner_node,
-    make_reflect_node,
     make_verifier_node,
     make_visualizer_node,
 )
@@ -42,6 +41,13 @@ def build_sql_analytics_graph(config: dict) -> Any:
     """
     tool_names = config.get("tool_bindings", [])
     default_model_key = config.get("model_key")
+    fallback_keys = config.get("fallback_keys")
+
+    # Per-node model overrides (falls back to default)
+    planner_model_key = config.get("planner_model_key") or default_model_key
+    verifier_model_key = config.get("verifier_model_key") or default_model_key
+    visualizer_model_key = config.get("visualizer_model_key") or default_model_key
+
     max_retries = config.get("max_retries", 2)
     pii_masking = config.get("pii_masking", False)
 
@@ -66,8 +72,27 @@ def build_sql_analytics_graph(config: dict) -> Any:
         anonymize_tool = all_tools.get("anonymize_text")
         deanonymize_tool = all_tools.get("deanonymize_text")
         if not anonymize_tool or not deanonymize_tool:
-            logger.warning("pii_masking=True but privacy tools not found — PII masking disabled")
+            logger.error("pii_masking=True but privacy tools not found — PII masking disabled")
             pii_masking = False
+        else:
+            # Check if Zero backend is reachable (resolved at config startup)
+            from contextrouter.modules.tools.privacy_tools import _get_grpc_stub
+
+            if _get_grpc_stub() is not None:
+                logger.info("PII masking enabled (gRPC mode)")
+            else:
+                # Fallback: local mode — check if contextzero package is importable
+                try:
+                    import contextzero  # noqa: F401
+
+                    logger.info("PII masking enabled (local mode)")
+                except ImportError:
+                    logger.warning(
+                        "pii_masking=True but ContextZero unreachable: "
+                        "no endpoint resolved at startup (env/Redis/default) "
+                        "and contextzero package not installed. PII masking DISABLED."
+                    )
+                    pii_masking = False
 
     if sql_tool:
         logger.info("SQL tool resolved: %s", sql_tool.name)
@@ -83,10 +108,19 @@ def build_sql_analytics_graph(config: dict) -> Any:
         pii_masking,
     )
 
+    if planner_model_key != default_model_key or visualizer_model_key != default_model_key:
+        logger.info(
+            "Per-node models: planner=%s, verifier=%s, visualizer=%s",
+            planner_model_key,
+            verifier_model_key,
+            visualizer_model_key,
+        )
+
     # 3. Create nodes — each LLM node handles PII atomically
     planner = make_planner_node(
         planner_prompt=planner_prompt,
-        default_model_key=default_model_key,
+        default_model_key=planner_model_key,
+        fallback_keys=fallback_keys,
         pii_masking=pii_masking,
         anonymize_tool=anonymize_tool,
         deanonymize_tool=deanonymize_tool,
@@ -94,7 +128,8 @@ def build_sql_analytics_graph(config: dict) -> Any:
     executor = make_execute_node(sql_tool=sql_tool, tool_names=tool_names)
     verifier = make_verifier_node(
         verifier_prompt=verifier_prompt,
-        default_model_key=default_model_key,
+        default_model_key=verifier_model_key,
+        fallback_keys=fallback_keys,
         pii_masking=pii_masking,
         anonymize_tool=anonymize_tool,
         deanonymize_tool=deanonymize_tool,
@@ -102,12 +137,12 @@ def build_sql_analytics_graph(config: dict) -> Any:
     visualizer = make_visualizer_node(
         visualizer_prompt=visualizer_prompt,
         visualizer_sub_prompts=visualizer_sub_prompts,
-        default_model_key=default_model_key,
+        default_model_key=visualizer_model_key,
+        fallback_keys=fallback_keys,
         pii_masking=pii_masking,
         anonymize_tool=anonymize_tool,
         deanonymize_tool=deanonymize_tool,
     )
-    reflect = make_reflect_node()
 
     # 4. Graph structure
     workflow = StateGraph(SqlAnalyticsState)
@@ -116,14 +151,13 @@ def build_sql_analytics_graph(config: dict) -> Any:
     workflow.add_node("execute_sql", executor)
     workflow.add_node("verifier", verifier)
     workflow.add_node("visualizer", visualizer)
-    workflow.add_node("reflect", reflect)
 
     workflow.set_entry_point("planner")
 
     # 5. Edges and routing
     def after_planner(state):
         if state.get("error") and not state.get("sql"):
-            return "reflect"
+            return END
         return "execute_sql"
 
     def after_execute(state):
@@ -133,7 +167,7 @@ def build_sql_analytics_graph(config: dict) -> Any:
                 sql_result = state.get("sql_result") or {}
                 if isinstance(sql_result, dict) and sql_result.get("rows"):
                     return "visualizer"
-                return "reflect"
+                return END
             return "planner"
         return "verifier"
 
@@ -149,8 +183,7 @@ def build_sql_analytics_graph(config: dict) -> Any:
     workflow.add_conditional_edges("planner", after_planner)
     workflow.add_conditional_edges("execute_sql", after_execute)
     workflow.add_conditional_edges("verifier", after_verifier)
-    workflow.add_edge("visualizer", "reflect")
-    workflow.add_edge("reflect", END)
+    workflow.add_edge("visualizer", END)
 
     return workflow.compile()
 

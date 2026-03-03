@@ -21,7 +21,6 @@ from .graph import (
     create_matcher_subgraph,
     create_rlm_bulk_matcher_subgraph,
 )
-from .nodes import MatchingNode
 from .rlm_bulk import BulkMatchResult, ProductMatch, RLMBulkMatcher, rlm_bulk_match_node
 from .sku_parser import (
     SkuAttributes,
@@ -34,7 +33,6 @@ __all__ = [
     # Regular matcher
     "create_matcher_subgraph",
     "MatcherState",
-    "MatchingNode",
     # RLM bulk matcher
     "create_rlm_bulk_matcher_subgraph",
     "RLMBulkMatcherState",

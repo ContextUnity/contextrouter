@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import operator
 from typing import Annotated, Any, Sequence, TypedDict
 
 from langchain_core.messages import BaseMessage
@@ -15,6 +14,7 @@ class SqlAnalyticsState(TypedDict):
     Flow: planner → execute_sql → verifier → visualizer → reflect → END
 
     Each LLM node handles PII atomically (anonymize→LLM→deanonymize).
+    Tracing is handled by BrainAutoTracer via LangChain callbacks.
     """
 
     messages: Annotated[Sequence[BaseMessage], add_messages]
@@ -33,9 +33,6 @@ class SqlAnalyticsState(TypedDict):
     retry_count: int
     _start_ts: float
     _token_usage: dict[str, Any]  # accumulated {input_tokens, output_tokens, total_cost}
-
-    # Trace — each node appends its step record via operator.add reducer
-    _steps: Annotated[list[dict[str, Any]], operator.add]
 
 
 __all__ = ["SqlAnalyticsState"]

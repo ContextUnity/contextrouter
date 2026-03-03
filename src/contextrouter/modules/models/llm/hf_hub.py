@@ -53,14 +53,16 @@ class HuggingFaceHubLLM(BaseModel):
         self._task = (task or "text-generation").strip() or "text-generation"
 
         api_key = config.hf_hub.api_key or ""
-        base_url = config.hf_hub.base_url or "https://api-inference.huggingface.co/v1"
+        base_url = (config.hf_hub.base_url or "").strip()
+        # New huggingface_hub treats base_url as alias for model — cannot pass both.
+        # If a custom endpoint is configured, use it as model; otherwise use model_name.
+        client_kwargs: dict = {"token": api_key or None, **kwargs}
+        if base_url:
+            client_kwargs["model"] = base_url
+        else:
+            client_kwargs["model"] = self._model_name
 
-        self._client = AsyncInferenceClient(
-            model=self._model_name,
-            token=(api_key or None),
-            base_url=(base_url if base_url else None),
-            **kwargs,
-        )
+        self._client = AsyncInferenceClient(**client_kwargs)
 
         # Capabilities depend on task - we only claim what we actually implement
         image_tasks = {"image-to-text", "visual-question-answering", "image-classification"}

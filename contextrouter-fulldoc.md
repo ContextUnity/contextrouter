@@ -258,7 +258,7 @@ Central graph router. Selects which agent graph to execute based on:
 
 Standard Retrieval-Augmented Generation pipeline:
 1. **Retrieve** — Query Brain for relevant context
-2. **Rerank** — Score and filter results  
+2. **Rerank** — Score and filter results
 3. **Generate** — LLM response with citations
 
 ### 3. Commerce Agents (`commerce/`)
@@ -269,11 +269,22 @@ Taxonomy classification and product enrichment.
 - Process: Semantic matching against Brain taxonomy
 - Output: Category assignments, attributes extraction
 
-#### Matcher Agent  
+#### Matcher Agent
 Supplier-to-catalog product linking with RLM support for massive datasets.
 - Input: Supplier products + catalog products
 - Process: Multi-factor matching (name, brand, attributes)
 - Output: Matched pairs with confidence scores
+
+**RLM Model Selection**: The matcher accepts a project-scoped API key and model name
+via the LangGraph state (`rlm_api_key`, `rlm_model`). The model name determines the
+provider: `gemini-*` → `GEMINI_API_KEY`, `gpt-*` → `OPENAI_API_KEY`. If no project key
+is provided, the matcher falls back to Router's global `OPENAI_API_KEY`.
+
+> ⚠️ **TEMPORARY**: API key is passed as plaintext in the gRPC payload
+> (`.env → Django settings → execute_agent payload → LangGraph state`).
+> The correct approach is ContextShield credential management, where
+> the project registers its credentials once and Router fetches them
+> server-side at execution time.
 
 ### 4. News Engine (`news_engine/`)
 
@@ -371,7 +382,10 @@ if is_reasoning_model:
 ```bash
 # Core
 CONTEXTROUTER_DEFAULT_LLM="openai/gpt-5-mini"
-CONTEXTROUTER_FALLBACK_LLMS="anthropic/claude-sonnet-4,vertex/gemini-2.0-flash"
+# Optional list of global fallback models for the entire router
+CONTEXTROUTER_FALLBACK_LLMS="anthropic/claude-sonnet-4.5,vertex/gemini-2.5-flash"
+# Whether to allow using global fallbacks when a specific graph doesn't provide its own
+CONTEXTROUTER_ALLOW_GLOBAL_FALLBACK="true"
 
 # Brain connection
 BRAIN_MODE="grpc"
@@ -386,6 +400,9 @@ PERPLEXITY_API_KEY="pplx-..."
 # Observability
 LANGFUSE_SECRET_KEY="..."
 LANGFUSE_PUBLIC_KEY="..."
+LANGFUSE_HOST="https://cloud.langfuse.com"
+LANGFUSE_PROJECT_ID="..."     # Router's own project (fallback)
+LANGFUSE_ENVIRONMENT="stage"
 ```
 
 ### Config Classes
@@ -396,6 +413,68 @@ from contextrouter.core.config import RouterConfig
 config = RouterConfig.from_env()
 # Access: config.models, config.brain, config.providers
 ```
+
+### Per-Project Langfuse Tracing
+
+Langfuse tracing is **disabled by default**. Projects opt-in by passing `langfuse_enabled: true`
+in request metadata. This isolates traces per-project without any hardcoded tenant config in Router.
+
+#### How It Works
+
+```
+Project .env                 Project code                  Router
+┌──────────────┐    ┌───────────────────────┐    ┌──────────────────────────────┐
+│LANGFUSE_      │    │ settings.LANGFUSE_*   │    │ LangfuseRequestCtx           │
+│ENABLED=true   │───►│ → metadata dict       │───►│   .from_metadata(metadata)   │
+│LANGFUSE_      │    │ → gRPC request        │    │ → _enabled(ctx)=True         │
+│PROJECT_ID=... │    │                       │    │ → trace to correct project   │
+└──────────────┘    └───────────────────────┘    └──────────────────────────────┘
+```
+
+1. **Project** sets `LANGFUSE_ENABLED=true` + `LANGFUSE_PROJECT_ID` in `.env`
+2. **Project settings** reads env via its config layer (Django settings, etc.)
+3. **Caller** injects `langfuse_enabled` and `langfuse_project_id` into `input.metadata`
+4. **Router** builds `LangfuseRequestCtx.from_metadata(metadata)` per-request
+5. If `ctx.enabled == False` → no tracing. If `True` → traces go to the right project.
+
+#### Metadata Keys
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `langfuse_enabled` | `bool` | `false` | Enable/disable tracing for this request |
+| `langfuse_project_id` | `str` | `""` | Langfuse project ID (for dashboard URL) |
+| `langfuse_secret_key` | `str` | `""` | Project-specific SK (falls back to Router global) |
+| `langfuse_public_key` | `str` | `""` | Project-specific PK (falls back to Router global) |
+| `langfuse_host` | `str` | `""` | Custom Langfuse host (falls back to Router global) |
+
+#### Project Examples
+
+**NSZU** (tracing enabled, shared credentials):
+```bash
+# nszu/.env
+LANGFUSE_ENABLED=true
+LANGFUSE_PROJECT_ID=cmlmgptn300s4ad07ev9xl13u
+```
+
+**Traverse** (tracing disabled — RLM calls too heavy):
+```bash
+# traverse/.env
+LANGFUSE_ENABLED=false
+```
+
+#### Adding Tracing to a New Project
+
+1. Set `LANGFUSE_ENABLED=true` and `LANGFUSE_PROJECT_ID=<id>` in project `.env`
+2. Read these in project settings (e.g., `django-environ`)
+3. Pass `{"langfuse_enabled": True, "langfuse_project_id": "..."}` in request metadata
+4. Router handles the rest — no Router config changes needed
+
+#### Future: Shield-Managed Credentials
+
+Currently project-specific credentials are passed in metadata. Future versions
+will use ContextShield to fetch credentials server-side, eliminating credential
+transit in request payloads.
+
 
 ---
 
@@ -653,13 +732,14 @@ This eliminates token-payload conflicts and prevents privilege escalation via pa
 - NER and transformer composition guidance remains part of service reference.
 - New transformer additions should follow modular registration and envelope-based enrichment patterns.
 
-### Trace Reflection Nodes
+### Trace Reflection Nodes & Hierarchical AutoTracer
 
 - Both RAG and Dispatcher graphs have `reflect` END nodes that log execution traces.
+- **BrainAutoTracer** (introduced in Feb 2026) captures hierarchical execution traces (`nested_steps`), correctly mapping LangGraph node execution (`is_group=True`) and LLM token usage inside them.
 - `reflect_interaction` (RAG) captures tool_calls, token_usage, timing, and records episodes via `brain.add_episode()` and `brain.log_trace()`.
 - `reflect_dispatcher` (Dispatcher) captures similar data with dispatcher-specific metadata (iterations, message count).
 - Both reflect nodes enrich traces with `security_flags` from state — blocked tools, HITL events, and permission denials are visible in trace metadata.
-- Reflection nodes never block — errors are caught and logged.
+- Reflection nodes never block — errors are caught and logged. The AutoTracer explicitly resolves phantom Langfuse errors and prevents token leakage in test environments.
 
 ### Brain Memory Tools
 
@@ -1047,6 +1127,8 @@ model = model_registry.get_llm_with_fallback(
 **Fallback Rules:**
 - Only models supporting **all required modalities** are considered
 - No automatic conversion (e.g., image → text description)
+- **Global vs Project Fallback:** By default, if a project (like a remote agent or downstream app) registers a graph but does NOT provide `fallback_keys`, the graph will fail if the primary model fails.
+- To allow the Router to use its own system-wide fallback list (`CONTEXTROUTER_FALLBACK_LLMS`) when projects omit their own, you MUST set `CONTEXTROUTER_ALLOW_GLOBAL_FALLBACK=true` in the Router's configuration.
 
 ### Fallback Strategies
 
@@ -1303,4 +1385,3 @@ BRAIN_GRPC_ENDPOINT=10.0.0.5:50051
 
 
 ---
-

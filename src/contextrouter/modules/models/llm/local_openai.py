@@ -1,11 +1,12 @@
 """Local OpenAI-compatible LLM provider (vLLM/Ollama/etc).
 
-This uses `langchain-openai` ChatOpenAI with a custom base_url to connect
+This uses `openai` AsyncOpenAI with a custom base_url to connect
 to locally-running OpenAI-compatible servers.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import AsyncIterator
 
 from contextrouter.core import Config
@@ -22,7 +23,9 @@ from ..types import (
     ProviderInfo,
     TextDeltaEvent,
 )
-from ._openai_compat import build_openai_messages
+from ._openai_compat import build_native_openai_messages
+
+logger = logging.getLogger(__name__)
 
 
 class _BaseLocalOpenAI(BaseModel):
@@ -39,18 +42,20 @@ class _BaseLocalOpenAI(BaseModel):
         **kwargs: object,
     ) -> None:
         try:
-            from langchain_openai import ChatOpenAI
-        except Exception as e:  # pragma: no cover
-            raise ImportError(
-                "Local OpenAI-compatible providers require `contextrouter[models-openai]`."
-            ) from e
+            from langfuse.openai import AsyncOpenAI
+        except ImportError:
+            try:
+                from openai import AsyncOpenAI
+            except ImportError as e:
+                raise ImportError(
+                    "Local OpenAI-compatible providers require `openai` package."
+                ) from e
 
         self._provider = provider
         self._model_name = (model_name or "").strip() or "llama3.1"
         self._base_url = base_url.strip()
 
-        self._model = ChatOpenAI(
-            model=self._model_name,
+        self._client = AsyncOpenAI(
             base_url=self._base_url,
             api_key=(api_key or "local-key"),
             max_retries=config.llm.max_retries,
@@ -70,17 +75,23 @@ class _BaseLocalOpenAI(BaseModel):
         self, request: ModelRequest, *, token: ContextToken | None = None
     ) -> ModelResponse:
         _ = token
-        messages = build_openai_messages(request)
-        model = self._model.bind(
-            temperature=request.temperature,
-            max_tokens=request.max_output_tokens,
-            timeout=request.timeout_sec,
-        )
-        msg = await model.ainvoke(messages)
-        text = getattr(msg, "content", "")
+        messages = build_native_openai_messages(request)
+        kwargs = {
+            "model": self._model_name,
+            "messages": messages,
+            "timeout": request.timeout_sec,
+        }
+        if request.temperature is not None:
+            kwargs["temperature"] = request.temperature
+        if request.max_output_tokens is not None:
+            kwargs["max_tokens"] = request.max_output_tokens
+
+        response = await self._client.chat.completions.create(**kwargs)
+        choice = response.choices[0]
+        text = str(choice.message.content or "")
 
         return ModelResponse(
-            text=str(text or ""),
+            text=text,
             raw_provider=ProviderInfo(
                 provider=self._provider,
                 model_name=self._model_name,
@@ -92,19 +103,26 @@ class _BaseLocalOpenAI(BaseModel):
         self, request: ModelRequest, *, token: ContextToken | None = None
     ) -> AsyncIterator[ModelStreamEvent]:
         _ = token
-        messages = build_openai_messages(request)
-        model = self._model.bind(
-            temperature=request.temperature,
-            max_tokens=request.max_output_tokens,
-            timeout=request.timeout_sec,
-        )
+        messages = build_native_openai_messages(request)
+        kwargs = {
+            "model": self._model_name,
+            "messages": messages,
+            "timeout": request.timeout_sec,
+            "stream": True,
+        }
+        if request.temperature is not None:
+            kwargs["temperature"] = request.temperature
+        if request.max_output_tokens is not None:
+            kwargs["max_tokens"] = request.max_output_tokens
 
         full = ""
-        async for chunk in model.astream(messages):
-            delta = getattr(chunk, "content", None)
-            if isinstance(delta, str) and delta:
-                full += delta
-                yield TextDeltaEvent(delta=delta)
+        stream = await self._client.chat.completions.create(**kwargs)
+        async for chunk in stream:
+            if chunk.choices and len(chunk.choices) > 0:
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    full += delta
+                    yield TextDeltaEvent(delta=delta)
         yield FinalTextEvent(text=full)
 
 

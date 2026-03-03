@@ -106,13 +106,8 @@ async def detect_intent(state: AgentState) -> dict[str, object]:
 
     intent_cfg = core_cfg.models.rag.intent
     intent_model_key = intent_cfg.model or "vertex/gemini-2.5-flash-lite"
-    fallback_keys = list(intent_cfg.fallback or [])
-    strategy = intent_cfg.strategy or "fallback"
-
     model = model_registry.get_llm_with_fallback(
         key=intent_model_key,
-        fallback_keys=fallback_keys,
-        strategy=strategy,
         config=core_cfg,
     )
 

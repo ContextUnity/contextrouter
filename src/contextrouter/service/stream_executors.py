@@ -86,6 +86,30 @@ class StreamExecutorManager:
                     )
             logger.info("Stream executor unregistered: project=%s", project_id)
 
+    async def drain_all(self) -> None:
+        """Signal all active streams to shut down gracefully.
+
+        Called before server.stop() to allow streams to finish cleanly
+        instead of being force-cancelled by gRPC (which causes noisy
+        CancelledError tracebacks).
+        """
+        project_ids = list(self._executors.keys())
+        if not project_ids:
+            return
+
+        logger.info("Draining %s active stream(s): %s", len(project_ids), project_ids)
+        for project_id in project_ids:
+            executor = self._executors.get(project_id)
+            if executor:
+                # Signal the sender loop to exit (None = shutdown sentinel)
+                try:
+                    executor.send_queue.put_nowait(None)
+                except asyncio.QueueFull:
+                    pass
+
+        # Give streams a moment to drain
+        await asyncio.sleep(0.5)
+
     def is_available(self, project_id: str, tool_name: str) -> bool:
         """Check if a project has an active stream for this tool."""
         executor = self._executors.get(project_id)

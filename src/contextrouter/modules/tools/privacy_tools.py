@@ -37,7 +37,7 @@ _grpc_stub: Any = None
 
 
 def _get_grpc_stub():
-    """Get or create the gRPC ZeroService stub."""
+    """Get or create the async gRPC ZeroService stub."""
     global _grpc_stub
     if _grpc_stub is not None:
         return _grpc_stub
@@ -49,19 +49,19 @@ def _get_grpc_stub():
         return None
 
     from contextcore import zero_pb2_grpc
-    from contextcore.grpc_utils import create_channel_sync
+    from contextcore.grpc_utils import create_channel
 
-    channel = create_channel_sync(host)
+    channel = create_channel(host)
     _grpc_stub = zero_pb2_grpc.ZeroServiceStub(channel)
-    logger.info("Connected to ContextZero gRPC at %s", host)
+    logger.info("Connected to ContextZero async gRPC at %s", host)
     return _grpc_stub
 
 
-def _grpc_call(rpc_name: str, payload: dict) -> dict:
-    """Make a gRPC call to ZeroService and return response payload.
+async def _grpc_call(rpc_name: str, payload: dict) -> dict:
+    """Make an async gRPC call to ZeroService and return response payload.
 
     Raises:
-        RuntimeError: If Zero returns an error payload.
+        RuntimeError: If Zero returns an error payload or connection fails.
     """
     from contextcore import ContextUnit, context_unit_pb2
     from contextcore.token_utils import create_grpc_metadata_with_token
@@ -85,7 +85,7 @@ def _grpc_call(rpc_name: str, payload: dict) -> dict:
     metadata = create_grpc_metadata_with_token(token)
 
     rpc = getattr(stub, rpc_name)
-    resp = rpc(req, metadata=metadata)
+    resp = await rpc(req, metadata=metadata)
 
     resp_unit = ContextUnit.from_protobuf(resp)
     result = resp_unit.payload or {}
@@ -101,9 +101,7 @@ def _grpc_call(rpc_name: str, payload: dict) -> dict:
 
 def _use_rpc() -> bool:
     """Whether to use gRPC mode (remote Zero service)."""
-    from contextrouter.core import get_core_config
-
-    return bool(get_core_config().router.contextzero_grpc_host)
+    return _get_grpc_stub() is not None
 
 
 def _get_proxy_service() -> Any:
@@ -163,7 +161,7 @@ async def anonymize_text(
         - session_id: Session used (keep for deanonymization)
     """
     if _use_rpc():
-        return _grpc_call(
+        resp = await _grpc_call(
             "Anonymize",
             {
                 "prompt": text,
@@ -171,6 +169,13 @@ async def anonymize_text(
                 "persona_name": persona_name or "",
             },
         )
+        return {
+            "anonymized_text": resp.get("anonymized_text", text),
+            "entities_masked": resp.get("entities_masked", 0),
+            "entity_types": resp.get("entity_types", []),
+            "session_id": resp.get("session_id", session_id),
+            "persona_injected": resp.get("persona_injected", False),
+        }
 
     # Local mode
     from contextzero import ProxyRequest
@@ -216,7 +221,7 @@ async def deanonymize_text(text: str, session_id: str) -> str:
         Text with PII restored to original values.
     """
     if _use_rpc():
-        result = _grpc_call(
+        result = await _grpc_call(
             "Deanonymize",
             {
                 "text": text,
@@ -255,7 +260,7 @@ async def check_pii(text: str) -> dict[str, Any]:
         - entity_types: Types of PII detected
     """
     if _use_rpc():
-        return _grpc_call("ScanPII", {"text": text})
+        return await _grpc_call("ScanPII", {"text": text})
 
     # Local mode
     from contextzero import ProxyRequest
@@ -324,7 +329,7 @@ async def destroy_privacy_session(session_id: str) -> str:
         Confirmation message.
     """
     if _use_rpc():
-        _grpc_call("DestroySession", {"session_id": session_id})
+        await _grpc_call("DestroySession", {"session_id": session_id})
         return f"Session '{session_id}' destroyed via gRPC."
 
     # Local mode

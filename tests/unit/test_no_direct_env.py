@@ -30,6 +30,8 @@ _PKG_ROOT = _PROJECT_ROOT / "src" / "contextrouter"
 _ALLOWED_FILES = {
     _PKG_ROOT / "core" / "config" / "base.py",
     _PKG_ROOT / "core" / "config" / "main.py",
+    # langfuse.py must set OTEL_SERVICE_NAME before OTel SDK init (env-only config)
+    _PKG_ROOT / "modules" / "observability" / "langfuse.py",
 }
 
 

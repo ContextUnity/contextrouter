@@ -38,19 +38,18 @@ def _get_brain_client():
         from contextcore.sdk import SmartBrainClient
         from contextcore.tokens import mint_service_token
 
-        from contextrouter.core import get_core_config
-
-        brain_host = get_core_config().brain.grpc_endpoint
-        token = mint_service_token(
-            "router-trace-service",
-            permissions=(
-                Permissions.TRACE_WRITE,
-                Permissions.TRACE_READ,
-                Permissions.MEMORY_WRITE,
-                Permissions.MEMORY_READ,
+        _brain_client = SmartBrainClient(
+            tenant_id=None,
+            token=lambda: mint_service_token(
+                "router-trace-service",
+                permissions=(
+                    Permissions.TRACE_WRITE,
+                    Permissions.TRACE_READ,
+                    Permissions.MEMORY_WRITE,
+                    Permissions.MEMORY_READ,
+                ),
             ),
         )
-        _brain_client = SmartBrainClient(tenant_id=None, host=brain_host, token=token)
     return _brain_client
 
 

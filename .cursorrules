@@ -112,7 +112,7 @@ if token.can_read(unit.security):
 
 **Business logic belongs in domain services:**
 - Commerce logic → `ContextCommerce`
-- Knowledge storage → `ContextBrain`  
+- Knowledge storage → `ContextBrain`
 - Background workflows → `ContextWorker`
 
 Router only **calls** these services, never implements their logic.

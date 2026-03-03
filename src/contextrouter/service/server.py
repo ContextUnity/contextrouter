@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-import signal
 
 import grpc
 from contextcore import (
     get_context_unit_logger,
     load_shared_config_from_env,
-    register_service,
     router_pb2_grpc,
     setup_logging,
 )
-from contextcore.security import get_security_interceptors, shield_status
+from contextcore.security import get_security_interceptors
 
 from .dispatcher_service import DispatcherService
 
@@ -42,15 +40,13 @@ async def serve():
     interceptors = list(get_security_interceptors())
     interceptors.append(RouterPermissionInterceptor())
 
-    server = grpc.aio.server(interceptors=interceptors)
-
-    # Log security status
-    sec = shield_status()
-    sec_log = logger.info if sec["security_enabled"] else logger.warning
-    sec_log(
-        "Security: enabled=%s, shield=%s",
-        sec["security_enabled"],
-        "active" if sec["shield_active"] else "not installed",
+    server = grpc.aio.server(
+        interceptors=interceptors,
+        options=(
+            ("grpc.so_reuseport", 1 if config.grpc_reuse_port else 0),
+            ("grpc.max_send_message_length", 50 * 1024 * 1024),
+            ("grpc.max_receive_message_length", 50 * 1024 * 1024),
+        ),
     )
 
     # Register Dispatcher Service
@@ -59,50 +55,29 @@ async def serve():
     logger.info("Dispatcher Service registered")
 
     port = cfg.router.port
-    instance_name = cfg.router.instance_name
 
-    from contextcore.grpc_utils import create_server_credentials
+    from contextcore.grpc_utils import graceful_shutdown, start_grpc_server
 
-    tls_creds = create_server_credentials()
-    if tls_creds:
-        server.add_secure_port(f"[::]:{port}", tls_creds)
-        logger.info("Router Service starting on :%s with TLS (instance=%s)", port, instance_name)
-    else:
-        server.add_insecure_port(f"[::]:{port}")
-        logger.info("Router Service starting on :%s (instance=%s)", port, instance_name)
-    await server.start()
+    heartbeat_task = await start_grpc_server(
+        server,
+        "router",
+        port,
+        instance_name=cfg.router.instance_name,
+        tenants=cfg.router.tenants,
+    )
 
     # Restore persisted project registrations from Redis
     await dispatcher.restore_registrations()
 
-    # Register in Redis for service discovery
-    tenants = cfg.router.tenants
+    # Wait for shutdown signal, drain streams, stop server
+    from contextrouter.service.stream_executors import get_stream_executor_manager
 
-    heartbeat_task = await register_service(
-        service="router",
-        instance=instance_name,
-        endpoint=f"localhost:{port}",
-        tenants=tenants,
-        metadata={"port": int(port)},
+    await graceful_shutdown(
+        server,
+        "Router",
+        heartbeat_task=heartbeat_task,
+        before_stop=get_stream_executor_manager().drain_all,
     )
-
-    # Graceful shutdown on SIGINT/SIGTERM
-    loop = asyncio.get_running_loop()
-    stop_event = asyncio.Event()
-
-    def _shutdown_handler():
-        logger.info("Shutdown signal received, stopping Router...")
-        stop_event.set()
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, _shutdown_handler)
-
-    await stop_event.wait()
-    logger.info("Stopping gRPC server (5s grace)...")
-    await server.stop(grace=5)
-    if heartbeat_task:
-        heartbeat_task.cancel()
-    logger.info("Router server stopped.")
 
 
 if __name__ == "__main__":

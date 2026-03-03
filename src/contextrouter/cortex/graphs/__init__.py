@@ -53,12 +53,12 @@ def __getattr__(name: str) -> Any:
         "CommerceState",
         "GardenerState",
         "MatcherState",
-        "MatchingNode",
         "build_commerce_graph",
         "create_chat_subgraph",
         "create_gardener_subgraph",
         "create_lexicon_subgraph",
         "create_matcher_subgraph",
+        "create_rlm_bulk_matcher_subgraph",
         "invoke_chat",
     }
     if name in _commerce_exports:
@@ -97,8 +97,8 @@ __all__ = [
     "create_lexicon_subgraph",
     # Matcher
     "create_matcher_subgraph",
+    "create_rlm_bulk_matcher_subgraph",
     "MatcherState",
-    "MatchingNode",
     # RAG
     "rag_retrieval",
 ]

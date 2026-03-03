@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import grpc
 from contextcore import get_context_unit_logger
 
@@ -16,6 +18,12 @@ def grpc_error_handler(func):
     async def wrapper(self, request, context):
         try:
             return await func(self, request, context)
+        except asyncio.CancelledError:
+            logger.info(
+                "Request %s cancelled (client disconnected or server shutting down)", func.__name__
+            )
+            # Clean exit without propagating BaseException to cygrpc
+            return
         except ValueError as e:
             logger.error("Validation error in %s: %s", func.__name__, e)
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
@@ -61,30 +69,45 @@ def grpc_stream_error_handler(func):
         try:
             async for item in func(self, request, context):
                 yield item
+        except asyncio.CancelledError:
+            logger.info(
+                "Stream %s cancelled (client disconnected or server shutting down)", func.__name__
+            )
+            # Clean exit without yielding further
+            return
         except ValueError as e:
             logger.error("Validation error in %s: %s", func.__name__, e)
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
             context.set_details(str(e))
+            unit = parse_unit(request)
             yield make_response(
                 payload={"error": str(e), "error_type": "validation"},
-                provenance=[f"router:{func.__name__}:error"],
+                trace_id=str(unit.trace_id),
+                provenance=list(unit.provenance) + [f"router:{func.__name__}:error"],
+                security=unit.security,
             )
         except PermissionError as e:
             logger.warning("Permission denied in %s: %s", func.__name__, e)
             context.set_code(grpc.StatusCode.PERMISSION_DENIED)
             context.set_details(str(e))
+            unit = parse_unit(request)
             yield make_response(
                 payload={"error": str(e), "error_type": "permission_denied"},
-                provenance=[f"router:{func.__name__}:permission_denied"],
+                trace_id=str(unit.trace_id),
+                provenance=list(unit.provenance) + [f"router:{func.__name__}:permission_denied"],
+                security=unit.security,
             )
         except Exception as e:
             err_msg = str(e) or repr(e)
             logger.exception("Unexpected error in %s: %s", func.__name__, err_msg)
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Internal error: {err_msg}")
+            unit = parse_unit(request)
             yield make_response(
                 payload={"error": err_msg, "error_type": type(e).__name__},
-                provenance=[f"router:{func.__name__}:error"],
+                trace_id=str(unit.trace_id),
+                provenance=list(unit.provenance) + [f"router:{func.__name__}:error"],
+                security=unit.security,
             )
 
     return wrapper

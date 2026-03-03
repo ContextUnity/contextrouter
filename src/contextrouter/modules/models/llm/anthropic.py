@@ -93,18 +93,19 @@ class AnthropicLLM(BaseModel):
         model_name: str | None = None,
         temperature: float | None = None,
         max_output_tokens: int | None = None,
-        **_: object,
+        **kwargs: object,
     ) -> None:
         self._cfg = config
         self._model_name = (model_name or "").strip() or "claude-sonnet-4.5"
+        api_key = kwargs.pop("api_key", config.anthropic.api_key or None)
         # Claude supports text and images natively
         self._capabilities = ModelCapabilities(
             supports_text=True, supports_image=True, supports_audio=False
         )
 
         # Prefer passing key explicitly; also set env default for libraries that rely on it.
-        if config.anthropic.api_key:
-            set_env_default("ANTHROPIC_API_KEY", config.anthropic.api_key)
+        if api_key:
+            set_env_default("ANTHROPIC_API_KEY", api_key)
 
         try:
             from langchain_anthropic import ChatAnthropic  # type: ignore[import-not-found]
@@ -113,7 +114,7 @@ class AnthropicLLM(BaseModel):
                 "Anthropic provider requires `contextrouter[models-anthropic]`."
             ) from e
 
-        kwargs: dict[str, object] = {
+        kwargs_init: dict[str, object] = {
             "model": self._model_name,
             "temperature": self._cfg.llm.temperature if temperature is None else temperature,
             "max_tokens": self._cfg.llm.max_output_tokens
@@ -123,14 +124,14 @@ class AnthropicLLM(BaseModel):
         }
 
         # Some versions accept `api_key`, some rely on env; try both.
-        if self._cfg.anthropic.api_key:
-            kwargs["api_key"] = self._cfg.anthropic.api_key
+        if api_key:
+            kwargs_init["api_key"] = api_key
 
         try:
-            self._client = ChatAnthropic(**kwargs)
+            self._client = ChatAnthropic(**kwargs_init)
         except TypeError:
-            kwargs.pop("api_key", None)
-            self._client = ChatAnthropic(**kwargs)
+            kwargs_init.pop("api_key", None)
+            self._client = ChatAnthropic(**kwargs_init)
 
     @property
     def capabilities(self) -> ModelCapabilities:

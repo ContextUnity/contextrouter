@@ -34,81 +34,12 @@ def make_reflect_node():
         pipeline_start = state.get("_start_ts") or time.monotonic()
         timing_ms = int((time.monotonic() - pipeline_start) * 1000)
         metadata = state.get("metadata") or {}
-
-        # _steps is accumulated by every node via operator.add reducer
-        raw_steps = state.get("_steps") or []
         has_pii = bool(metadata.get("session_id"))
 
-        # ── Build rich steps for ContextView ──
-        # Convert flat _steps (from helpers.step()) into the format that
-        # ContextView expects: tool_call + tool_result pairs with timing.
-        #
-        # Timing semantics:
-        #   tool_call.timing_ms  = gap/overhead since previous step ended
-        #   tool_result.timing_ms = tool execution time (from StepTimer)
+        # Steps and tool_calls are now captured by BrainAutoTracer via
+        # LangChain callbacks — no manual conversion needed here.
         steps: list[dict] = []
         tool_calls_summary: list[dict] = []
-        prev_end_ts: float = 0.0  # tracks when previous step finished
-
-        for s in raw_steps:
-            tool_name = s.get("tool", "unknown")
-            status = s.get("status", "ok")
-            step_timing = s.get("timing_ms", 0)
-            step_ts = s.get("ts", 0)  # unix timestamp when step completed
-            request_data = s.get("request")
-            result_data = s.get("result")
-
-            # Compute step start time and gap from previous step
-            step_start_ts = (step_ts - step_timing / 1000.0) if step_ts else 0
-            gap_ms = 0
-            if prev_end_ts and step_start_ts:
-                gap_ms = max(0, int((step_start_ts - prev_end_ts) * 1000))
-            # Update prev_end_ts for next iteration
-            if step_ts:
-                prev_end_ts = step_ts
-
-            # Build tool_call step (with args = request data)
-            # timing_ms = gap/overhead since previous step ended
-            tool_call_step: dict = {
-                "step": len(steps),
-                "iteration": 1,
-                "type": "tool_call",
-                "tool": tool_name,
-                "tool_call_id": f"{tool_name}_{len(steps)}",
-                "status": status,
-                "timing_ms": gap_ms,
-            }
-            if request_data:
-                if isinstance(request_data, str):
-                    try:
-                        import json
-
-                        tool_call_step["args"] = json.loads(request_data)
-                    except (ValueError, TypeError):
-                        tool_call_step["args"] = {"input": request_data[:3000]}
-                elif isinstance(request_data, dict):
-                    tool_call_step["args"] = {k: str(v)[:3000] for k, v in request_data.items()}
-                else:
-                    tool_call_step["args"] = {"input": str(request_data)[:3000]}
-            steps.append(tool_call_step)
-
-            # Build tool_result step (with result data)
-            # timing_ms = actual tool execution time (from StepTimer)
-            if result_data:
-                tool_result_step: dict = {
-                    "step": len(steps),
-                    "iteration": 1,
-                    "type": "tool_result",
-                    "tool": tool_name,
-                    "tool_call_id": tool_call_step["tool_call_id"],
-                    "status": status,
-                    "timing_ms": step_timing,
-                    "result": str(result_data)[:10000] if result_data else "",
-                }
-                steps.append(tool_result_step)
-
-            # Summary for top-level tool_calls
-            tool_calls_summary.append({"tool": tool_name, "status": status})
 
         # ── Extract user query for episodic memory ──
         user_query = ""
@@ -135,6 +66,7 @@ def make_reflect_node():
         token_usage = {
             "input_tokens": token_usage_raw.get("input_tokens", 0),
             "output_tokens": token_usage_raw.get("output_tokens", 0),
+            "total_cost": token_usage_raw.get("total_cost", 0.0),
         }
 
         # ── Security context from runtime access token ──

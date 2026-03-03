@@ -65,6 +65,7 @@ class RLMLLM(BaseModel):
         environment_kwargs: dict | None = None,
         verbose: bool = False,
         log_dir: str | None = None,
+        custom_tools: dict | None = None,
         **kwargs: object,
     ) -> None:
         """Initialize RLM wrapper.
@@ -94,18 +95,27 @@ class RLMLLM(BaseModel):
         self._verbose = verbose
 
         # Determine backend from model name
-        backend = self._infer_backend(self._model_name)
+        backend, extra_kwargs = self._infer_backend(self._model_name)
 
         # Build RLM instance
         rlm_kwargs: dict = {
             "backend": backend,
-            "backend_kwargs": {"model_name": self._model_name},
+            "backend_kwargs": {"model_name": self._model_name, **extra_kwargs},
             "environment": environment,
             "verbose": verbose,
+            "max_timeout": 300.0,  # 5 min per brand — prevents indefinite runs
+            "max_iterations": 15,  # cap REPL iterations
         }
+
+        # Forward api_key to backend if provided (bypasses module-level env cache)
+        if "api_key" in kwargs:
+            rlm_kwargs["backend_kwargs"]["api_key"] = kwargs.pop("api_key")
 
         if environment_kwargs:
             rlm_kwargs["environment_kwargs"] = environment_kwargs
+
+        if custom_tools:
+            rlm_kwargs["custom_tools"] = custom_tools
 
         # Add logger if log_dir specified
         if log_dir:
@@ -114,6 +124,7 @@ class RLMLLM(BaseModel):
             rlm_kwargs["logger"] = RLMLogger(log_dir=log_dir)
 
         self._rlm = RLM(**rlm_kwargs)
+        self._custom_tools = custom_tools
 
         self._capabilities = ModelCapabilities(
             supports_text=True,
@@ -122,20 +133,29 @@ class RLMLLM(BaseModel):
         )
 
     @staticmethod
-    def _infer_backend(model_name: str) -> str:
-        """Infer RLM backend from model name."""
+    def _infer_backend(model_name: str) -> tuple[str, dict]:
+        """Infer RLM backend and extra kwargs from model name.
+
+        Returns:
+            Tuple of (backend_name, extra_backend_kwargs).
+        """
         model_lower = model_name.lower()
 
         if any(x in model_lower for x in ["gpt", "o1", "o3", "o4"]):
-            return "openai"
+            return "openai", {}
         elif any(x in model_lower for x in ["claude", "sonnet", "haiku", "opus"]):
-            return "anthropic"
+            return "anthropic", {}
         elif "gemini" in model_lower:
-            return "vertex"  # or "google" depending on rlm implementation
+            # Route through Google's OpenAI-compatible endpoint.
+            # The native google-genai SDK has Vertex AI routing issues
+            # (silently sends to aiplatform.googleapis.com even with api_key).
+            return "openai", {
+                "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+            }
         elif "llama" in model_lower or "mistral" in model_lower:
-            return "openrouter"  # or local
+            return "openrouter", {}
         else:
-            return "openai"  # default fallback
+            return "openai", {}  # default fallback
 
     @property
     def capabilities(self) -> ModelCapabilities:
@@ -146,13 +166,24 @@ class RLMLLM(BaseModel):
         request: ModelRequest,
         *,
         token: ContextToken | None = None,
+        custom_tools: dict | None = None,
     ) -> ModelResponse:
         """Generate response using RLM recursive completion.
 
         The RLM will create a REPL environment and may spawn recursive
         LLM calls to process the request, especially for large contexts.
+
+        Args:
+            request: Model request with prompt and parameters.
+            token: Optional context token.
+            custom_tools: Per-request REPL variables/functions.
+                Non-callable values become REPL variables accessible immediately.
         """
         _ = token
+
+        # Merge per-request tools with instance tools
+        if custom_tools:
+            self._rlm.custom_tools = {**(self._custom_tools or {}), **custom_tools}
 
         # Build prompt from request parts
         prompt = self._build_prompt(request)
@@ -212,27 +243,17 @@ class RLMLLM(BaseModel):
         return "\n".join(parts)
 
     def _extract_usage(self, result: object) -> UsageStats | None:
-        """Extract usage stats from RLM result."""
+        """Extract usage stats from RLM result (RLMChatCompletion)."""
         try:
-            # RLM may provide metrics in result object
-            metrics = getattr(result, "metrics", None)
-            if metrics:
+            # RLMChatCompletion has usage_summary: UsageSummary
+            usage_summary = getattr(result, "usage_summary", None)
+            if usage_summary:
+                input_tokens = getattr(usage_summary, "total_input_tokens", 0) or 0
+                output_tokens = getattr(usage_summary, "total_output_tokens", 0) or 0
                 return UsageStats(
-                    input_tokens=int(metrics.get("input_tokens", 0)),
-                    output_tokens=int(metrics.get("output_tokens", 0)),
-                    total_tokens=int(metrics.get("total_tokens", 0)),
-                )
-
-            # Try to get from trajectory
-            trajectory = getattr(result, "trajectory", None)
-            if trajectory:
-                total_tokens = sum(
-                    step.get("tokens", 0) for step in trajectory if isinstance(step, dict)
-                )
-                return UsageStats(
-                    input_tokens=0,
-                    output_tokens=0,
-                    total_tokens=total_tokens,
+                    input_tokens=int(input_tokens),
+                    output_tokens=int(output_tokens),
+                    total_tokens=int(input_tokens + output_tokens),
                 )
         except Exception:
             pass

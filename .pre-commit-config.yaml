@@ -22,7 +22,7 @@ repos:
     rev: 1.9.2
     hooks:
       - id: bandit
-        args: [-c, .bandit, -r, src/contextrouter]
+        args: [-c, services/contextrouter/.bandit, -r, services/contextrouter/src/contextrouter]
         additional_dependencies: ["tomli; python_version<'3.11'"]
 
   # Local architecture enforcement

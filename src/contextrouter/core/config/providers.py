@@ -22,6 +22,19 @@ class VertexConfig(BaseModel):
     credentials_path: str = ""
 
 
+class GeminiConfig(BaseModel):
+    """Google AI Studio (Gemini) API configuration.
+
+    Uses google-genai SDK with API key auth (not Vertex AI / service account).
+    Get a key at https://aistudio.google.com/apikey
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    api_key: str = ""
+    default_model: str = "gemini-2.5-flash"
+
+
 class PostgresConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -89,6 +102,20 @@ class GroqConfig(BaseModel):
     base_url: str = "https://api.groq.com/openai/v1"
 
 
+class InceptionConfig(BaseModel):
+    """Inception Labs API configuration (Mercury-2 diffusion LLM).
+
+    Docs: https://docs.inceptionlabs.ai/get-started/models
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    api_key: str = ""
+    base_url: str = "https://api.inceptionlabs.ai/v1"
+    # Reasoning effort: instant, low, medium, high (default: medium on Mercury-2 side)
+    reasoning_effort: str = ""
+
+
 class RunPodConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -128,7 +155,7 @@ class LangfuseConfig(BaseModel):
     secret_key: str = ""
     public_key: str = ""
     host: str = "https://cloud.langfuse.com"
-    project_id: str = ""  # Langfuse project ID for dashboard URL construction
+    project_id: str = ""  # Default project ID for dashboard URL construction
     environment: str = "development"
     service_name: str = "contextrouter"
 
@@ -136,6 +163,7 @@ class LangfuseConfig(BaseModel):
 class RedisConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
+    url_override: str | None = Field(default=None, alias="url")
     host: str = "localhost"
     port: int = 6379
     db: int = 0
@@ -144,9 +172,15 @@ class RedisConfig(BaseModel):
     @property
     def url(self) -> str:
         """Generate Redis URL from config."""
+        if self.url_override:
+            return self.url_override
         if self.password:
             return f"redis://:{self.password}@{self.host}:{self.port}/{self.db}"
         return f"redis://{self.host}:{self.port}/{self.db}"
+
+    @url.setter
+    def url(self, v: str) -> None:
+        self.url_override = v
 
 
 class PluginsConfig(BaseModel):

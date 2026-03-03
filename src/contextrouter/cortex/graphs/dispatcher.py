@@ -50,6 +50,7 @@ def build_graph(graph_name: str | None = None):
         Uncompiled StateGraph
     """
     from .commerce import build_commerce_graph
+    from .commerce.matcher import create_matcher_subgraph, create_rlm_bulk_matcher_subgraph
     from .rag_retrieval.graph import build_graph as build_rag_graph
 
     cfg = get_core_config()
@@ -85,6 +86,8 @@ def build_graph(graph_name: str | None = None):
         "rag_retrieval": build_rag_graph,
         "commerce": build_commerce_graph,
         "dispatcher": build_dispatcher_graph,
+        "matcher": create_rlm_bulk_matcher_subgraph,
+        "matcher_incremental": create_matcher_subgraph,
     }
 
     # Optional: ContextZero privacy proxy graph

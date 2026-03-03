@@ -66,7 +66,10 @@ class StreamMixin:
                 yield unit.to_protobuf(context_unit_pb2)
 
         except asyncio.CancelledError:
-            pass
+            logger.info(
+                "ToolExecutorStream sender stopped (server shutdown/cancel): project_id=%s",
+                project_id or "unknown",
+            )
         except Exception as e:
             logger.warning(
                 "ToolExecutorStream sender ended: project=%s error=%s",
@@ -221,6 +224,12 @@ class StreamMixin:
                         action,
                     )
 
+        except asyncio.CancelledError:
+            logger.info(
+                "ToolExecutorStream reader stopped (server shutdown/cancel): project_id=%s",
+                project_id or "unknown",
+            )
+            return
         except Exception as e:
             logger.warning(
                 "ToolExecutorStream reader ended: project=%s error=%s",
