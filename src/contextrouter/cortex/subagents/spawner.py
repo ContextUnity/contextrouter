@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-import logging
 import uuid
 from typing import Any, Dict, Optional
 
-from contextcore import ContextToken, ContextUnit
+from contextcore import ContextToken, ContextUnit, get_context_unit_logger
 
 from contextrouter.modules.grpc import get_worker_client
 
 from .prompt_generator import SubAgentPromptGenerator
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 class IsolationContext:
@@ -56,20 +55,6 @@ class IsolationContext:
             trace_id=data.get("trace_id"),
             parent_agent_id=data.get("parent_agent_id", ""),
             subagent_id=data.get("subagent_id", ""),
-        )
-
-    def to_context_unit(self) -> ContextUnit:
-        """Convert to ContextUnit for gRPC calls."""
-        from contextcore import SecurityScopes
-
-        return ContextUnit(
-            payload={},
-            provenance=[f"subagent:{self.subagent_id}"],
-            security=SecurityScopes(
-                read=[f"tenant:{self.tenant_id}:read"] if self.tenant_id else [],
-                write=[f"tenant:{self.tenant_id}:write"] if self.tenant_id else [],
-            ),
-            trace_id=self.trace_id,
         )
 
 

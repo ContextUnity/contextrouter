@@ -7,6 +7,7 @@ python = "3.13"
 uv = "latest"
 gcloud = "latest"
 
+[settings]
 env_shell_expand = true
 
 [env]
@@ -16,6 +17,10 @@ PYTHON = "$(mise which python)"
 [tasks.sync]
 description = "Install all dependencies (dev + vertex + observability)"
 run = "uv sync --group dev --extra vertex --extra observability"
+
+[tasks.install-observability]
+description = "Install observability dependencies like langfuse"
+run = "uv sync --extra observability"
 
 [tasks.lint]
 description = "Lint + format-check all code (Ruff)"
@@ -52,6 +57,10 @@ run = "uv run python -m contextrouter"
 [tasks.dev]
 description = "Start Router gRPC service in development mode"
 run = "uv run python -m contextrouter"
+
+[tasks.clean-redis]
+description = "Clean project registrations from Redis. Usage: `mise run clean-redis` (all) or `mise run clean-redis -- <project_id>`"
+run = "uv run python scripts/clean_registrations.py"
 
 # =============================================================================
 # RAG Commands
@@ -126,3 +135,7 @@ run = "uv build"
 [tasks.compile-protos]
 description = "Compile protobuf files (runs in contextcore)"
 run = "cd ../contextcore && ./compile_protos.sh"
+
+[tasks.rotate-redis]
+description = "Re-encrypt the Redis project secrets with a new REDIS_SECRET_KEY"
+run = "uv run python -m contextcore.cli.mint rotate-redis-key"

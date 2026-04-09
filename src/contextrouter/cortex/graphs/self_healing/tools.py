@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import logging
-
+from contextcore import get_context_unit_logger
 from contextunity.api.admin_client import AdminClient
 from contextunity.healing.code_fixer import CodeFixer
 from contextunity.healing.service_healer import ServiceHealer
@@ -11,7 +10,7 @@ from langchain_core.tools import tool
 
 from contextrouter.modules.tools import register_tool as _register_tool
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 admin_client = AdminClient(
     endpoint="unity.contextunity.ts.net:50056",

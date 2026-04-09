@@ -11,8 +11,9 @@ Usage:
 
 from __future__ import annotations
 
-import logging
 import time
+
+from contextcore import get_context_unit_logger
 
 from contextrouter.core import get_core_config
 from contextrouter.cortex import RetrievedDoc
@@ -20,7 +21,7 @@ from contextrouter.utils.retry import retry_with_backoff_async
 
 from .settings import get_rag_retrieval_settings
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 _rank_client = None
 

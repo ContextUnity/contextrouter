@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Sequence
 
+from contextcore import get_context_unit_logger
 from langchain_core.messages import BaseMessage, SystemMessage
 
 from .models import RetrievedDoc
@@ -19,7 +20,7 @@ from .prompting import (
     RAG_SYSTEM_PROMPT,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def build_rag_prompt(

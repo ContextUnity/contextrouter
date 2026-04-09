@@ -8,10 +8,10 @@ Runs at the end of the graph flow to:
 
 from __future__ import annotations
 
-import logging
 import time
 from typing import Any
 
+from contextcore import get_context_unit_logger
 from contextcore.sdk import BrainClient
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -19,7 +19,7 @@ from contextrouter.core import get_core_config
 from contextrouter.core.memory import MemoryManager
 from contextrouter.cortex import AgentState
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def _extract_tool_calls(state: AgentState) -> list[dict[str, Any]]:
@@ -130,14 +130,6 @@ async def reflect_interaction(state: AgentState) -> dict:
     # Determine graph_name from platform/source
     graph_name = "rag_retrieval"  # Default; dispatcher will pass its own
 
-    # Build provenance chain
-    provenance = [f"agent:router:{graph_name}"]
-    for tc in tool_calls:
-        tool_name = tc.get("tool", "")
-        if tool_name:
-            provenance.append(f"tool:{tool_name}")
-    provenance.append(f"router:{graph_name}:reflect")
-
     try:
         brain_host = getattr(config.providers, "brain_host", "localhost:50051")
 
@@ -159,7 +151,6 @@ async def reflect_interaction(state: AgentState) -> dict:
                 "message_count": len(state.get("messages", [])),
                 "security_flags": list(state.get("security_flags", [])),
             },
-            provenance=provenance,
         )
         logger.info("Logged trace for session %s", session_id)
     except Exception as e:

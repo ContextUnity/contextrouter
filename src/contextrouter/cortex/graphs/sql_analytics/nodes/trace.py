@@ -10,15 +10,15 @@ Uses the universal ``log_execution_trace`` tool which handles:
 
 from __future__ import annotations
 
-import logging
 import time
 
+from contextcore import get_context_unit_logger
 from langchain_core.messages import HumanMessage
 
 from contextrouter.cortex.graphs.sql_analytics.state import SqlAnalyticsState
 from contextrouter.modules.tools import get_tool
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def make_reflect_node():
@@ -50,16 +50,6 @@ def make_reflect_node():
             elif isinstance(msg, dict) and msg.get("role") == "user":
                 user_query = msg.get("content", "")
                 break
-
-        # ── Build provenance chain ──
-        provenance = [
-            f"agent:{metadata.get('agent_id', 'sql_analytics')}",
-            "router:sql_analytics:execute",
-        ]
-        if has_pii:
-            provenance.append("zero:pii_masking")
-        for tc in tool_calls_summary:
-            provenance.append(f"tool:{tc['tool']}")
 
         # ── Token usage ──
         token_usage_raw = state.get("_token_usage") or {}
@@ -115,15 +105,16 @@ def make_reflect_node():
                         "langfuse_trace_id": metadata.get("langfuse_trace_id", ""),
                         "langfuse_trace_url": metadata.get("langfuse_trace_url", ""),
                     },
-                    "provenance": provenance,
                     "security_flags": token_info,
                     "record_episode": True,
                 }
             )
         except Exception as e:
-            detail = e.details() if hasattr(e, "details") else str(e)
-            code = e.code() if hasattr(e, "code") else ""
-            logger.warning("Brain trace failed [%s]: %s", code or type(e).__name__, detail)
+            detail_attr = getattr(e, "details", None)
+            detail = detail_attr() if callable(detail_attr) else str(detail_attr or e)
+            code_attr = getattr(e, "code", None)
+            code = code_attr() if callable(code_attr) else str(code_attr or type(e).__name__)
+            logger.warning("Brain trace failed [%s]: %s", code, detail)
         # ── Destroy PII session to wipe keys from RAM ──
         if has_pii and metadata.get("session_id"):
             try:

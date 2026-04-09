@@ -9,21 +9,17 @@ Pipeline:
 
 from __future__ import annotations
 
-import asyncio
-import logging
 from typing import Any, Dict
 
+from contextcore import get_context_unit_logger
 from langgraph.graph import END, StateGraph
 
 from contextrouter.core import get_core_config
-from contextrouter.modules.models import model_registry
-from contextrouter.modules.models.types import ModelRequest, TextPart
 
 from ..state import NewsEngineState
-from .filters import BANNED_KEYWORDS, DEFAULT_ARCHIVIST_PROMPT, SIMILARITY_THRESHOLD
-from .json_utils import extract_json_from_response
+from .filters import BANNED_KEYWORDS, SIMILARITY_THRESHOLD
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 async def filter_node(state: NewsEngineState) -> Dict[str, Any]:
@@ -52,108 +48,6 @@ async def filter_node(state: NewsEngineState) -> Dict[str, Any]:
         "raw_items": filtered,
         "rejected_count": rejected,
     }
-
-
-async def validate_node(state: NewsEngineState) -> Dict[str, Any]:
-    """LLM validation for quality and greenwashing detection.
-
-    Note: This node is currently not used in the pipeline (Showrunner handles selection).
-    Kept for potential future use.
-    """
-    raw_items = state.get("raw_items", [])
-    tenant_id = state.get("tenant_id", "default")
-
-    if not raw_items:
-        return {}
-
-    config = get_core_config()
-
-    overrides = state.get("prompt_overrides", {})
-    system_prompt = overrides.get("archivist", DEFAULT_ARCHIVIST_PROMPT)
-
-    logger.info("[%s] LLM validating %s items", tenant_id, len(raw_items))
-
-    try:
-        model = model_registry.get_llm_with_fallback(
-            key=config.models.default_llm,
-            fallback_keys=config.models.fallback_llms,
-            strategy="fallback",
-            config=config,
-        )
-
-        validated = []
-        rejected = state.get("rejected_count", 0)
-
-        for item in raw_items:
-            headline = item.get("headline", "")[:60]
-            user_prompt = f"""Validate this news item:
-
-Headline: {item.get("headline", "")}
-Summary: {item.get("summary", "")}
-Source: {item.get("url", "")}"""
-
-            request = ModelRequest(
-                system=system_prompt,
-                parts=[TextPart(text=user_prompt)],
-                temperature=0.2,
-                max_output_tokens=4000,  # Extra for reasoning models
-                response_format="json_object",  # Enforce JSON output
-            )
-
-            try:
-                response = await model.generate(request)
-
-                # Parse response using robust extractor
-                result = extract_json_from_response(response.text)
-
-                if result:
-                    if result.get("verdict") == "accept":
-                        item["category"] = result.get("category", item.get("category", "unknown"))
-                        item["significance_score"] = result.get("significance_score", 5)
-                        item["suggested_agents"] = result.get("suggested_agents", [])
-                        item["validation_reason"] = result.get("reason", "")
-                        validated.append(item)
-                    else:
-                        rejected += 1
-                        logger.debug(
-                            "Rejected: %s - %s", item.get("headline"), result.get("reason")
-                        )
-                else:
-                    # Log first 200 chars of response for debugging
-                    preview = response.text[:200].replace("\n", " ") if response.text else "(empty)"
-                    logger.warning(
-                        "[No JSON Found] '%s...' - Could not extract JSON from response. Preview: %s... Accepting item by default.",
-                        headline,
-                        preview,
-                    )
-                    validated.append(item)
-
-            except asyncio.CancelledError:
-                logger.warning(
-                    "[Connection Timeout] '%s...' - OpenAI request was cancelled ", headline
-                )
-                validated.append(item)
-
-            except Exception as e:
-                error_type = type(e).__name__
-                logger.warning("[%s] '%s...' - Validation failed: %s. ", error_type, headline, e)
-                validated.append(item)
-
-        logger.info(
-            "[%s] LLM validation: %s accepted, %s total rejected",
-            tenant_id,
-            len(validated),
-            rejected,
-        )
-
-        return {
-            "raw_items": validated,
-            "rejected_count": rejected,
-        }
-
-    except Exception as e:
-        logger.error("LLM validation failed: %s", e)
-        return {}
 
 
 async def dedupe_node(state: NewsEngineState) -> Dict[str, Any]:
@@ -241,19 +135,21 @@ async def dedupe_node(state: NewsEngineState) -> Dict[str, Any]:
 
 
 async def store_node(state: NewsEngineState) -> Dict[str, Any]:
-    """Convert raw items to facts and store in Brain via gRPC."""
+    """Convert raw items to facts and store in Brain via generic Vector UPSERT."""
     raw_items = state.get("raw_items", [])
     tenant_id = state.get("tenant_id", "default")
 
-    logger.info("[%s] Storing %s facts to Brain", tenant_id, len(raw_items))
+    logger.info(
+        "[%s] Storing %s facts to Brain (Generic Vector Storage)", tenant_id, len(raw_items)
+    )
+
+    import uuid
 
     facts = []
-    config = get_core_config()
     stored_count = 0
+    config = get_core_config()
 
     try:
-        import uuid
-
         from contextcore import BrainClient
 
         from contextrouter.core.brain_token import get_brain_service_token
@@ -261,8 +157,9 @@ async def store_node(state: NewsEngineState) -> Dict[str, Any]:
         client = BrainClient(host=config.brain.grpc_endpoint, token=get_brain_service_token())
 
         for item in raw_items:
+            fact_id = str(uuid.uuid4())
             fact = {
-                "id": str(uuid.uuid4()),
+                "id": fact_id,
                 "headline": item.get("headline", ""),
                 "summary": item.get("summary", ""),
                 "url": item.get("url", ""),
@@ -270,42 +167,32 @@ async def store_node(state: NewsEngineState) -> Dict[str, Any]:
                 "significance_score": item.get("significance_score", 5),
                 "suggested_agents": item.get("suggested_agents", []),
                 "source": item.get("source", "unknown"),
-                "raw_id": item.get("brain_id"),  # Link to raw item if available
             }
 
             try:
-                fact_id = await client.upsert_news_item(
+                # Upsert into generic knowledge graph (ContextBrain)
+                content_text = f"{fact['headline']}\\n\\n{fact['summary']}"
+                await client.upsert(
                     tenant_id=tenant_id,
-                    url=fact["url"],
-                    headline=fact["headline"],
-                    summary=fact["summary"],
-                    item_type="fact",
-                    category=fact["category"],
+                    content=content_text,
+                    source_type="news_fact",
+                    doc_id=fact_id,
                     metadata={
+                        "url": fact["url"],
+                        "category": fact["category"],
                         "significance_score": str(fact["significance_score"]),
                         "source": fact["source"],
-                        "suggested_agents": ",".join(fact["suggested_agents"])
-                        if fact["suggested_agents"]
-                        else "",
                     },
                 )
-
-                if fact_id:
-                    stored_count += 1
-                    fact["brain_id"] = fact_id
-
+                stored_count += 1
+                fact["brain_id"] = fact_id
             except Exception as e:
-                logger.warning("Failed to store fact to Brain: %s", e)
+                logger.warning("Failed to upsert fact generically: %s", e)
 
             facts.append(fact)
 
-        logger.info("[%s] Stored %s/%s facts to Brain", tenant_id, stored_count, len(facts))
-
     except ImportError:
-        logger.warning("contextcore not available, facts won't be stored to Brain")
-        # Still create facts for the pipeline
-        import uuid
-
+        logger.warning("contextcore not available, facts won't be stored")
         for item in raw_items:
             fact = {
                 "id": str(uuid.uuid4()),
@@ -319,7 +206,7 @@ async def store_node(state: NewsEngineState) -> Dict[str, Any]:
             }
             facts.append(fact)
     except Exception as e:
-        logger.error("Brain storage error: %s", e)
+        logger.error("Brain generic storage error: %s", e)
 
     return {
         "facts": facts,
@@ -341,12 +228,18 @@ def create_archivist_subgraph():
     Note: LLM validation was removed because Showrunner already does
     editorial selection. This speeds up the pipeline by ~4 minutes.
     """
+    from contextrouter.cortex.graphs.secure_node import make_secure_node
+
     workflow = StateGraph(NewsEngineState)
 
-    workflow.add_node("filter", filter_node)
+    secure_filter = make_secure_node("filter", filter_node)
+    secure_dedupe = make_secure_node("dedupe", dedupe_node)
+    secure_store = make_secure_node("store", store_node)
+
+    workflow.add_node("filter", secure_filter)
     # validate_node removed - Showrunner handles editorial selection
-    workflow.add_node("dedupe", dedupe_node)
-    workflow.add_node("store", store_node)
+    workflow.add_node("dedupe", secure_dedupe)
+    workflow.add_node("store", secure_store)
 
     workflow.set_entry_point("filter")
     workflow.add_edge("filter", "dedupe")  # Skip validate, go directly to dedupe

@@ -1,15 +1,16 @@
 """LangGraph node for RLM Bulk Matcher — brand-by-brand BiDi iteration."""
 
-import logging
 import time
 import uuid
 from typing import Any
+
+from contextcore import get_context_unit_logger
 
 from .bidi import BiDiClient
 from .matcher import RLMBulkMatcher
 from .utils import slim_products
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 async def rlm_bulk_match_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -125,15 +126,23 @@ async def rlm_bulk_match_node(state: dict[str, Any]) -> dict[str, Any]:
         brands_total=len(brands_data),
     )
 
+    # Matcher model — passed directly in dispatch payload (rlm_model field)
+    # TODO: migrate matcher to template-based graph like gardener
+    rlm_model = state.get("rlm_model", "") or "mercury-2"
+    rlm_reasoning = state.get("rlm_reasoning", "") or "none"
+    logger.info("Matcher LLM config: model=%s, reasoning=%s", rlm_model, rlm_reasoning)
+
     all_matches = []
     brand_stats = {}
     total_supplier = 0
     total_site = 0
+
     matcher = RLMBulkMatcher(
         environment="local",
         verbose=True,
-        rlm_api_key=state.get("rlm_api_key", ""),
-        rlm_model=state.get("rlm_model", ""),
+        tenant_id=state.get("tenant_id", ""),
+        rlm_model=rlm_model,
+        reasoning_effort=rlm_reasoning,
     )
 
     custom_prompt = state.get("custom_prompt", "") or ""

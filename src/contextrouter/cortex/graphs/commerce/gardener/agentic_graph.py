@@ -13,9 +13,9 @@ Key differences from deterministic:
 
 from __future__ import annotations
 
-import logging
 from typing import Annotated, Any, Dict, Literal, Sequence, TypedDict
 
+from contextcore import get_context_unit_logger
 from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import tool
@@ -23,7 +23,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 # ============================================================================

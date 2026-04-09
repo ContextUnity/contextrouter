@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import logging
 import time
 from typing import Any
+
+from contextcore import get_context_unit_logger
 
 from contextrouter.core import BaseTransformer, Config, ContextUnit
 from contextrouter.modules.ingestion.rag.config import get_assets_paths, load_config
@@ -17,7 +18,7 @@ from contextrouter.modules.ingestion.rag.stages.store import (
     write_shadow_records_jsonl,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def build_shadow_records(

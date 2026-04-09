@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Literal
+
+from contextcore import get_context_unit_logger
 
 from contextrouter.cortex.graphs.dispatcher_agent.state import DispatcherState
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def should_execute_tools(state: DispatcherState) -> Literal["execute", "blocked", "end"]:

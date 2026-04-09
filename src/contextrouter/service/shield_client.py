@@ -16,11 +16,12 @@ Usage:
 
 from __future__ import annotations
 
-import logging
 import secrets
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from contextcore import get_context_unit_logger
+
+logger = get_context_unit_logger(__name__)
 
 # Default Shield endpoint — overridden by core config or env
 _DEFAULT_SHIELD_URL = "localhost:50054"
@@ -52,7 +53,17 @@ def _shield_metadata():
     """Create gRPC metadata with service token for Shield authentication.
 
     Single source of truth for all Router → Shield gRPC calls.
+    Propagates caller token if available (SPOT pattern).
     """
+    from contextcore.authz.context import get_auth_context
+
+    # Ensure caller token gets propagated to Shield
+    ctx = get_auth_context()
+    if ctx and ctx.token_string:
+        return [("authorization", f"Bearer {ctx.token_string}")]
+
+    # Fallback to local minting if background task
+    from contextcore.signing import get_signing_backend
     from contextcore.token_utils import create_grpc_metadata_with_token
     from contextcore.tokens import mint_service_token
 
@@ -66,7 +77,8 @@ def _shield_metadata():
             "shield:secrets:read",
         ),
     )
-    return create_grpc_metadata_with_token(token)
+    backend = get_signing_backend(project_id="router")
+    return create_grpc_metadata_with_token(token, backend=backend)
 
 
 def shield_put_secret(

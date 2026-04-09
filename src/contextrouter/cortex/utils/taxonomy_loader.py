@@ -10,11 +10,12 @@ They must degrade gracefully if taxonomy is missing.
 from __future__ import annotations
 
 import json
-import logging
 from functools import lru_cache
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+from contextcore import get_context_unit_logger
+
+logger = get_context_unit_logger(__name__)
 
 
 def _default_taxonomy_path() -> Path | None:

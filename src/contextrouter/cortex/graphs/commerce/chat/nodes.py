@@ -6,12 +6,13 @@ LLM intent detection and routing for PIM Chat.
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict
+
+from contextcore import get_context_unit_logger
 
 from .state import ChatState
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 async def detect_intent_node(state: ChatState) -> Dict[str, Any]:

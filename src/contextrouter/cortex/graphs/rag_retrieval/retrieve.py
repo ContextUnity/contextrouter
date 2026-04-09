@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import logging
+from contextcore import get_context_unit_logger
 
 from contextrouter.cortex import AgentState
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 async def retrieve_documents(state: AgentState) -> dict[str, object]:

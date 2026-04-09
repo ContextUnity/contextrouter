@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from typing import TYPE_CHECKING
+
+from contextcore import get_context_unit_logger
 
 from contextrouter.core import ContextToken
 from contextrouter.cortex.state import AgentState
@@ -18,7 +19,7 @@ from .settings import RagRetrievalSettings
 if TYPE_CHECKING:
     pass
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 class RetrievalMixin:

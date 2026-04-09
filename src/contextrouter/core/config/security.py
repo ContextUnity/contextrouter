@@ -12,8 +12,8 @@ class SecurityPoliciesConfig(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    read_permission: str = Permissions.BRAIN_READ
-    write_permission: str = Permissions.BRAIN_WRITE
+    read_permission: str = Permissions.ROUTER_EXECUTE
+    write_permission: str = Permissions.ROUTER_EXECUTE
 
     # Default permissions granted to new tokens
     default_permissions: tuple[str, ...] = (
@@ -29,17 +29,13 @@ class SecurityPoliciesConfig(BaseModel):
 
 
 class SecurityConfig(BaseModel):
-    """Security settings for the application."""
+    """Security settings for ContextRouter.
+
+    Security is always enforced — there is no toggle.
+    Token signing/verification is handled by contextcore.signing backends
+    (auto-detected: HmacBackend or SessionTokenBackend).
+    """
 
     model_config = ConfigDict(extra="ignore")
 
-    enabled: bool = False  # Disabled by default; enable in production
-    environment: str = "development"  # "development", "staging", "production"
     policies: SecurityPoliciesConfig = Field(default_factory=SecurityPoliciesConfig)
-
-    # Basic token settings
-    token_ttl_seconds: int = 3600  # 1 hour
-    token_issuer: str = "contextrouter"
-
-    # ContextUnit protocol token settings
-    private_key_path: str = ""  # Path to private key for token signing

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict, List, Literal
+
+from contextcore import get_context_unit_logger
 
 from .spawner import SubAgentSpawner
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 class SubAgentOrchestrator:

@@ -11,14 +11,13 @@ Tools:
 
 from __future__ import annotations
 
-import logging
-from typing import Any
-
+from contextcore import get_context_unit_logger
 from langchain_core.tools import tool
 
 from contextrouter.modules.tools import register_tool
+from contextrouter.modules.tools.schemas import DataToolResult
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def _get_default_bucket() -> str:
@@ -34,7 +33,7 @@ async def gcs_upload(
     path: str,
     bucket: str = "",
     content_type: str = "text/plain",
-) -> dict[str, Any]:
+) -> DataToolResult:
     """Upload content to Google Cloud Storage.
 
     Use this tool to save files, exports, reports, or any data to GCS.
@@ -97,7 +96,7 @@ async def gcs_upload(
 async def gcs_download(
     path: str,
     bucket: str = "",
-) -> dict[str, Any]:
+) -> DataToolResult:
     """Download content from Google Cloud Storage.
 
     Use this tool to read files from GCS buckets.
@@ -153,7 +152,7 @@ async def gcs_list(
     prefix: str = "",
     bucket: str = "",
     max_results: int = 50,
-) -> dict[str, Any]:
+) -> DataToolResult:
     """List blobs in a Google Cloud Storage bucket.
 
     Use this tool to browse available files in a GCS bucket.

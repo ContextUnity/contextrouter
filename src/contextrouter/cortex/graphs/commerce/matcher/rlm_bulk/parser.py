@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import ast
 import json
-import logging
 import os
 import re
 
+from contextcore import get_context_unit_logger
+
 from .types import ProductMatch
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def parse_rlm_response(response_text: str, out_path: str = "") -> list[ProductMatch]:

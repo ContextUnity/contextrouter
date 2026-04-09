@@ -40,7 +40,7 @@ class TestProtoCompilationAll:
         assert unit.unit_id == "test-1"
         assert hasattr(unit, "payload")
         assert hasattr(unit, "trace_id")
-        assert hasattr(unit, "provenance")
+        assert not hasattr(unit, "provenance")
         assert hasattr(unit, "chain_of_thought")
         assert hasattr(unit, "metrics")
         assert hasattr(unit, "security")
@@ -57,10 +57,6 @@ class TestProtoCompilationAll:
             "CreateKGRelation",
             "Upsert",
             "QueryMemory",
-            "UpsertNewsItem",
-            "GetNewsItems",
-            "UpsertNewsPost",
-            "CheckNewsPostExists",
             "AddEpisode",
             "UpsertFact",
             "UpsertTaxonomy",
@@ -101,7 +97,7 @@ class TestProtoCompilationAll:
         from contextcore import worker_pb2_grpc
 
         servicer = worker_pb2_grpc.WorkerServiceServicer()
-        expected = ["StartWorkflow", "GetTaskStatus", "ExecuteCode"]
+        expected = ["StartWorkflow", "GetTaskStatus", "ExecuteCode", "RegisterSchedules"]
         for rpc in expected:
             assert hasattr(servicer, rpc), f"WorkerService missing RPC: {rpc}"
 
@@ -192,7 +188,6 @@ class TestContextUnitProtobufRoundtrip:
 
         original = ContextUnit(
             payload={"tenant_id": "nszu", "query": "test", "count": 42},
-            provenance=["router:dispatcher", "brain:search"],
             security=SecurityScopes(read=["sql:select"], write=["product:patch"]),
         )
 
@@ -200,7 +195,6 @@ class TestContextUnitProtobufRoundtrip:
         pb = original.to_protobuf(context_unit_pb2)
         assert pb.unit_id == str(original.unit_id)
         assert pb.payload["tenant_id"] == "nszu"
-        assert list(pb.provenance) == ["router:dispatcher", "brain:search"]
         assert list(pb.security.read) == ["sql:select"]
         assert list(pb.security.write) == ["product:patch"]
 
@@ -209,7 +203,6 @@ class TestContextUnitProtobufRoundtrip:
         assert restored.unit_id == original.unit_id
         assert restored.payload["tenant_id"] == "nszu"
         assert restored.payload["count"] == 42
-        assert restored.provenance == original.provenance
         assert restored.security.read == original.security.read
         assert restored.security.write == original.security.write
 
@@ -275,64 +268,73 @@ class TestContextUnitProtobufRoundtrip:
 
 
 # ============================================================================
-# 4. SecurityGuard Contract — delegates to Shield.check()
+# 3. Shield API Contract — .check() NOT .scan()
 # ============================================================================
 
 
-class TestSecurityGuardContract:
-    """Verify SecurityGuard wraps Shield correctly."""
+class TestShieldAPIContract:
+    """Verify Shield's public API matches documentation exactly."""
 
-    def test_guard_check_input_signature(self):
-        """SecurityGuard.check_input() must accept user_input and related params."""
-        from contextcore.security import SecurityGuard
+    def test_shield_has_check_method(self):
+        """Shield.check() is the correct API — NOT .scan()."""
+        from contextshield import Shield
 
-        sig = inspect.signature(SecurityGuard.check_input)
+        shield = Shield()
+        assert hasattr(shield, "check"), "Shield must have .check() method"
+        assert not hasattr(shield, "scan"), "Shield must NOT have .scan() — use .check()"
+
+    def test_shield_check_signature(self):
+        """Shield.check() must accept user_input and context params."""
+        from contextshield import Shield
+
+        sig = inspect.signature(Shield.check)
         params = list(sig.parameters.keys())
-        assert "user_input" in params
-        assert "context_text" in params
-        assert "rag_chunks" in params
+        assert "user_input" in params, "Shield.check must accept user_input"
+        assert "context" in params, "Shield.check must accept context"
 
-    def test_guard_result_has_allowed_and_blocked(self):
-        """GuardResult must have .allowed and .blocked properties."""
-        from contextcore.security import GuardResult
+    def test_shield_check_returns_shield_result(self):
+        """Shield.check() must return a ShieldResult."""
+        from contextshield import Shield, ShieldResult
 
-        r = GuardResult(allowed=True)
-        assert r.allowed is True
-        assert r.blocked is False
+        shield = Shield()
+        result = shield.check(user_input="Hello")
+        assert isinstance(result, ShieldResult)
 
-        r2 = GuardResult(allowed=False, reason="test")
-        assert not r2.allowed
-        assert r2.blocked
+    def test_shield_result_has_correct_attributes(self):
+        """ShieldResult must have allowed, blocked, reason, flags, latency_ms, severity."""
+        from contextshield import Shield
 
-    def test_guard_validate_token_signature(self):
-        """SecurityGuard.validate_token() must accept context and require params."""
-        from contextcore.security import SecurityGuard
+        shield = Shield()
+        result = shield.check(user_input="test")
+        assert hasattr(result, "allowed")
+        assert hasattr(result, "blocked")  # property
+        assert hasattr(result, "reason")
+        assert hasattr(result, "flags")
+        assert hasattr(result, "latency_ms")
+        assert hasattr(result, "severity")
 
-        sig = inspect.signature(SecurityGuard.validate_token)
-        params = list(sig.parameters.keys())
-        assert "context" in params
-        assert "require" in params
+    def test_shield_result_blocked_is_inverse_of_allowed(self):
+        """ShieldResult.blocked must be the inverse of .allowed."""
+        from contextshield import Shield
 
-    def test_security_config_defaults(self):
-        """SecurityConfig defaults: security OFF, shield ON, fail_open OFF."""
-        from contextcore.security import SecurityConfig
+        shield = Shield()
+        result = shield.check(user_input="Safe query")
+        assert result.blocked == (not result.allowed)
 
-        cfg = SecurityConfig()
-        assert cfg.security_enabled is False
-        assert cfg.shield_enabled is True
-        assert cfg.fail_open is False
+    def test_shield_filter_or_raise_exists(self):
+        """Shield.filter_or_raise() must exist as a convenience method."""
+        from contextshield import Shield
 
-    def test_shield_status_returns_dict(self):
-        """shield_status() must return a dict with shield_installed key."""
-        from contextcore.security import shield_status
+        assert hasattr(Shield, "filter_or_raise")
 
-        status = shield_status()
-        assert isinstance(status, dict)
-        assert "shield_installed" in status
-        assert "shield_active" in status
-        assert "security_enabled" in status
+    def test_shield_blocked_error_type(self):
+        """ShieldBlockedError must be importable and be an Exception."""
+        from contextshield import ShieldBlockedError
+
+        assert issubclass(ShieldBlockedError, Exception)
 
 
+# ============================================================================
 # ============================================================================
 # 5. Token Lifecycle — mint → serialize → parse → verify
 # ============================================================================
@@ -362,15 +364,14 @@ class TestTokenLifecycle:
 
     def test_serialize_and_parse_roundtrip(self):
         """serialize_token → parse_token_string must produce equivalent token."""
+        from contextcore.signing import HmacBackend
         from contextcore.token_utils import (
             parse_token_string,
-            reset_default_backend,
             serialize_token,
         )
         from contextcore.tokens import TokenBuilder
 
-        reset_default_backend()
-
+        backend = HmacBackend("test", "secret")
         builder = TokenBuilder()
         original = builder.mint_root(
             user_ctx={},
@@ -379,7 +380,7 @@ class TestTokenLifecycle:
             allowed_tenants=["traverse"],
         )
 
-        wire = serialize_token(original)
+        wire = serialize_token(original, backend=backend)
         assert isinstance(wire, str)
         assert len(wire) > 10
 
@@ -391,13 +392,14 @@ class TestTokenLifecycle:
 
     def test_serialize_wire_format_3_parts(self):
         """Wire format must be kid.payload.signature (3 dot-separated parts)."""
-        from contextcore.token_utils import reset_default_backend, serialize_token
+        from contextcore.signing import HmacBackend
+        from contextcore.token_utils import serialize_token
         from contextcore.tokens import TokenBuilder
 
-        reset_default_backend()
+        backend = HmacBackend("test", "secret")
         builder = TokenBuilder()
         token = builder.mint_root(user_ctx={}, permissions=["test"], ttl_s=60)
-        wire = serialize_token(token)
+        wire = serialize_token(token, backend=backend)
         parts = wire.split(".")
         assert len(parts) == 3, f"Wire format must have 3 parts, got {len(parts)}: {wire}"
 
@@ -451,43 +453,9 @@ class TestTokenLifecycle:
         assert root.exp_unix is not None
         assert child.exp_unix <= root.exp_unix + 1.0  # 1s tolerance
 
-
-# ============================================================================
-# 6. Signing Backend Protocol
-# ============================================================================
-
-
-class TestSigningBackendProtocol:
-    """Verify signing backends satisfy the protocol."""
-
-    def test_unsigned_backend_satisfies_protocol(self):
-        """UnsignedBackend must implement the SigningBackend protocol."""
-        from contextcore.signing import SigningBackend, UnsignedBackend
-
-        backend = UnsignedBackend()
-        assert isinstance(backend, SigningBackend)
-
-    def test_unsigned_backend_properties(self):
-        """UnsignedBackend must have algorithm='none' and active_kid='unsigned'."""
-        from contextcore.signing import UnsignedBackend
-
-        backend = UnsignedBackend()
-        assert backend.algorithm == "none"
-        assert backend.active_kid == "unsigned"
-
-    def test_unsigned_sign_and_verify(self):
-        """UnsignedBackend sign → verify must return original payload."""
-        from contextcore.signing import UnsignedBackend
-
-        backend = UnsignedBackend()
-        payload = b'{"token_id":"test","permissions":["a"]}'
-        signed = backend.sign(payload)
-        assert signed.kid == "unsigned"
-        assert signed.algorithm == "none"
-
-        wire = signed.serialize()
-        restored = backend.verify(wire)
-        assert restored == payload
+    # ============================================================================
+    # 6. Signing Backend Protocol
+    # ============================================================================
 
     def test_signed_payload_wire_format(self):
         """SignedPayload.serialize() must produce kid.payload.signature format."""
@@ -497,12 +465,292 @@ class TestSigningBackendProtocol:
         wire = sp.serialize()
         assert wire == "key1.abc.xyz"
 
-    def test_get_signing_backend_without_config_returns_unsigned(self):
-        """get_signing_backend(None) must return UnsignedBackend."""
-        from contextcore.signing import UnsignedBackend, get_signing_backend
 
-        backend = get_signing_backend(None)
-        assert isinstance(backend, UnsignedBackend)
+# ============================================================================
+# 7. PolicyEngine Condition Contracts
+# ============================================================================
+
+
+class TestPolicyEngineConditionContracts:
+    """Verify every condition type evaluates correctly against ContextToken."""
+
+    def test_permission_condition_exact_match(self):
+        from contextcore.tokens import ContextToken
+        from contextshield.policy import PermissionCondition
+
+        cond = PermissionCondition("catalog:read")
+        token = ContextToken(token_id="t1", permissions=("catalog:read",))
+        assert cond.evaluate(token, {})
+
+    def test_permission_condition_wildcard(self):
+        from contextcore.tokens import ContextToken
+        from contextshield.policy import PermissionCondition
+
+        cond = PermissionCondition("admin:*")
+        token = ContextToken(token_id="t1", permissions=("admin:users", "admin:config"))
+        assert cond.evaluate(token, {})
+
+    def test_permission_condition_no_match(self):
+        from contextcore.tokens import ContextToken
+        from contextshield.policy import PermissionCondition
+
+        cond = PermissionCondition("catalog:write")
+        token = ContextToken(token_id="t1", permissions=("catalog:read",))
+        assert not cond.evaluate(token, {})
+
+    def test_tenant_condition_literal(self):
+        from contextcore.tokens import ContextToken
+        from contextshield.policy import TenantCondition
+
+        cond = TenantCondition("nszu")
+        token = ContextToken(token_id="t1", allowed_tenants=("nszu",))
+        assert cond.evaluate(token, {})
+
+    def test_tenant_condition_context_reference(self):
+        """TenantCondition('context.tenant_id') resolves from context dict."""
+        from contextcore.tokens import ContextToken
+        from contextshield.policy import TenantCondition
+
+        cond = TenantCondition("context.tenant_id")
+        token = ContextToken(token_id="t1", allowed_tenants=("nszu",))
+        assert cond.evaluate(token, {"tenant_id": "nszu"})
+        assert not cond.evaluate(token, {"tenant_id": "other"})
+
+    def test_operation_condition(self):
+        from contextcore.tokens import ContextToken
+        from contextshield.policy import OperationCondition
+
+        cond = OperationCondition("read")
+        token = ContextToken(token_id="t1")
+        assert cond.evaluate(token, {"operation": "read"})
+        assert not cond.evaluate(token, {"operation": "write"})
+
+    def test_context_condition_equals(self):
+        from contextcore.tokens import ContextToken
+        from contextshield.policy import ContextCondition
+
+        cond = ContextCondition(field="source", equals="api")
+        token = ContextToken(token_id="t1")
+        assert cond.evaluate(token, {"source": "api"})
+        assert not cond.evaluate(token, {"source": "web"})
+
+    def test_context_condition_in_list(self):
+        from contextcore.tokens import ContextToken
+        from contextshield.policy import ContextCondition
+
+        cond = ContextCondition(field="env", in_list=("prod", "staging"))
+        token = ContextToken(token_id="t1")
+        assert cond.evaluate(token, {"env": "prod"})
+        assert not cond.evaluate(token, {"env": "dev"})
+
+    def test_policy_engine_default_deny(self):
+        """With no matching policies, default_effect='deny' must deny."""
+        from contextcore.tokens import ContextToken
+        from contextshield.policy import PolicyEngine
+
+        engine = PolicyEngine([], default_effect="deny")
+        token = ContextToken(token_id="t1", permissions=("test",))
+        result = engine.evaluate(token)
+        assert not result.allowed
+        assert result.matched_policy is None
+
+    def test_policy_engine_default_allow(self):
+        """With no matching policies, default_effect='allow' must allow."""
+        from contextcore.tokens import ContextToken
+        from contextshield.policy import PolicyEngine
+
+        engine = PolicyEngine([], default_effect="allow")
+        token = ContextToken(token_id="t1")
+        result = engine.evaluate(token)
+        assert result.allowed
+
+    def test_policy_engine_priority_ordering(self):
+        """Higher priority policies should be evaluated first."""
+        from contextcore.tokens import ContextToken
+        from contextshield.policy import PermissionCondition, Policy, PolicyEngine
+
+        engine = PolicyEngine(
+            [
+                Policy(
+                    name="low-priority-deny",
+                    effect="deny",
+                    conditions=(PermissionCondition("test"),),
+                    priority=1,
+                ),
+                Policy(
+                    name="high-priority-allow",
+                    effect="allow",
+                    conditions=(PermissionCondition("test"),),
+                    priority=10,
+                ),
+            ]
+        )
+        token = ContextToken(token_id="t1", permissions=("test",))
+        result = engine.evaluate(token)
+        assert result.allowed
+        assert result.matched_policy == "high-priority-allow"
+
+
+# ============================================================================
+# 8. ContextZero ProxyService Contract
+# ============================================================================
+
+
+class TestProxyServiceContract:
+    """Verify ProxyService API matches documented contract."""
+
+    def test_proxy_service_has_all_methods(self):
+        """ProxyService must have anonymize, deanonymize, destroy_session, get_stats, cleanup_expired_sessions."""
+        from contextzero import ProxyService
+
+        required_methods = [
+            "anonymize",
+            "deanonymize",
+            "destroy_session",
+            "get_stats",
+            "cleanup_expired_sessions",
+        ]
+        for method in required_methods:
+            assert hasattr(ProxyService, method), f"ProxyService missing method: {method}"
+
+    def test_proxy_request_fields(self):
+        """ProxyRequest must have prompt, session_id, persona_name, metadata."""
+        from contextzero import ProxyRequest
+
+        req = ProxyRequest(
+            prompt="test", session_id="s1", persona_name="analyst", metadata={"key": "val"}
+        )
+        assert req.prompt == "test"
+        assert req.session_id == "s1"
+        assert req.persona_name == "analyst"
+        assert req.metadata == {"key": "val"}
+
+    def test_proxy_response_fields(self):
+        """ProxyResponse must have anonymized_prompt, persona_injected, entities_masked, entity_types, session_id."""
+        from contextzero import ProxyResponse
+
+        resp = ProxyResponse(anonymized_prompt="test", entities_masked=3, entity_types=["phone"])
+        assert resp.anonymized_prompt == "test"
+        assert resp.entities_masked == 3
+        assert resp.entity_types == ["phone"]
+        assert resp.persona_injected is False
+
+    def test_anonymize_returns_proxy_response(self):
+        """ProxyService.anonymize() must return a ProxyResponse."""
+        from contextzero import ProxyRequest, ProxyResponse, ProxyService
+        from contextzero.masking import MaskingConfig
+
+        svc = ProxyService.create(masking_config=MaskingConfig())
+        resp = svc.anonymize(ProxyRequest(prompt="test text"))
+        assert isinstance(resp, ProxyResponse)
+        assert resp.session_id  # auto-generated if not provided
+
+    def test_deanonymize_roundtrip(self):
+        """anonymize → deanonymize must restore original text when no PII."""
+        from contextzero import DeanonymizeRequest, ProxyRequest, ProxyService
+        from contextzero.masking import MaskingConfig
+
+        svc = ProxyService.create(masking_config=MaskingConfig())
+        resp = svc.anonymize(ProxyRequest(prompt="no pii here", session_id="test-rt"))
+        restored = svc.deanonymize(
+            DeanonymizeRequest(text=resp.anonymized_prompt, session_id="test-rt")
+        )
+        assert "no pii here" in restored
+
+
+# ============================================================================
+# 9. Audit Trail Event Contract
+# ============================================================================
+
+
+class TestAuditEventContract:
+    """Verify AuditEvent types cover full security lifecycle."""
+
+    def test_all_event_types_exist(self):
+        """AuditEventType must cover shield, token, policy, delegation, key, and pii events."""
+        from contextshield.audit import AuditEventType
+
+        required = [
+            "SHIELD_CHECK",
+            "SHIELD_BLOCK",
+            "TOKEN_MINT",
+            "TOKEN_VERIFY",
+            "TOKEN_VERIFY_FAIL",
+            "TOKEN_REVOKE",
+            "POLICY_EVALUATE",
+            "POLICY_DENY",
+            "DELEGATION_CREATE",
+            "DELEGATION_ATTENUATE",
+            "KEY_ROTATE",
+            "KEY_GENERATE",
+            "PII_MASK",
+            "PII_UNMASK",
+            "PII_LEAK_DETECTED",
+        ]
+        for name in required:
+            assert hasattr(AuditEventType, name), f"Missing AuditEventType: {name}"
+
+    def test_event_serialization_round_trip(self):
+        """AuditEvent.to_dict() must include event_type as string value."""
+        import json
+
+        from contextshield.audit import AuditEvent, AuditEventType
+
+        event = AuditEvent(
+            event_type=AuditEventType.TOKEN_MINT,
+            actor="admin",
+            tenant="nszu",
+            details={"token_id": "t1"},
+        )
+        d = event.to_dict()
+        assert d["event_type"] == "token.mint"
+        assert d["actor"] == "admin"
+
+        j = event.to_json()
+        parsed = json.loads(j)
+        assert parsed["event_type"] == "token.mint"
+
+    def test_audit_trail_log_shield_check(self):
+        """AuditTrail.log_shield_check() must accept all documented params."""
+        from contextshield.audit import AuditTrail
+
+        trail = AuditTrail(enabled=True)
+        # Should not raise
+        trail.log_shield_check(
+            allowed=True,
+            flags=["injection"],
+            latency_ms=1.5,
+            request_id="r1",
+            actor="user",
+            tenant="nszu",
+            input_preview="test",
+        )
+
+    def test_audit_trail_log_token_operation(self):
+        """AuditTrail.log_token_operation() must accept operation, token_id, actor, etc."""
+        from contextshield.audit import AuditTrail
+
+        trail = AuditTrail(enabled=True)
+        trail.log_token_operation(
+            "mint",
+            token_id="tok-123",
+            actor="admin",
+            tenant="traverse",
+            request_id="r2",
+        )
+
+    def test_audit_trail_log_policy_decision(self):
+        """AuditTrail.log_policy_decision() must accept effect, policy_name, permissions."""
+        from contextshield.audit import AuditTrail
+
+        trail = AuditTrail(enabled=True)
+        trail.log_policy_decision(
+            effect="deny",
+            policy_name="rate-limit",
+            permissions=["write"],
+            actor="user",
+            tenant="nszu",
+        )
 
 
 # ============================================================================
@@ -646,6 +894,24 @@ class TestExportConsistency:
                 f"contextcore.__all__ lists '{name}' but it's not importable"
             )
 
+    def test_contextshield_exports(self):
+        """Every item in contextshield.__all__ must be importable."""
+        import contextshield
+
+        for name in contextshield.__all__:
+            assert hasattr(contextshield, name), (
+                f"contextshield.__all__ lists '{name}' but it's not importable"
+            )
+
+    def test_contextzero_exports(self):
+        """Every item in contextzero.__all__ must be importable."""
+        import contextzero
+
+        for name in contextzero.__all__:
+            assert hasattr(contextzero, name), (
+                f"contextzero.__all__ lists '{name}' but it's not importable"
+            )
+
     def test_contextrouter_exports(self):
         """contextrouter.__all__ must list all expected exports.
 
@@ -712,6 +978,28 @@ class TestCrossServiceTypeConsistency:
         from contextcore.sdk.models import SecurityScopes as SS2
 
         assert SS1 is SS2
+
+    def test_shield_policy_uses_contextcore_token(self):
+        """Shield's PolicyEngine must use the same ContextToken from contextcore."""
+        from contextcore.tokens import ContextToken
+        from contextshield.policy import PermissionCondition, Policy, PolicyEngine
+
+        # Create a token from contextcore
+        token = ContextToken(token_id="cross-svc", permissions=("test",))
+        engine = PolicyEngine(
+            [
+                Policy(name="test", effect="allow", conditions=(PermissionCondition("test"),)),
+            ]
+        )
+        # Must work — proves same class
+        result = engine.evaluate(token)
+        assert result.allowed
+
+
+"""
+    __import__("contextshield.policy").policy.PermissionCondition uses contextcore.tokens.ContextToken
+    This test verifies the cross-service contract is intact.
+"""
 
 
 # ============================================================================

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from typing import TYPE_CHECKING, AsyncIterator
+
+from contextcore import get_context_unit_logger
 
 try:
     from asyncio import anext  # Python 3.10+
@@ -22,8 +23,9 @@ except ImportError:
             return default
 
 
+from contextcore.tokens import ContextToken
+
 from contextrouter.core import Config
-from contextrouter.core.tokens import ContextToken
 
 from ..types import (
     BaseModel,
@@ -43,7 +45,7 @@ from .types import ModelSelectionStrategy
 if TYPE_CHECKING:
     from .main import ModelRegistry
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 class FallbackModel(BaseModel):
@@ -89,19 +91,9 @@ class FallbackModel(BaseModel):
             for key in self._candidate_keys:
                 try:
                     model_kwargs = dict(self._kwargs)
-                    model_kwargs.pop("api_key_shield_path", None)  # ignore old hardcoded paths
 
                     if tenant_id:
-                        provider = key.split("/")[0] if "/" in key else key
-                        shield_path = f"{tenant_id}/api_keys/{provider}"
-                        try:
-                            from contextrouter.service.shield_client import shield_get_secret
-
-                            secret_val = shield_get_secret(shield_path, tenant_id=tenant_id)
-                            if secret_val:
-                                model_kwargs["api_key"] = secret_val
-                        except Exception as e:
-                            logger.warning("Failed to fetch API key from shield for %s: %s", key, e)
+                        model_kwargs["tenant_id"] = tenant_id
 
                     model = self._registry.create_llm(key, config=self._config, **model_kwargs)
                     self._candidates.append((key, model))

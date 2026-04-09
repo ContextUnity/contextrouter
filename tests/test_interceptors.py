@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import contextcore.router_pb2 as router_pb2
 from contextcore.permissions import Permissions
-from contextcore.security import EnforcementMode
 
 from contextrouter.service.interceptors import (
     RPC_PERMISSION_MAP,
@@ -26,22 +25,16 @@ class TestRPCPermissionMap:
     """Verify all Router RPCs are mapped to correct permissions."""
 
     def test_execute_agent_mapped(self):
-        assert RPC_PERMISSION_MAP["ExecuteAgent"] == Permissions.ROUTER_INVOKE
+        assert RPC_PERMISSION_MAP["ExecuteAgent"] == Permissions.ROUTER_EXECUTE
 
     def test_stream_agent_mapped(self):
-        assert RPC_PERMISSION_MAP["StreamAgent"] == Permissions.ROUTER_INVOKE
+        assert RPC_PERMISSION_MAP["StreamAgent"] == Permissions.ROUTER_EXECUTE
 
     def test_execute_dispatcher_mapped(self):
-        assert RPC_PERMISSION_MAP["ExecuteDispatcher"] == Permissions.DISPATCHER_EXECUTE
+        assert RPC_PERMISSION_MAP["ExecuteDispatcher"] == Permissions.ROUTER_EXECUTE
 
     def test_stream_dispatcher_mapped(self):
-        assert RPC_PERMISSION_MAP["StreamDispatcher"] == Permissions.DISPATCHER_EXECUTE
-
-    def test_register_tools_mapped(self):
-        assert RPC_PERMISSION_MAP["RegisterTools"] == Permissions.TOOLS_REGISTER
-
-    def test_deregister_tools_mapped(self):
-        assert RPC_PERMISSION_MAP["DeregisterTools"] == Permissions.TOOLS_REGISTER
+        assert RPC_PERMISSION_MAP["StreamDispatcher"] == Permissions.ROUTER_EXECUTE
 
     def test_tool_executor_stream_mapped(self):
         assert RPC_PERMISSION_MAP["ToolExecutorStream"] == Permissions.TOOLS_REGISTER
@@ -53,8 +46,7 @@ class TestRPCPermissionMap:
             "StreamAgent",
             "ExecuteDispatcher",
             "StreamDispatcher",
-            "RegisterTools",
-            "DeregisterTools",
+            "RegisterManifest",
             "ToolExecutorStream",
         }
         assert set(RPC_PERMISSION_MAP.keys()) == expected_rpcs
@@ -70,7 +62,7 @@ class TestRPCPermissionMap:
 
     def test_registration_rpcs_require_register(self):
         """Registration RPCs should require register permission."""
-        reg_rpcs = ["RegisterTools", "DeregisterTools", "ToolExecutorStream"]
+        reg_rpcs = ["RegisterManifest", "ToolExecutorStream"]
         for rpc in reg_rpcs:
             perm = RPC_PERMISSION_MAP[rpc]
             assert ":register" in perm, f"{rpc} should require register, got {perm}"
@@ -135,18 +127,6 @@ class TestProtoPermissionCoverage:
 
 class TestRouterPermissionInterceptor:
     """Test interceptor construction."""
-
-    def test_warn_by_default(self):
-        interceptor = RouterPermissionInterceptor()
-        assert interceptor._mode == EnforcementMode.WARN
-
-    def test_enforce_mode(self):
-        interceptor = RouterPermissionInterceptor(enforcement=EnforcementMode.ENFORCE)
-        assert interceptor._mode == EnforcementMode.ENFORCE
-
-    def test_warn_mode(self):
-        interceptor = RouterPermissionInterceptor(enforcement=EnforcementMode.WARN)
-        assert interceptor._mode == EnforcementMode.WARN
 
     def test_service_name(self):
         interceptor = RouterPermissionInterceptor()

@@ -20,15 +20,15 @@ LIMITATIONS:
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
+from contextcore import get_context_unit_logger
 from contextcore.exceptions import ProviderError
 
 from contextrouter.core import get_core_config
 from contextrouter.modules.retrieval.rag.settings import get_effective_data_store_id
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 async def generate_with_grounding(

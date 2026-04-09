@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 import json
-import logging
 from decimal import Decimal
 
+from contextcore import get_context_unit_logger
 from langchain_core.tools import BaseTool
 
 from contextrouter.cortex.graphs.sql_analytics.helpers import (
     is_debug,
     validate_sql_syntax,
 )
+from contextrouter.cortex.graphs.sql_analytics.schemas import SqlAnalyticsStateUpdate
 from contextrouter.cortex.graphs.sql_analytics.state import SqlAnalyticsState
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def make_execute_node(*, sql_tool: BaseTool | None, tool_names: list[str]):
@@ -28,8 +29,20 @@ def make_execute_node(*, sql_tool: BaseTool | None, tool_names: list[str]):
     so BrainAutoTracer captures it automatically — no manual _steps needed.
     """
 
-    async def execute_node(state: SqlAnalyticsState):
-        if not sql_tool:
+    async def execute_node(state: SqlAnalyticsState) -> SqlAnalyticsStateUpdate:
+        # Lazy resolution: if tool wasn't found at build time, try again now
+        resolved_tool = sql_tool
+        if not resolved_tool and tool_names:
+            from contextrouter.modules.tools import get_tool
+
+            for name in tool_names:
+                found = get_tool(name)
+                if found:
+                    resolved_tool = found
+                    logger.info("Lazy-resolved SQL tool: %s", name)
+                    break
+
+        if not resolved_tool:
             logger.error("No SQL tool configured! tool_bindings=%s", tool_names)
             return {
                 "error": "No SQL tool configured",
@@ -52,12 +65,12 @@ def make_execute_node(*, sql_tool: BaseTool | None, tool_names: list[str]):
                 "error": f"SQL syntax error: {syntax_err}",
             }
 
-        logger.info("execute_node: running SQL tool '%s'", sql_tool.name)
+        logger.info("execute_node: running SQL tool '%s'", resolved_tool.name)
         if is_debug():
             logger.debug("execute_node: sql=%s", sql[:500])
 
         try:
-            res = await sql_tool.ainvoke(sql)
+            res = await resolved_tool.ainvoke(sql)
             logger.debug("execute_node: tool returned type=%s", type(res).__name__)
 
             if isinstance(res, str):

@@ -4,12 +4,11 @@ Harvest subgraph steps - fetch news using Perplexity with LLM fallback.
 
 from __future__ import annotations
 
-import logging
-from typing import Any
-
+from contextcore import get_context_unit_logger
 from langgraph.graph import END, START, StateGraph
 
 from contextrouter.core import get_core_config
+from contextrouter.cortex.graphs.config_resolution import get_node_manifest_config
 from contextrouter.modules.models import model_registry
 from contextrouter.modules.models.types import ModelRequest, TextPart
 
@@ -17,19 +16,18 @@ from ..state import NewsEngineState
 from .json_parser import extract_json_array
 from .prompts import DEFAULT_HARVESTER_PROMPT
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
-async def harvest_perplexity_node(state: NewsEngineState) -> dict[str, Any]:
+async def harvest_perplexity_node(state: NewsEngineState) -> NewsEngineState:
     """Use Perplexity to harvest news with built-in search."""
     tenant_id = state.get("tenant_id", "unknown")
-    logger.info("[%s] Harvesting via Perplexity", tenant_id)
+    logger.info("[%s] Harvesting via LLM Search", tenant_id)
 
     config = get_core_config()
 
-    if not config.perplexity.api_key:
-        logger.warning("Perplexity API key not configured, skipping")
-        return {"harvest_errors": ["Perplexity API key not configured"]}
+    node_config = get_node_manifest_config(state, "perplexity")
+    model_name = node_config.get("model", "perplexity/sonar")
 
     # Get prompt override or use default
     overrides = state.get("prompt_overrides", {})
@@ -50,7 +48,7 @@ async def harvest_perplexity_node(state: NewsEngineState) -> dict[str, Any]:
     for attempt in range(max_retries):
         try:
             model = model_registry.create_llm(
-                "perplexity/sonar",
+                model_name,
                 config=config,
                 search_recency_filter="day",
                 return_citations=True,
@@ -162,7 +160,7 @@ async def harvest_perplexity_node(state: NewsEngineState) -> dict[str, Any]:
     }
 
 
-async def harvest_llm_fallback_node(state: NewsEngineState) -> dict[str, Any]:
+async def harvest_llm_fallback_node(state: NewsEngineState) -> NewsEngineState:
     """Fallback to OpenAI with web search if Perplexity failed or returned no results.
 
     Uses model_registry.create_llm with enable_web_search=True to activate
@@ -178,16 +176,19 @@ async def harvest_llm_fallback_node(state: NewsEngineState) -> dict[str, Any]:
     tenant_id = state.get("tenant_id", "unknown")
     config = get_core_config()
 
-    logger.info("[%s] Falling back to OpenAI with web search", tenant_id)
+    logger.info("[%s] Falling back to LLM with web search", tenant_id)
 
     # Get prompt override or use default
     overrides = state.get("prompt_overrides", {})
+
+    node_config = get_node_manifest_config(state, "llm_fallback")
+    model_name = node_config.get("model", "openai/gpt-4o-mini")
     system_prompt = overrides.get("harvester", DEFAULT_HARVESTER_PROMPT)
 
     try:
         # Use model_registry with enable_web_search=True (architecture-compliant)
         model = model_registry.create_llm(
-            "openai/gpt-4o-mini",
+            model_name,
             config=config,
             enable_web_search=True,
         )
@@ -275,8 +276,8 @@ Return 5-10 stories as JSON array with:
         }
 
 
-async def store_raw_to_brain_node(state: NewsEngineState) -> dict[str, Any]:
-    """Store raw harvested items to Brain for audit trail."""
+async def store_raw_to_brain_node(state: NewsEngineState) -> NewsEngineState:
+    """Store raw harvested items to Brain via generic Vector UPSERT."""
     raw_items = state.get("raw_items", [])
     tenant_id = state.get("tenant_id", "default")
     harvest_source = state.get("harvest_source", "unknown")
@@ -284,11 +285,13 @@ async def store_raw_to_brain_node(state: NewsEngineState) -> dict[str, Any]:
     if not raw_items:
         return {}
 
-    logger.info("[%s] Storing %s raw items to Brain", tenant_id, len(raw_items))
+    logger.info("[%s] Storing %s raw items to Brain generic storage", tenant_id, len(raw_items))
 
     config = get_core_config()
 
     try:
+        import uuid
+
         from contextcore import BrainClient
 
         from contextrouter.core.brain_token import get_brain_service_token
@@ -298,26 +301,28 @@ async def store_raw_to_brain_node(state: NewsEngineState) -> dict[str, Any]:
         stored_count = 0
         for item in raw_items:
             try:
-                item_id = await client.upsert_news_item(
+                item_id = str(uuid.uuid4())
+                content_text = f"{item.get('headline', '')}\\n\\n{item.get('summary', '')}"
+
+                await client.upsert(
                     tenant_id=tenant_id,
-                    url=item.get("url", ""),
-                    headline=item.get("headline", ""),
-                    summary=item.get("summary", ""),
-                    item_type="raw",
-                    category=item.get("category", ""),
-                    source_api=harvest_source,
+                    content=content_text,
+                    source_type="raw_item",
+                    doc_id=item_id,
                     metadata={
+                        "url": item.get("url", ""),
+                        "category": item.get("category", ""),
+                        "source_api": harvest_source,
                         "significance_score": str(item.get("significance_score", 5)),
                         "source": item.get("source", ""),
                     },
                 )
 
-                if item_id:
-                    stored_count += 1
-                    item["brain_id"] = item_id
+                stored_count += 1
+                item["brain_id"] = item_id
 
             except Exception as e:
-                logger.warning("Failed to store raw item to Brain: %s", e)
+                logger.warning("Failed to store raw item generically: %s", e)
 
         logger.info("[%s] Stored %s/%s raw items to Brain", tenant_id, stored_count, len(raw_items))
 
@@ -339,7 +344,7 @@ def _should_fallback(state: NewsEngineState) -> str:
     return "llm_fallback"
 
 
-def _after_llm_fallback(state: NewsEngineState) -> str:
+def _after_fallback(state: NewsEngineState) -> str:
     """After LLM fallback, store to Brain if we have items."""
     items = state.get("raw_items", [])
     if items:
@@ -348,17 +353,27 @@ def _after_llm_fallback(state: NewsEngineState) -> str:
 
 
 def create_harvest_subgraph():
-    """Create harvest subgraph with Perplexity + LLM fallback + Brain storage.
+    """Create harvest subgraph with Perplexity + LLM fallback.
 
     Flow:
         perplexity → (if no items) → llm_fallback → store_to_brain → END
                    → (if items)   → store_to_brain → END
     """
+    from contextrouter.cortex.graphs.secure_node import make_secure_node
+
     graph = StateGraph(NewsEngineState)
 
-    graph.add_node("perplexity", harvest_perplexity_node)
-    graph.add_node("llm_fallback", harvest_llm_fallback_node)
-    graph.add_node("store_to_brain", store_raw_to_brain_node)
+    secure_perplexity = make_secure_node(
+        "perplexity", harvest_perplexity_node, model_secret_ref="perplexity"
+    )
+    secure_fallback = make_secure_node(
+        "llm_fallback", harvest_llm_fallback_node, model_secret_ref="openai"
+    )
+    secure_store = make_secure_node("store_to_brain", store_raw_to_brain_node)
+
+    graph.add_node("perplexity", secure_perplexity)
+    graph.add_node("llm_fallback", secure_fallback)
+    graph.add_node("store_to_brain", secure_store)
 
     graph.add_edge(START, "perplexity")
     graph.add_conditional_edges(
@@ -372,7 +387,7 @@ def create_harvest_subgraph():
     )
     graph.add_conditional_edges(
         "llm_fallback",
-        _after_llm_fallback,
+        _after_fallback,
         {
             "store_to_brain": "store_to_brain",
             END: END,

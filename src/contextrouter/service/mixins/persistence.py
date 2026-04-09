@@ -7,7 +7,7 @@ import json
 from contextcore import get_context_unit_logger
 
 from contextrouter.core import get_core_config
-from contextrouter.service.payloads import RegisterToolsPayload
+from contextrouter.service.payloads import GraphConfig, ToolConfig
 from contextrouter.service.tool_factory import create_tool_from_config
 
 logger = get_context_unit_logger(__name__)
@@ -58,6 +58,38 @@ class PersistenceMixin:
         finally:
             await r.aclose()
 
+    async def _check_manifest_hash(self, project_id: str, current_hash: str) -> bool:
+        """Check if the given manifest hash matches the one stored in Redis."""
+        if not current_hash:
+            return False
+
+        r = await self._get_redis()
+        if not r:
+            return False
+        try:
+            stored_hash = await r.get(f"{_REDIS_PREFIX}:{project_id}:hash")
+            return stored_hash == current_hash
+        except Exception as e:
+            logger.warning("Failed to check manifest hash in Redis: %s", e)
+            return False
+        finally:
+            await r.aclose()
+
+    async def _save_manifest_hash(self, project_id: str, new_hash: str) -> None:
+        """Save the new manifest hash to Redis."""
+        if not new_hash:
+            return
+
+        r = await self._get_redis()
+        if not r:
+            return
+        try:
+            await r.set(f"{_REDIS_PREFIX}:{project_id}:hash", new_hash)
+        except Exception as e:
+            logger.warning("Failed to save manifest hash to Redis: %s", e)
+        finally:
+            await r.aclose()
+
     async def restore_registrations(self):
         """Restore all project registrations from Redis.
 
@@ -86,15 +118,20 @@ class PersistenceMixin:
                     if not raw:
                         continue
                     payload = json.loads(raw)
-                    params = RegisterToolsPayload(**payload)
+                    project_id = payload.get("project_id")
+                    if not project_id:
+                        logger.warning("Persisted payload missing 'project_id', skipping.")
+                        continue
+                    tenant_id = payload.get("tenant_id", project_id)
 
                     # Deregister previous (idempotent)
-                    if params.project_id in self._project_tools:
-                        self._deregister_project(params.project_id)
+                    if project_id in self._project_tools:
+                        self._deregister_project(project_id)
 
                     # Re-create tools
                     registered_tools: list[str] = []
-                    for tool_def in params.tools:
+                    for tool_dict in payload.get("tools", []):
+                        tool_def = ToolConfig(**tool_dict)
                         tools = create_tool_from_config(
                             name=tool_def.name,
                             tool_type=tool_def.type,
@@ -104,15 +141,29 @@ class PersistenceMixin:
                         from contextrouter.modules.tools import register_tool
 
                         for tool_instance in tools:
-                            register_tool(tool_instance)
+                            register_tool(tool_instance, tenant=tenant_id)
                             registered_tools.append(tool_instance.name)
 
-                    self._project_tools[params.project_id] = registered_tools
+                    self._project_tools[project_id] = registered_tools
 
                     # Re-register graph
                     graph_name = None
-                    if params.graph:
-                        graph_name = self._register_graph(params.project_id, params.graph)
+                    graph_dict = payload.get("graph")
+                    if graph_dict and "id" in graph_dict:
+                        graph_config = GraphConfig(
+                            name=graph_dict["id"],
+                            template=graph_dict.get("template"),
+                            nodes=graph_dict.get("nodes", []),
+                            edges=graph_dict.get("edges", []),
+                            config=graph_dict.get("config", {}),
+                        )
+                        graph_name = self._register_graph(project_id, graph_config)
+
+                        if project_id not in self._project_configs:
+                            self._project_configs[project_id] = {}
+                        self._project_configs[project_id]["nodes"] = graph_dict.get("nodes", [])
+                        self._project_configs[project_id]["policy"] = payload.get("policy", {})
+                        self._project_configs[project_id]["tools"] = payload.get("tools", [])
 
                     logger.info(
                         "Restored project '%s': %d tools, graph=%s",

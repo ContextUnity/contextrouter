@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
-from contextrouter.cortex.graphs.dispatcher_agent.state import DispatcherState
+from contextcore import get_context_unit_logger
+
+from contextrouter.cortex.graphs.dispatcher_agent.state import (
+    DispatcherState,
+    DispatcherStateUpdate,
+)
 from contextrouter.modules.tools import discover_all_tools
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
-async def security_guard_node(state: DispatcherState) -> dict[str, Any]:
+async def security_guard_node(state: DispatcherState) -> DispatcherStateUpdate:
     """Security guard node — checks tool permissions before execution.
 
     Enforcement layers (in priority order):

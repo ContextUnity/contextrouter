@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import json
-import logging
 import re
 from typing import Any
 
+from contextcore import get_context_unit_logger
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from contextrouter.core import get_core_config
 from contextrouter.modules.models.types import ModelRequest, TextPart
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 # Verbose graph-level logging — lazy to avoid import-time config access
 _dbg_cache: bool | None = None
@@ -66,6 +66,9 @@ def extract_json(text: str) -> dict:
 async def invoke_model(
     model: Any,
     messages: list[BaseMessage],
+    *,
+    config: Any = None,
+    prompt_version: str | None = None,
 ) -> tuple[AIMessage, dict]:
     """Bridge LangChain messages to Router model.generate() API.
 
@@ -103,7 +106,63 @@ async def invoke_model(
         response_format="json_object",
     )
     logger.info("invoke_model: request.system len=%s", len(request.system) if request.system else 0)
+
+    # Standard LangChain LLM tracing via config callbacks
+    # This automatically notifies Langfuse, BrainAutoTracer, and any other handlers
+    from langchain_core.runnables.config import get_async_callback_manager_for_config
+
+    cb_manager = get_async_callback_manager_for_config(config or {})
+
+    # Extract actual model name instead of FallbackModel wrapper class
+    llm_name = getattr(model, "name", None)
+    if not llm_name:
+        candidates = getattr(model, "_candidate_keys", None)
+        if candidates and isinstance(candidates, list) and candidates:
+            llm_name = candidates[0]
+    llm_name = llm_name or getattr(model.__class__, "__name__", "LLM")
+
+    rms = await cb_manager.on_chat_model_start(
+        serialized={"name": llm_name},
+        messages=[messages],
+    )
+    run_manager = rms[0] if rms else None
+
+    if prompt_version:
+        from contextrouter.cortex.runtime_context import append_provenance
+
+        append_provenance(f"prompt:{llm_name}:{prompt_version}")
+
     response = await model.generate(request)
+
+    if run_manager:
+        try:
+            from langchain_core.outputs import ChatGeneration, LLMResult
+
+            gen = ChatGeneration(message=AIMessage(content=response.text), text=response.text)
+
+            usage = response.usage
+            llm_output = {}
+            if usage:
+                llm_output["token_usage"] = {
+                    "prompt_tokens": usage.input_tokens or 0,
+                    "completion_tokens": usage.output_tokens or 0,
+                    "total_tokens": (usage.input_tokens or 0) + (usage.output_tokens or 0),
+                    "total_cost": usage.total_cost or 0.0,
+                }
+
+            # Use actual model name from response (what the provider returned)
+            if response.raw_provider:
+                llm_output["model_name"] = response.raw_provider.model_name
+            else:
+                candidate_keys = getattr(model, "_candidate_keys", None)
+                if candidate_keys:
+                    llm_output["model_name"] = candidate_keys[0]
+
+            res = LLMResult(generations=[[gen]], llm_output=llm_output)
+            await run_manager.on_llm_end(res)
+        except Exception as e:
+            logger.warning("Failed to end callback manager run: %s", e)
+
     usage = response.usage
     if usage:
         usage_dict = {

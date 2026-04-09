@@ -6,8 +6,7 @@ and generation, calling the LLM directly with grounding enabled.
 
 from __future__ import annotations
 
-import logging
-
+from contextcore import get_context_unit_logger
 from langchain_core.messages import AIMessage
 
 from contextrouter.cortex import AgentState
@@ -16,7 +15,7 @@ from contextrouter.cortex.prompting import RAG_SYSTEM_PROMPT
 from contextrouter.cortex.services import get_graph_service
 from contextrouter.modules.providers.storage.vertex_grounding import generate_with_grounding
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 async def generate_with_native_grounding(state: AgentState) -> dict[str, object]:

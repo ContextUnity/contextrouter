@@ -57,13 +57,13 @@ def cli(ctx, verbose, config_path):
         warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
 
     # Suppress verbose HTTP logging from Google API clients
-    logging.getLogger("google").setLevel(logging.WARNING)
-    logging.getLogger("google.genai").setLevel(logging.WARNING)
-    logging.getLogger("google.auth").setLevel(logging.WARNING)
-    logging.getLogger("google.api_core").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    get_context_unit_logger("google").setLevel(logging.WARNING)
+    get_context_unit_logger("google.genai").setLevel(logging.WARNING)
+    get_context_unit_logger("google.auth").setLevel(logging.WARNING)
+    get_context_unit_logger("google.api_core").setLevel(logging.WARNING)
+    get_context_unit_logger("httpx").setLevel(logging.WARNING)
+    get_context_unit_logger("httpcore").setLevel(logging.WARNING)
+    get_context_unit_logger("urllib3").setLevel(logging.WARNING)
 
     # Load layered config for CLI session (standalone-friendly).
     # - Defaults < env < TOML < overrides
@@ -76,7 +76,7 @@ def cli(ctx, verbose, config_path):
         try:
             scan(Path(plugin_path))
         except Exception as e:
-            logger = logging.getLogger(__name__)
+            logger = get_context_unit_logger(__name__)
             logger.warning("Failed to scan plugin directory %s: %s", plugin_path, e)
 
 

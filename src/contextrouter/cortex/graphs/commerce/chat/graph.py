@@ -7,9 +7,9 @@ Wraps Commerce graph — detects intent from user message and routes to appropri
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict
 
+from contextcore import get_context_unit_logger
 from langgraph.graph import END, START, StateGraph
 
 from .nodes import (
@@ -26,7 +26,7 @@ from .nodes import (
 )
 from .state import ChatState
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def create_chat_subgraph():

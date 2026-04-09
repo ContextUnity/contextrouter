@@ -12,7 +12,7 @@ import logging
 import time
 from typing import AsyncIterator
 
-from contextcore import ContextUnit
+from contextcore import ContextUnit, get_context_unit_logger
 
 from contextrouter.core import (
     BaseConnector,
@@ -22,10 +22,10 @@ from contextrouter.core import (
 from contextrouter.modules.observability import retrieval_span
 from contextrouter.modules.retrieval.rag.models import RetrievedDoc
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 # Suppress googleapiclient.discovery_cache warnings about oauth2client
-logging.getLogger("googleapiclient.discovery_cache").setLevel(logging.ERROR)
+get_context_unit_logger("googleapiclient.discovery_cache").setLevel(logging.ERROR)
 
 
 def _safe_preview(val: object, limit: int = 240) -> str:

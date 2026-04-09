@@ -14,16 +14,17 @@ NOT for real-time operations - use regular OpenAI LLM for that.
 from __future__ import annotations
 
 import json
-import logging
 import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from contextcore import get_context_unit_logger
+
 from contextrouter.core import Config
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 @dataclass
@@ -35,6 +36,7 @@ class BatchRequest:
     model: str = "gpt-4o-mini"
     temperature: float | None = None
     max_tokens: int | None = None
+    response_format: dict[str, str] | None = None
 
 
 @dataclass
@@ -131,6 +133,8 @@ class OpenAIBatchClient:
                 body["temperature"] = req.temperature
             if req.max_tokens is not None:
                 body["max_tokens"] = req.max_tokens
+            if req.response_format is not None:
+                body["response_format"] = req.response_format
 
             line = {
                 "custom_id": req.custom_id,

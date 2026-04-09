@@ -6,9 +6,10 @@ This is a copy of the intent logic without agent registration side effects.
 from __future__ import annotations
 
 import json
-import logging
 import re
 import time
+
+from contextcore import get_context_unit_logger
 
 from contextrouter.cortex.services import get_graph_service
 from contextrouter.cortex.state import AgentState, get_last_user_query
@@ -21,7 +22,7 @@ from ...utils.taxonomy_loader import (
     get_taxonomy_top_level_categories,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def _build_taxonomy_context() -> str:
@@ -98,18 +99,13 @@ async def detect_intent(state: AgentState) -> dict[str, object]:
 
     ignore_history_hint = user_query.lower().startswith("new topic")
 
-    from contextrouter.core import get_core_config
+    from contextrouter.cortex.graphs.config_resolution import get_node_manifest_config
     from contextrouter.modules.models import model_registry
     from contextrouter.modules.models.types import ModelRequest, TextPart
 
-    core_cfg = get_core_config()
-
-    intent_cfg = core_cfg.models.rag.intent
-    intent_model_key = intent_cfg.model or "vertex/gemini-2.5-flash-lite"
-    model = model_registry.get_llm_with_fallback(
-        key=intent_model_key,
-        config=core_cfg,
-    )
+    node_config = get_node_manifest_config(state, "detect_intent")
+    intent_model_key = node_config.get("model") or "vertex/gemini-2.5-flash-lite"
+    model = model_registry.create_llm(intent_model_key)
 
     # Direct model usage with new multimodal interface
     llm = model

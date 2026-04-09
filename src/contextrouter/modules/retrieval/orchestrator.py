@@ -10,10 +10,9 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-from contextcore import ContextUnit
+from contextcore import ContextUnit, get_context_unit_logger
 
 from contextrouter.core import (
-    AccessManager,
     ContextToken,
     IRead,
 )
@@ -29,8 +28,8 @@ class RetrievalResult:
 class RetrievalOrchestrator:
     """Fan-out retrieval across IRead providers and merge results."""
 
-    def __init__(self, *, access: AccessManager | None = None) -> None:
-        self._access = access or AccessManager.from_core_config()
+    def __init__(self) -> None:
+        pass
 
     async def search(
         self,
@@ -41,8 +40,6 @@ class RetrievalOrchestrator:
         token: ContextToken,
         providers: list[str] | None = None,
     ) -> RetrievalResult:
-        self._access.verify_read(token)
-
         query_text, extra = normalize_query(query)
         merged_filters: dict[str, Any] | None
         if filters is None and extra is None:
@@ -83,9 +80,8 @@ class RetrievalOrchestrator:
                 # Example: Vertex config/serving_config/resource errors.
                 # pylint/ruff: ignore nosec - message is controlled.
                 # type: ignore[reportGeneralTypeIssues]
-                import logging
 
-                logging.getLogger(__name__).warning("Provider '%s' failed: %s", key, r)
+                get_context_unit_logger(__name__).warning("Provider '%s' failed: %s", key, r)
                 continue
             if isinstance(r, list):
                 merged.extend([x for x in r if isinstance(x, ContextUnit)])

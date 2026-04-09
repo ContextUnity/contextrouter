@@ -10,9 +10,9 @@ Assembles nodes into the LangGraph pipeline:
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
+from contextcore import get_context_unit_logger
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
 
@@ -25,7 +25,7 @@ from contextrouter.cortex.graphs.dispatcher_agent.routing import should_execute_
 from contextrouter.cortex.graphs.dispatcher_agent.state import DispatcherState
 from contextrouter.modules.tools import discover_all_tools
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def build_dispatcher_graph() -> StateGraph:
@@ -37,16 +37,27 @@ def build_dispatcher_graph() -> StateGraph:
                              → blocked → agent (with error)
                              → end → reflect → END
     """
+
+    from contextrouter.cortex.graphs.secure_node import make_secure_node
+
     tools = discover_all_tools()
+    tool_names = [t.name for t in tools] if tools else []
     logger.info("Building dispatcher graph with %d tools", len(tools))
 
     tool_node = ToolNode(tools) if tools else None
 
     workflow = StateGraph(DispatcherState)
 
-    workflow.add_node("agent", agent_node)
+    dispatcher_model_secret = None
+
+    secure_agent = make_secure_node(
+        "agent", agent_node, execute_tools=tool_names, model_secret_ref=dispatcher_model_secret
+    )
+    secure_reflect = make_secure_node("reflect", reflect_dispatcher)
+
+    workflow.add_node("agent", secure_agent)
     workflow.add_node("security", security_guard_node)
-    workflow.add_node("reflect", reflect_dispatcher)
+    workflow.add_node("reflect", secure_reflect)
 
     if tool_node:
         workflow.add_node("tools", tool_node)

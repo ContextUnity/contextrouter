@@ -6,16 +6,14 @@ Uses ContextUnit protocol for data transport.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
-from contextcore import ContextToken, ContextUnit
+from contextcore import ContextToken, ContextUnit, get_context_unit_logger
 from contextcore.exceptions import ProviderError
 
 from contextrouter.core.interfaces import BaseProvider, IRead, IWrite
-from contextrouter.core.tokens import AccessManager
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 class GCSProvider(BaseProvider, IRead, IWrite):
@@ -30,7 +28,6 @@ class GCSProvider(BaseProvider, IRead, IWrite):
 
     def __init__(self, *, default_bucket: str = "") -> None:
         self._default_bucket = default_bucket
-        self._access = AccessManager.from_core_config()
         self._client: Any = None
 
     def _get_client(self) -> Any:
@@ -62,8 +59,6 @@ class GCSProvider(BaseProvider, IRead, IWrite):
             filters: Optional dict with "bucket" key.
             token: Access token for authorization.
         """
-        self._access.verify_read(token)
-
         bucket_name = (filters or {}).get("bucket", self._default_bucket)
         if not bucket_name:
             raise ProviderError("GCS bucket name is required", code="GCS_NO_BUCKET")
@@ -105,8 +100,6 @@ class GCSProvider(BaseProvider, IRead, IWrite):
             - path: blob path
             - content_type: MIME type (optional)
         """
-        self._access.verify_write(token)
-
         payload = data.payload or {}
         content = payload.get("content", "")
         bucket_name = payload.get("bucket", self._default_bucket)

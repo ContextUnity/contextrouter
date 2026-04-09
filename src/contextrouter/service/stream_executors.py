@@ -13,12 +13,13 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 import uuid
 from dataclasses import dataclass, field
 
-logger = logging.getLogger(__name__)
+from contextcore import get_context_unit_logger
+
+logger = get_context_unit_logger(__name__)
 
 
 @dataclass
@@ -154,31 +155,27 @@ class StreamExecutorManager:
         # audit trail and project-side tenant filtering (VULN-7 fix).
         # When security is enabled, caller_tenant is MANDATORY.
         caller_tenant = ""
-        caller_user = ""
+        user_id = ""
         try:
             from contextrouter.cortex.runtime_context import get_current_access_token
 
             token = get_current_access_token()
             if token:
                 caller_tenant = (getattr(token, "allowed_tenants", None) or ("",))[0]
-                caller_user = getattr(token, "user_id", "") or ""
+                user_id = getattr(token, "user_id", "") or ""
         except ImportError:
             raise PermissionError("contextcore module unavailable (fail-closed)")
         except Exception:
             pass  # Best-effort extraction
 
-        # Fail-closed: if security is enabled and we can't resolve the
-        # caller, reject rather than forwarding with empty context.
+        # Fail-closed: if we can't resolve the caller, reject
+        # rather than forwarding with empty context.
         if not caller_tenant:
-            from contextrouter.core import get_core_config
-
-            config = get_core_config()
-            if config.security.enabled:
-                raise PermissionError(
-                    f"Cannot forward execution to project '{project_id}': "
-                    f"no caller_tenant resolved. Security is enabled — "
-                    f"caller context is mandatory for stream execution."
-                )
+            raise PermissionError(
+                f"Cannot forward execution to project '{project_id}': "
+                f"no caller_tenant resolved. "
+                f"Caller context is mandatory for stream execution."
+            )
 
         message = {
             "action": "execute",
@@ -186,7 +183,7 @@ class StreamExecutorManager:
             "request_id": request_id,
             "args": args,
             "caller_tenant": caller_tenant,
-            "caller_user": caller_user,
+            "user_id": user_id,
         }
         await executor.send_queue.put(message)
 

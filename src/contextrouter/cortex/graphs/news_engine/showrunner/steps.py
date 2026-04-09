@@ -10,12 +10,13 @@ Pipeline:
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any, Dict
 
+from contextcore import get_context_unit_logger
 from langgraph.graph import END, StateGraph
 
 from contextrouter.core import get_core_config
+from contextrouter.cortex.graphs.config_resolution import get_node_manifest_config
 from contextrouter.modules.models import model_registry
 from contextrouter.modules.models.types import ModelRequest, TextPart
 
@@ -23,7 +24,7 @@ from ..state import NewsEngineState
 from .heuristics import heuristic_plan
 from .prompts import DEFAULT_SHOWRUNNER_PROMPT
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 async def analyze_node(state: NewsEngineState) -> Dict[str, Any]:
@@ -86,10 +87,11 @@ async def plan_node(state: NewsEngineState) -> Dict[str, Any]:
     logger.info("[%s] LLM planning for %s facts", tenant_id, len(facts))
 
     try:
-        model = model_registry.get_llm_with_fallback(
-            key=config.models.default_llm,
-            fallback_keys=config.models.fallback_llms,
-            strategy="fallback",
+        node_config = get_node_manifest_config(state, "plan")
+        model_name = node_config.get("model", config.models.default_llm)
+
+        model = model_registry.create_llm(
+            model_name,
             config=config,
         )
 
@@ -249,11 +251,24 @@ async def finalize_node(state: NewsEngineState) -> Dict[str, Any]:
 
 def create_showrunner_subgraph():
     """Build the showrunner subgraph."""
+    from contextrouter.cortex.graphs.secure_node import make_secure_node
+
     workflow = StateGraph(NewsEngineState)
 
-    workflow.add_node("analyze", analyze_node)
-    workflow.add_node("plan", plan_node)
-    workflow.add_node("finalize", finalize_node)
+    logger.debug("Building showrunner subgraph")
+
+    try:
+        provider = get_core_config().models.default_llm.split("/")[0]
+    except Exception:
+        provider = "openai"
+
+    secure_analyze = make_secure_node("analyze", analyze_node)
+    secure_plan = make_secure_node("plan", plan_node, model_secret_ref=provider)
+    secure_finalize = make_secure_node("finalize", finalize_node)
+
+    workflow.add_node("analyze", secure_analyze)
+    workflow.add_node("plan", secure_plan)
+    workflow.add_node("finalize", secure_finalize)
 
     workflow.set_entry_point("analyze")
     workflow.add_edge("analyze", "plan")

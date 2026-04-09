@@ -1,10 +1,10 @@
-import logging
+from contextcore import get_context_unit_logger
 
 from contextrouter.core import get_core_config
 from contextrouter.core.memory import MemoryManager
 from contextrouter.cortex import AgentState
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 async def fetch_memory(state: AgentState) -> dict:

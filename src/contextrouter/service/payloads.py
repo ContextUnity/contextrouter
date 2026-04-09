@@ -125,14 +125,12 @@ class ToolConfig(BaseModel):
 class GraphConfig(BaseModel):
     """Graph configuration for a project.
 
-    Option A (template): provide ``template`` + ``config`` to use a built-in template.
-    Option B (declarative): provide ``nodes`` + ``edges`` for a custom graph.
+    v1alpha runtime supports template graphs only: provide ``template`` + ``config``
+    to use a built-in graph builder in Router.
     """
 
     name: str = Field(..., min_length=1, description="Graph name (used as registry key)")
-    template: str | None = Field(
-        None, description="Built-in template: sql_analytics, rag_retrieval, dispatcher"
-    )
+    template: str = Field(..., description="Built-in template name OR 'custom' for dynamic graph.")
     config: dict[str, Any] = Field(
         default_factory=dict, description="Template config (prompts, tool_bindings, etc.)"
     )
@@ -140,26 +138,27 @@ class GraphConfig(BaseModel):
     edges: list[dict[str, Any]] | None = Field(None, description="Declarative graph edges")
 
 
-class RegisterToolsPayload(BaseModel):
-    """Payload for RegisterTools RPC.
+class RegisterManifestPayload(BaseModel):
+    """Payload for RegisterManifest RPC.
 
-    Request payload structure:
+    Expects a pre-compiled bundle from ArtifactGenerator (contextcore.manifest).
+    Bundle is compiled project-side with secrets resolved from project's os.environ.
+
     {
-        "project_id": "contextmed",
-        "tools": [{name, type, description, config}],
-        "graph": {name, template, config}
+        "bundle": {
+            "project_id": "my-project",
+            "tenant_id": "my-project",
+            "graph": {...},
+            "tools": [...],
+            "policy": {...},
+            "secrets": {"openai": "sk-..."}  // present when Shield unavailable
+        },
+        "hash": "a1b2c3d4..."
     }
     """
 
-    project_id: str = Field(..., min_length=1, description="Unique project identifier")
-    tools: list[ToolConfig] = Field(default_factory=list, description="Tools to register")
-    graph: GraphConfig | None = Field(None, description="Optional graph to register")
-
-
-class DeregisterToolsPayload(BaseModel):
-    """Payload for DeregisterTools RPC."""
-
-    project_id: str = Field(..., min_length=1, description="Project to deregister")
+    bundle: dict[str, Any] | None = Field(None, description="Pre-compiled registration bundle")
+    hash: str | None = Field(None, description="Optional hash for idempotent validation")
 
 
 __all__ = [
@@ -169,6 +168,5 @@ __all__ = [
     "StreamDispatcherEventPayload",
     "ToolConfig",
     "GraphConfig",
-    "RegisterToolsPayload",
-    "DeregisterToolsPayload",
+    "RegisterManifestPayload",
 ]

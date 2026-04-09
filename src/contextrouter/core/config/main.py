@@ -1,10 +1,10 @@
 """Main configuration class that combines all config modules."""
 
-import logging
 import tomllib
 from pathlib import Path
 from typing import Any
 
+from contextcore import get_context_unit_logger
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -12,7 +12,7 @@ from .base import get_bool_env, get_env, set_env_default
 
 # RAGConfig removed - ingestion moved to contextbrain
 # from .ingestion import RAGConfig
-from .models import GardenerConfig, LLMConfig, ModelsConfig, NewsEngineConfig, RouterConfig
+from .models import LLMConfig, ModelsConfig, NewsEngineConfig, RouterConfig
 from .paths import ConfigPaths
 from .providers import (
     AnthropicConfig,
@@ -87,7 +87,6 @@ class Config(BaseModel):
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)
-    gardener: GardenerConfig = Field(default_factory=GardenerConfig)  # Commerce enrichment
     news_engine: NewsEngineConfig = Field(default_factory=NewsEngineConfig)
     # rag and ingestion removed - moved to contextbrain
     # rag: RAGConfig = Field(default_factory=RAGConfig)
@@ -180,7 +179,7 @@ class Config(BaseModel):
                 config.paths_cache = paths
                 config.loaded_from.append(toml_path)
             except Exception as e:
-                logger = logging.getLogger(__name__)
+                logger = get_context_unit_logger(__name__)
                 logger.warning("Failed to load TOML config from %s: %s", toml_path, e)
 
         # Override with environment variables
@@ -195,14 +194,14 @@ class Config(BaseModel):
         """Resolve all external service endpoints once at startup.
 
         Strategy per service (env var → Redis auto-discovery → default):
-          - brain:  BRAIN_GRPC_ENDPOINT / CONTEXT_BRAIN_URL → Redis "brain" → localhost:50051
-          - worker: CONTEXT_WORKER_URL → Redis "worker" → localhost:50052
-          - zero:   CONTEXTZERO_GRPC_HOST → Redis "zero" → "" (optional)
-          - shield: CONTEXTSHIELD_GRPC_HOST → Redis "shield" → "" (optional)
+          - brain:  CONTEXTBRAIN_GRPC_URL / BRAIN_GRPC_ENDPOINT → Redis "brain" → localhost:50051
+          - worker: CONTEXTWORKER_GRPC_URL → Redis "worker" → localhost:50052
+          - zero:   CONTEXTZERO_GRPC_URL → Redis "zero" → "" (optional)
+          - shield: CONTEXTSHIELD_GRPC_URL → Redis "shield" → "" (optional)
         """
         from contextcore.discovery import resolve_service_endpoint
 
-        logger = logging.getLogger(__name__)
+        logger = get_context_unit_logger(__name__)
 
         self.brain.grpc_endpoint = resolve_service_endpoint(
             "brain",
@@ -245,15 +244,6 @@ class Config(BaseModel):
         # Model configuration
         if llm_val := get_env("CONTEXTROUTER_DEFAULT_LLM"):
             self.models.default_llm = llm_val
-        if intent_val := get_env("CONTEXTROUTER_INTENT_LLM"):
-            self.models.rag.intent.model = intent_val
-        if suggestions_val := get_env("CONTEXTROUTER_SUGGESTIONS_LLM"):
-            self.models.rag.suggestions.model = suggestions_val
-        if generation_val := get_env("CONTEXTROUTER_GENERATION_LLM"):
-            self.models.rag.generation.model = generation_val
-        if no_results_val := get_env("CONTEXTROUTER_NO_RESULTS_LLM"):
-            self.models.rag.no_results.model = no_results_val
-
         # Fallback LLM chain - comma-separated list of model keys
         if fallback_val := get_env("CONTEXTROUTER_FALLBACK_LLMS"):
             self.models.fallback_llms = [m.strip() for m in fallback_val.split(",") if m.strip()]
@@ -316,7 +306,7 @@ class Config(BaseModel):
         # Brain configuration
         if v := get_env("BRAIN_MODE"):
             self.brain.mode = v.lower()
-        if v := (get_env("BRAIN_GRPC_ENDPOINT") or get_env("CONTEXT_BRAIN_URL")):
+        if v := (get_env("CONTEXTBRAIN_GRPC_URL") or get_env("BRAIN_GRPC_ENDPOINT")):
             self.brain.grpc_endpoint = v
 
         # Router server & external services
@@ -326,11 +316,11 @@ class Config(BaseModel):
             self.router.instance_name = v
         if v := get_env("ROUTER_TENANTS"):
             self.router.tenants = [t.strip() for t in v.split(",") if t.strip()]
-        if v := get_env("CONTEXT_WORKER_URL"):
+        if v := get_env("CONTEXTWORKER_GRPC_URL"):
             self.router.worker_grpc_endpoint = v
-        if v := get_env("CONTEXTZERO_GRPC_HOST"):
+        if v := (get_env("CONTEXTZERO_GRPC_URL") or get_env("CONTEXTZERO_GRPC_HOST")):
             self.router.contextzero_grpc_host = v
-        if v := get_env("CONTEXTSHIELD_GRPC_HOST"):
+        if v := (get_env("CONTEXTSHIELD_GRPC_URL") or get_env("CONTEXTSHIELD_GRPC_HOST")):
             self.router.contextshield_grpc_host = v
         if v := get_env("GCS_DEFAULT_BUCKET"):
             self.router.gcs_default_bucket = v
@@ -423,12 +413,8 @@ class Config(BaseModel):
 
         shared_config = get_shared_core_config()
 
-        if shared_config.security.enabled is not None:
-            self.security.enabled = shared_config.security.enabled
-        if private_key_path := get_env("CONTEXTROUTER_PRIVATE_KEY_PATH"):
-            self.security.private_key_path = private_key_path
-        if env_name := (get_env("CONTEXTROUTER_ENVIRONMENT") or get_env("ENVIRONMENT")):
-            self.security.environment = env_name.lower()
+        # Security: private_key_path and environment removed — signing is
+        # handled by contextcore.signing backends (auto-detected).
 
         # Redis configuration (from shared core)
         if shared_config.redis_url:

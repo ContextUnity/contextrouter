@@ -37,7 +37,7 @@ from typing import cast
 from langgraph.graph import END, START, StateGraph
 
 import contextrouter.core.registry as core_registry_module
-from contextrouter.core import agent_registry, get_core_config
+from contextrouter.core import agent_registry
 from contextrouter.cortex import AgentState, InputState, OutputState
 
 from .routing import should_retrieve
@@ -79,24 +79,14 @@ def build_graph() -> StateGraph:
     Returns:
         Uncompiled StateGraph ready for compilation.
     """
-    # Router override (composition): host may supply a custom graph builder.
-    override_path = get_core_config().router.override_path
-    if override_path:
-        builder = _import_object(override_path)
-        if hasattr(builder, "build_graph"):
-            return builder.build_graph()  # type: ignore[no-any-return]
-        if callable(builder):
-            return builder()  # type: ignore[no-any-return]
-        raise TypeError(f"router.override_path object is not callable: {override_path}")
-
     workflow = StateGraph(AgentState, input=InputState, output=OutputState)
 
-    mode = (get_core_config().router.mode or "agent").strip().lower()
-    if mode not in {"agent", "direct"}:
-        mode = "agent"
+    mode = "agent"
 
     if mode == "direct":
         # Direct-mode: assemble graph from function nodes (local imports).
+        from contextrouter.cortex.graphs.secure_node import make_secure_node
+
         from . import (
             detect_intent,
             extract_user_query,
@@ -107,15 +97,38 @@ def build_graph() -> StateGraph:
         from .memory import fetch_memory
         from .reflect import reflect_interaction
 
-        workflow.add_node("extract_query", extract_user_query)
-        workflow.add_node("fetch_memory", fetch_memory)
-        workflow.add_node("detect_intent", detect_intent)
-        workflow.add_node("retrieve", retrieve_documents)
-        workflow.add_node("suggest", generate_search_suggestions)
-        workflow.add_node("generate", generate_response)
-        workflow.add_node("reflect", reflect_interaction)
+        rag_model_secret = None
+
+        secure_extract = make_secure_node(
+            "extract_query", extract_user_query, model_secret_ref=rag_model_secret
+        )
+        secure_memory = make_secure_node("fetch_memory", fetch_memory)
+        secure_intent = make_secure_node(
+            "detect_intent", detect_intent, model_secret_ref=rag_model_secret
+        )
+        secure_retrieve = make_secure_node(
+            "retrieve", retrieve_documents, model_secret_ref=rag_model_secret
+        )
+        secure_suggest = make_secure_node(
+            "suggest", generate_search_suggestions, model_secret_ref=rag_model_secret
+        )
+        secure_generate = make_secure_node(
+            "generate", generate_response, model_secret_ref=rag_model_secret
+        )
+        secure_reflect = make_secure_node("reflect", reflect_interaction)
+
+        workflow.add_node("extract_query", secure_extract)
+        workflow.add_node("fetch_memory", secure_memory)
+        workflow.add_node("detect_intent", secure_intent)
+        workflow.add_node("retrieve", secure_retrieve)
+        workflow.add_node("suggest", secure_suggest)
+        workflow.add_node("generate", secure_generate)
+        workflow.add_node("reflect", secure_reflect)
     else:
         # Agent-mode: assemble graph dynamically from registry (class-based nodes).
+        # We need to wrap the instances returned by registry.
+        from contextrouter.cortex.graphs.secure_node import make_secure_node
+
         extract_cls = agent_registry.get("extract_query")
         # Memory fetch might not be in registry yet, using direct import for now
         from .memory import fetch_memory
@@ -126,13 +139,33 @@ def build_graph() -> StateGraph:
         suggest_cls = agent_registry.get("suggest")
         generate_cls = agent_registry.get("generate")
 
-        workflow.add_node("extract_query", extract_cls(core_registry_module))
-        workflow.add_node("fetch_memory", fetch_memory)
-        workflow.add_node("detect_intent", intent_cls(core_registry_module))
-        workflow.add_node("retrieve", retrieve_cls(core_registry_module))
-        workflow.add_node("suggest", suggest_cls(core_registry_module))
-        workflow.add_node("generate", generate_cls(core_registry_module))
-        workflow.add_node("reflect", reflect_interaction)
+        rag_model_secret = None
+
+        secure_extract = make_secure_node(
+            "extract_query", extract_cls(core_registry_module), model_secret_ref=rag_model_secret
+        )
+        secure_memory = make_secure_node("fetch_memory", fetch_memory)
+        secure_intent = make_secure_node(
+            "detect_intent", intent_cls(core_registry_module), model_secret_ref=rag_model_secret
+        )
+        secure_retrieve = make_secure_node(
+            "retrieve", retrieve_cls(core_registry_module), model_secret_ref=rag_model_secret
+        )
+        secure_suggest = make_secure_node(
+            "suggest", suggest_cls(core_registry_module), model_secret_ref=rag_model_secret
+        )
+        secure_generate = make_secure_node(
+            "generate", generate_cls(core_registry_module), model_secret_ref=rag_model_secret
+        )
+        secure_reflect = make_secure_node("reflect", reflect_interaction)
+
+        workflow.add_node("extract_query", secure_extract)
+        workflow.add_node("fetch_memory", secure_memory)
+        workflow.add_node("detect_intent", secure_intent)
+        workflow.add_node("retrieve", secure_retrieve)
+        workflow.add_node("suggest", secure_suggest)
+        workflow.add_node("generate", secure_generate)
+        workflow.add_node("reflect", secure_reflect)
 
     workflow.add_edge(START, "extract_query")
     workflow.add_edge("extract_query", "fetch_memory")

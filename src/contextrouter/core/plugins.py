@@ -9,14 +9,14 @@ Plugins without a manifest are loaded in legacy mode (bare .py files).
 
 from __future__ import annotations
 
-import logging
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from contextcore import get_context_unit_logger
 from pydantic import BaseModel, Field, field_validator
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 # ============================================================================

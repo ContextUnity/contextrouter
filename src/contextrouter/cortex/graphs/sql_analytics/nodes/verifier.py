@@ -3,21 +3,24 @@
 from __future__ import annotations
 
 import json
-import logging
 
+from contextcore import get_context_unit_logger
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tools import BaseTool
 
+from contextrouter.cortex.graphs.config_resolution import get_node_attr
 from contextrouter.cortex.graphs.sql_analytics.helpers import (
     acc_tokens,
     extract_json,
     invoke_model,
 )
 from contextrouter.cortex.graphs.sql_analytics.pii import PiiSession
+from contextrouter.cortex.graphs.sql_analytics.schemas import SqlAnalyticsStateUpdate
 from contextrouter.cortex.graphs.sql_analytics.state import SqlAnalyticsState
 from contextrouter.modules.models import model_registry
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def make_verifier_node(
@@ -25,6 +28,7 @@ def make_verifier_node(
     verifier_prompt: str | None,
     default_model_key: str | None,
     fallback_keys: list[str] | None = None,
+    shield_key_name: str | None = None,
     pii_masking: bool = False,
     anonymize_tool: BaseTool | None = None,
     deanonymize_tool: BaseTool | None = None,
@@ -37,7 +41,9 @@ def make_verifier_node(
     automatically by BrainAutoTracer callbacks — no manual _steps needed.
     """
 
-    async def verifier_node(state: SqlAnalyticsState):
+    async def verifier_node(
+        state: SqlAnalyticsState, config: RunnableConfig
+    ) -> SqlAnalyticsStateUpdate:
         if not verifier_prompt:
             return {"validation": {"valid": True}}
 
@@ -75,17 +81,22 @@ def make_verifier_node(
             session_id=session_id,
             anonymize_tool=anonymize_tool if pii_masking else None,
             deanonymize_tool=deanonymize_tool if pii_masking else None,
+            config=config,
         ) as pii:
             prompt = await pii.hide(prompt)
 
             messages = [SystemMessage(content=verifier_prompt), HumanMessage(content=prompt)]
 
             llm = model_registry.get_llm_with_fallback(
-                default_model_key, fallback_keys=fallback_keys
+                default_model_key, fallback_keys=fallback_keys, shield_key_name=shield_key_name
             )
 
             try:
-                response, usage = await invoke_model(llm, messages)
+                project_config = metadata.get("project_config", {})
+                prompt_version = get_node_attr(project_config, "verifier", "prompt_version")
+                response, usage = await invoke_model(
+                    llm, messages, config=config, prompt_version=prompt_version
+                )
                 content = response.content
                 content = await pii.reveal(content)
 

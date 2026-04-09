@@ -28,8 +28,6 @@ BUILTIN_LLMS: dict[str, str] = {
     "hf/*": "contextrouter.modules.models.llm.huggingface.HuggingFaceLLM",
     # Perplexity Sonar: built-in search LLM
     "perplexity/*": "contextrouter.modules.models.llm.perplexity.PerplexityLLM",
-    # LiteLLM: intentionally a stub (not implemented) to avoid adding another abstraction layer.
-    "litellm/*": "contextrouter.modules.models.llm.litellm.LiteLLMStub",
     # Recursive Language Models: wraps any LLM with REPL-based recursive context processing
     # for handling massive contexts (50k+ items). Uses `rlm/<base_model>` format.
     # Example: "rlm/gpt-5-mini" for GPT-5-mini with recursive capabilities.

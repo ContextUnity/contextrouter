@@ -12,10 +12,9 @@ from __future__ import annotations
 
 import importlib
 import json
-import logging
 from typing import NotRequired, TypedDict
 
-from contextcore import ContextUnit
+from contextcore import ContextUnit, get_context_unit_logger
 from pydantic import BaseModel, ConfigDict
 
 from contextrouter.core import Config
@@ -25,7 +24,7 @@ from contextrouter.modules.models.types import ModelRequest, TextPart
 
 from .base import Transformer
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 # Standard NER entity types
 STANDARD_ENTITY_TYPES = {

@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
-import logging
 from pathlib import Path
 from typing import Any, Callable
+
+from contextcore import get_context_unit_logger
 
 # ---- Graph Registry -------------------------------------------------
 
@@ -182,6 +183,8 @@ graph_registry = Registry(
     name="graphs",
     builtin_map={
         "commerce": "contextrouter.cortex.graphs.commerce.graph:build_commerce_graph",
+        "commerce_product_enricher": "contextrouter.cortex.graphs.commerce.enricher.graph:build_enricher_graph",
+        "commerce_product_writer": "contextrouter.cortex.graphs.commerce.writer.graph:build_writer_graph",
     },
 )
 
@@ -276,7 +279,7 @@ agent_registry: Registry = Registry(name="agents", builtin_map=BUILTIN_AGENTS)
 
 # ---- Plugin scanning -------------------------------------------------------
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def scan(plugin_dir: Path) -> list[Any]:

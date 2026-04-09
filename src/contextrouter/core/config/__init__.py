@@ -17,7 +17,6 @@ from .main import (
     set_core_config,
 )
 from .models import (
-    GardenerConfig,
     LLMConfig,
     ModelsConfig,
     RouterConfig,
@@ -59,7 +58,6 @@ __all__ = [
     "ModelsConfig",
     "LLMConfig",
     "RouterConfig",
-    "GardenerConfig",
     # Provider configs
     "VertexConfig",
     "OpenAIConfig",

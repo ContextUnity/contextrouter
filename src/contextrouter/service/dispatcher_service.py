@@ -8,7 +8,7 @@ automatically restore all project tools and graphs.
 
 The class is composed from mixins:
 - ExecutionMixin:   ExecuteAgent, ExecuteDispatcher, StreamDispatcher
-- RegistrationMixin: RegisterTools, DeregisterTools, graph management
+- RegistrationMixin: RegisterManifest, graph management
 - PersistenceMixin:  Redis-backed registration persistence and recovery
 """
 
@@ -17,7 +17,6 @@ from __future__ import annotations
 import threading
 
 from contextcore import get_context_unit_logger, router_pb2_grpc
-from contextcore.security import get_security_guard
 
 from contextrouter.service.mixins import (
     ExecutionMixin,
@@ -43,7 +42,6 @@ class DispatcherService(
     """
 
     def __init__(self) -> None:
-        self._guard = get_security_guard()
         # Track registered tools per project for cleanup
         self._project_tools: dict[str, list[str]] = {}
         self._project_graphs: dict[str, str] = {}

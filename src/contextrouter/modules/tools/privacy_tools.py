@@ -20,15 +20,16 @@ Tools:
 
 from __future__ import annotations
 
-import logging
 import uuid
 from typing import Any
 
+from contextcore import get_context_unit_logger
 from langchain_core.tools import tool
 
 from contextrouter.modules.tools import register_tool
+from contextrouter.modules.tools.schemas import DataToolResult
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 # ── Lazy-initialized connections ──────────────────────────────────
 
@@ -64,6 +65,7 @@ async def _grpc_call(rpc_name: str, payload: dict) -> dict:
         RuntimeError: If Zero returns an error payload or connection fails.
     """
     from contextcore import ContextUnit, context_unit_pb2
+    from contextcore.signing import get_signing_backend
     from contextcore.token_utils import create_grpc_metadata_with_token
     from contextcore.tokens import mint_service_token
 
@@ -77,12 +79,23 @@ async def _grpc_call(rpc_name: str, payload: dict) -> dict:
     )
     req = unit.to_protobuf(context_unit_pb2)
 
-    # Service-level token with Zero permissions
-    token = mint_service_token(
-        "router-zero-service",
-        permissions=("zero:anonymize", "zero:deanonymize"),
-    )
-    metadata = create_grpc_metadata_with_token(token)
+    from contextcore.authz.context import get_auth_context
+
+    ctx = get_auth_context()
+    if ctx and ctx.token_string:
+        metadata = [("authorization", f"Bearer {ctx.token_string}")]
+    else:
+        # Fallback to local minting if background task
+        from contextcore.signing import get_signing_backend
+        from contextcore.token_utils import create_grpc_metadata_with_token
+        from contextcore.tokens import mint_service_token
+
+        token = mint_service_token(
+            "router-zero-service",
+            permissions=("zero:anonymize", "zero:deanonymize"),
+        )
+        backend = get_signing_backend(project_id="router")
+        metadata = create_grpc_metadata_with_token(token, backend=backend)
 
     rpc = getattr(stub, rpc_name)
     resp = await rpc(req, metadata=metadata)
@@ -137,7 +150,7 @@ async def anonymize_text(
     text: str,
     session_id: str,
     persona_name: str | None = None,
-) -> dict[str, Any]:
+) -> DataToolResult:
     """Mask PII (names, phones, emails, medical data) before sending to external LLM.
 
     ALWAYS use this when the user's message contains personal data that should
@@ -243,7 +256,7 @@ async def deanonymize_text(text: str, session_id: str) -> str:
 
 
 @tool
-async def check_pii(text: str) -> dict[str, Any]:
+async def check_pii(text: str) -> DataToolResult:
     """Check if text contains PII without modifying it.
 
     Use for audit and compliance — scan text for personal data
@@ -338,20 +351,23 @@ async def destroy_privacy_session(session_id: str) -> str:
     return f"Session '{session_id}' destroyed. All encryption keys wiped from RAM."
 
 
-# ============================================================================
-# Auto-register tools on import
-# ============================================================================
-
-_PRIVACY_TOOLS = [
-    anonymize_text,
-    deanonymize_text,
-    check_pii,
-    apply_persona,
-    destroy_privacy_session,
+# Privacy tools are internal wrappers around the Zero service.
+# Their authorization uses the canonical zero: permission namespace,
+# NOT tool:anonymize_text — Shield issues zero:* permissions from
+# the project manifest, and we must not require Shield to know
+# about Router-internal tool names.
+_PRIVACY_TOOL_PERMISSIONS: list[tuple] = [
+    (anonymize_text, "zero:anonymize"),
+    (deanonymize_text, "zero:deanonymize"),
+    (check_pii, "zero:check_pii"),
+    (apply_persona, "zero:anonymize"),  # persona injection is part of anonymization
+    (destroy_privacy_session, "zero:audit"),  # session cleanup is an audit operation
 ]
 
-for _t in _PRIVACY_TOOLS:
-    register_tool(_t)
+_PRIVACY_TOOLS = [t for t, _ in _PRIVACY_TOOL_PERMISSIONS]
+
+for _t, _perm in _PRIVACY_TOOL_PERMISSIONS:
+    register_tool(_t, permission=_perm, scope="execute")
 
 logger.info("Registered %d ContextZero privacy tools", len(_PRIVACY_TOOLS))
 

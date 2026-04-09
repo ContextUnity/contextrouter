@@ -17,40 +17,54 @@ Uses the same BrainClient singleton as brain_memory_tools.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
+from contextcore import get_context_unit_logger
 from langchain_core.tools import tool
 
 from contextrouter.modules.tools import register_tool
+from contextrouter.modules.tools.schemas import (
+    EpisodeResult,
+    ToolCallSummary,
+    TotalTokenUsage,
+    TraceResult,
+)
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
-# Reuse the same BrainClient singleton
-_brain_client = None
+# Per-tenant BrainClient cache — each tenant gets a properly scoped client
+_brain_clients: dict[str, object] = {}
 
 
-def _get_brain_client():
-    """Get or create BrainClient singleton."""
-    global _brain_client
-    if _brain_client is None:
-        from contextcore.permissions import Permissions
-        from contextcore.sdk import SmartBrainClient
-        from contextcore.tokens import mint_service_token
+def _get_brain_client(tenant_id: str):
+    """Get or create BrainClient for a specific tenant.
 
-        _brain_client = SmartBrainClient(
-            tenant_id=None,
-            token=lambda: mint_service_token(
-                "router-trace-service",
-                permissions=(
-                    Permissions.TRACE_WRITE,
-                    Permissions.TRACE_READ,
-                    Permissions.MEMORY_WRITE,
-                    Permissions.MEMORY_READ,
-                ),
-            ),
+    Uses the client's **pre-serialized token string** from the current
+    auth context. The token is already signed by the project's backend
+    (HMAC or Shield) — no Router-level signing backend needed.
+
+    Requires ``trace:write`` (LogTrace) and ``memory:write`` (AddEpisode),
+    both of which are granted to the primary client token representing the user.
+    """
+    if tenant_id not in _brain_clients:
+        from contextcore.sdk import BrainClient
+
+        _brain_clients[tenant_id] = BrainClient(
+            tenant_id=tenant_id,
+            token=lambda: _get_auth_token_string(),
         )
-    return _brain_client
+    return _brain_clients[tenant_id]
+
+
+def _get_auth_token_string() -> str | None:
+    """Extract the pre-serialized token string from the current gRPC auth context."""
+    try:
+        from contextcore.authz.context import get_auth_context
+
+        ctx = get_auth_context()
+        return ctx.token_string if ctx else None
+    except Exception:
+        return None
 
 
 # ============================================================================
@@ -65,8 +79,8 @@ async def log_execution_trace(
     session_id: str,
     user_id: str,
     graph_name: str,
-    tool_calls: list[dict[str, Any]],
-    token_usage: dict[str, int],
+    tool_calls: list[ToolCallSummary],
+    token_usage: TotalTokenUsage,
     timing_ms: int,
     # ── Rich trace fields (used by ContextView dashboard) ──
     steps: list[dict[str, Any]] | None = None,
@@ -81,7 +95,7 @@ async def log_execution_trace(
     provenance: list[str] | None = None,
     security_flags: dict[str, Any] | None = None,
     record_episode: bool = True,
-) -> dict[str, Any]:
+) -> TraceResult:
     """Log a full execution trace to ContextBrain for observability.
 
     Call this at the end of any graph execution to persist the trace.
@@ -116,8 +130,6 @@ async def log_execution_trace(
         Dict with trace_id and success status.
     """
     try:
-        brain = _get_brain_client()
-
         # ── Build rich metadata ──
         # Merge caller-provided metadata with dashboard-required fields
         full_metadata = dict(metadata or {})
@@ -130,6 +142,7 @@ async def log_execution_trace(
         if steps:
             full_metadata["steps"] = steps
 
+        brain = _get_brain_client(tenant_id)
         trace_id = await brain.log_trace(
             tenant_id=tenant_id,
             agent_id=agent_id,
@@ -204,9 +217,11 @@ async def log_execution_trace(
             "graph_name": graph_name,
         }
     except Exception as e:
-        detail = e.details() if hasattr(e, "details") else str(e)
-        code = e.code() if hasattr(e, "code") else ""
-        logger.error("Brain trace failed [%s]: %s", code or type(e).__name__, detail)
+        detail_attr = getattr(e, "details", None)
+        detail = detail_attr() if callable(detail_attr) else str(detail_attr or e)
+        code_attr = getattr(e, "code", None)
+        code = code_attr() if callable(code_attr) else str(code_attr or type(e).__name__)
+        logger.error("Brain trace failed [%s]: %s", code, detail)
         return {"success": False, "error": detail}
 
 
@@ -224,11 +239,11 @@ async def record_execution_episode(
     user_query: str,
     final_answer: str,
     trace_id: str = "",
-    tool_calls: list[dict[str, Any]] | None = None,
-    token_usage: dict[str, int] | None = None,
+    tool_calls: list[ToolCallSummary] | None = None,
+    token_usage: dict[str, int | float] | None = None,
     timing_ms: int = 0,
     platform: str = "",
-) -> dict[str, Any]:
+) -> EpisodeResult:
     """Record an execution episode in Brain's episodic memory.
 
     Creates a rich episodic memory entry summarizing the agent's execution.
@@ -255,8 +270,7 @@ async def record_execution_episode(
         Dict with episode_id and success status.
     """
     try:
-        brain = _get_brain_client()
-
+        brain = _get_brain_client(tenant_id)
         task_summary = (user_query[:500] + "...") if len(user_query) > 500 else user_query
         outcome_summary = (final_answer[:500] + "...") if len(final_answer) > 500 else final_answer
         tc = tool_calls or []
@@ -292,9 +306,11 @@ async def record_execution_episode(
             "episode_id": episode_id,
         }
     except Exception as e:
-        detail = e.details() if hasattr(e, "details") else str(e)
-        code = e.code() if hasattr(e, "code") else ""
-        logger.error("Brain episode failed [%s]: %s", code or type(e).__name__, detail)
+        detail_attr = getattr(e, "details", None)
+        detail = detail_attr() if callable(detail_attr) else str(detail_attr or e)
+        code_attr = getattr(e, "code", None)
+        code = code_attr() if callable(code_attr) else str(code_attr or type(e).__name__)
+        logger.error("Brain episode failed [%s]: %s", code, detail)
         return {"success": False, "error": detail}
 
 

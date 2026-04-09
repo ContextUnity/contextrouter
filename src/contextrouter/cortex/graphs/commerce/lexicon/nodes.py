@@ -10,15 +10,15 @@ Exception handling uses contextcore.exceptions hierarchy.
 from __future__ import annotations
 
 import json
-import logging
 import time
 from typing import Any, Dict, List
 
+from contextcore import get_context_unit_logger
 from contextcore.exceptions import ModelError, ProviderError
 
 from .state import ContentRequest, GeneratedContent, LexiconState, ValidationResult
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 # --- Helpers ---
@@ -112,7 +112,6 @@ async def analyze_products_node(state: LexiconState) -> dict:
             tenant_id=state["tenant_id"],
             product_ids=product_ids,
             trace_id=state.get("trace_id", ""),
-            parent_provenance=["router:lexicon:analyze"],
         )
     except Exception as e:
         logger.error("Lexicon: failed to fetch products from Brain: %s", e)
@@ -375,7 +374,6 @@ async def write_results_node(state: LexiconState) -> dict:
                 enrichment=enrichment,
                 trace_id=state.get("trace_id", ""),
                 status="content_generated",
-                parent_provenance=["router:lexicon:write_results"],
             )
             products_updated += 1
 

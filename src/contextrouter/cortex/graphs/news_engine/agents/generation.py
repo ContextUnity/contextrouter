@@ -7,12 +7,13 @@ unique voices for each reporter.
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict
 
+from contextcore import get_context_unit_logger
 from langgraph.graph import END, StateGraph
 
 from contextrouter.core import get_core_config
+from contextrouter.cortex.graphs.config_resolution import get_node_manifest_config
 from contextrouter.modules.models import model_registry
 from contextrouter.modules.models.types import ModelRequest, TextPart
 
@@ -27,7 +28,7 @@ from .personas import (
     BASE_AGENT_PROMPT,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 async def load_context_node(state: NewsEngineState) -> Dict[str, Any]:
@@ -98,10 +99,11 @@ async def generate_posts_node(state: NewsEngineState) -> Dict[str, Any]:
         init_language_tool(lang=config.news_engine.language_tool_lang)
 
     try:
-        model = model_registry.get_llm_with_fallback(
-            key=config.models.default_llm,
-            fallback_keys=config.models.fallback_llms,
-            strategy="fallback",
+        node_config = get_node_manifest_config(state, "generate")
+        model_name = node_config.get("model", config.models.default_llm)
+
+        model = model_registry.create_llm(
+            model_name,
             config=config,
         )
 
@@ -238,58 +240,37 @@ Write the post following the language and style rules from your system prompt.""
 
 
 async def store_posts_node(state: NewsEngineState) -> Dict[str, Any]:
-    """Store generated posts to Brain for deduplication and archive."""
+    """Store generated posts by calling the federated tool on the client."""
     posts = state.get("posts", [])
     tenant_id = state.get("tenant_id", "default")
 
     if not posts:
         return {"result": {"status": "no_posts", "posts_count": 0}}
 
-    logger.info("[%s] Storing %s posts to Brain", tenant_id, len(posts))
-
-    config = get_core_config()
-    stored_count = 0
+    logger.info(
+        "[%s] Calling federated tool 'store_news_results' to store %s posts", tenant_id, len(posts)
+    )
 
     try:
-        from contextcore import BrainClient
+        from contextcore.sdk.clients.router import RouterClient
 
-        from contextrouter.core.brain_token import get_brain_service_token
+        # We instantiate a stateless router client
+        # In the context of a graph execution on contextrouter,
+        # we can still make an outgoing gRPC call to contextrouter's self,
+        # which will proxy it to the connected bi-di client.
+        client = RouterClient()
+        await client.execute_tool(
+            tool_name="store_news_results", target_project=tenant_id, args={"posts": posts}
+        )
+        logger.info("[%s] Successfully executed 'store_news_results'.", tenant_id)
 
-        client = BrainClient(host=config.brain.grpc_endpoint, token=get_brain_service_token())
-
-        for post in posts:
-            try:
-                post_id = await client.upsert_news_post(
-                    tenant_id=tenant_id,
-                    headline=post.get("headline", ""),
-                    content=post.get("content", ""),
-                    agent=post.get("agent", ""),
-                    emoji=post.get("emoji", "📰"),
-                    fact_url=post.get("fact_url", ""),
-                    fact_id=post.get("fact_id", ""),
-                )
-
-                if post_id:
-                    stored_count += 1
-                    logger.debug("Stored post: %s", post_id)
-                else:
-                    logger.warning("Failed to store post: %s", post.get("headline", "")[:30])
-
-            except Exception as e:
-                logger.warning("Failed to store post '%s': %s", post.get("headline", "")[:30], e)
-
-    except ImportError:
-        logger.warning("contextcore not available, skipping storage")
     except Exception as e:
-        logger.error("Storage failed: %s", e)
-
-    logger.info("[%s] Stored %s/%s posts", tenant_id, stored_count, len(posts))
+        logger.error("[%s] Failed to store posts via federated tool: %s", tenant_id, e)
 
     return {
         "result": {
             "status": "completed",
             "posts_count": len(posts),
-            "stored_count": stored_count,
             "errors_count": len(state.get("generation_errors", [])),
         },
     }
@@ -297,12 +278,26 @@ async def store_posts_node(state: NewsEngineState) -> Dict[str, Any]:
 
 def create_agents_subgraph():
     """Build the agents subgraph."""
+    from contextrouter.cortex.graphs.secure_node import make_secure_node
+
     workflow = StateGraph(NewsEngineState)
 
-    workflow.add_node("load_context", load_context_node)
-    workflow.add_node("generate", generate_posts_node)
-    workflow.add_node("store", store_posts_node)
+    logger.debug("Building agents subgraph")
 
+    try:
+        from contextrouter.core import get_core_config
+
+        provider = get_core_config().models.default_llm.split("/")[0]
+    except Exception:
+        provider = "openai"
+
+    secure_load = make_secure_node("load_context", load_context_node)
+    secure_generate = make_secure_node("generate", generate_posts_node, model_secret_ref=provider)
+    secure_store = make_secure_node("store", store_posts_node)
+
+    workflow.add_node("load_context", secure_load)
+    workflow.add_node("generate", secure_generate)
+    workflow.add_node("store", secure_store)
     workflow.set_entry_point("load_context")
     workflow.add_edge("load_context", "generate")
     workflow.add_edge("generate", "store")

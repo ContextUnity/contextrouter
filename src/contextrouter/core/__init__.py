@@ -16,6 +16,7 @@ import types
 
 # Note: registry is imported dynamically via __getattr__ to avoid circular imports
 from contextcore import ContextUnit
+from contextcore.tokens import ContextToken, TokenBuilder
 
 from contextrouter.core.config import (
     Config,
@@ -36,7 +37,6 @@ from contextrouter.core.interfaces import (
     IWrite,
 )
 from contextrouter.core.registry import agent_registry, graph_registry
-from contextrouter.core.tokens import AccessManager, ContextToken, TokenBuilder
 from contextrouter.core.types import UserCtx
 
 __all__ = [
@@ -64,7 +64,6 @@ __all__ = [
     # Plugins
     "plugins",  # Plugin manifest and context system
     # Security
-    "AccessManager",
     "ContextToken",
     "TokenBuilder",
     # Types

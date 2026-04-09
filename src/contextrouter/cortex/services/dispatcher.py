@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import logging
 import threading
 from typing import Any
 
-from contextcore import ContextToken
+from contextcore import ContextToken, get_context_unit_logger
 
 from contextrouter.core import get_core_config
 from contextrouter.cortex.graphs.dispatcher_agent import compile_dispatcher_graph
@@ -16,7 +15,7 @@ from contextrouter.modules.observability import (
     trace_context,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 # Try to import checkpointing (optional — requires Redis)
 try:

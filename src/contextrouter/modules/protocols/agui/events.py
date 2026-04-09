@@ -7,7 +7,16 @@ See: https://docs.ag-ui.com/llms-full.txt
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NotRequired, TypedDict
+
+
+class AguiEventDict(TypedDict, total=False):
+    type: str
+    toolCallId: str
+    timestamp: float
+    toolName: NotRequired[str]
+    args: NotRequired[dict[str, Any]]
+    result: NotRequired[Any]
 
 
 @dataclass
@@ -16,7 +25,7 @@ class ToolCallStart:
     name: str
     timestamp: float
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> AguiEventDict:
         return {
             "type": "ToolCallStart",
             "toolCallId": self.toolCallId,
@@ -31,7 +40,7 @@ class ToolCallArgs:
     args: dict[str, Any]
     timestamp: float
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> AguiEventDict:
         return {
             "type": "ToolCallArgs",
             "toolCallId": self.toolCallId,
@@ -45,7 +54,7 @@ class ToolCallEnd:
     toolCallId: str
     timestamp: float
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> AguiEventDict:
         return {
             "type": "ToolCallEnd",
             "toolCallId": self.toolCallId,
@@ -59,7 +68,7 @@ class ToolCallResult:
     result: Any
     timestamp: float
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> AguiEventDict:
         return {
             "type": "ToolCallResult",
             "toolCallId": self.toolCallId,

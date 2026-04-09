@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
-from contextcore import get_context_unit_logger
+from contextcore import ContextToken, get_context_unit_logger
 
 from contextrouter.core.registry import graph_registry
 from contextrouter.modules.observability import (
@@ -16,15 +17,6 @@ from contextrouter.service.payloads import ExecuteAgentPayload
 
 logger = get_context_unit_logger(__name__)
 
-# Permissions for internal graph tools (PII masking, etc.)
-# Router authorizes these when executing graphs — the user's token
-# doesn't need to carry them explicitly.
-_GRAPH_INTERNAL_PERMISSIONS = (
-    "tool:anonymize_text",
-    "tool:deanonymize_text",
-    "tool:check_pii",
-)
-
 
 def _resolve_tenant_id(token) -> str:
     """Derive tenant_id from token. Token is the single point of truth."""
@@ -33,36 +25,48 @@ def _resolve_tenant_id(token) -> str:
     return "default"
 
 
-def build_execution_token(token):
-    """Create an execution token augmented with graph-internal tool permissions.
+def build_execution_token(
+    token,
+    project_config: dict | None = None,
+    agent_id: str | None = None,
+    platform: str | None = None,
+):
+    """Attenuate a project token for graph execution.
 
-    The Router has already validated the user's identity and access.
-    Graphs need to call internal infrastructure tools (PII masking, etc.)
-    that the user's project token doesn't explicitly authorize.
-    We augment the token with these permissions so SecureTool checks pass.
-
-    The original token is not mutated (ContextToken is frozen).
+    Pure attenuation — NO permission augmentation.
+    The root token (minted by SDK's `mint_client_token`) carries
+    scopes needed by SecureNode/SecureTool (tool:*, shield:secrets:read,
+    zero:*, graph:*). This function only sets the agent_id for
+    provenance tracking.
     """
     if token is None:
         return token
 
-    from contextcore import ContextToken
+    from contextcore.tokens import TokenBuilder
 
-    existing = set(token.permissions)
-    needed = [p for p in _GRAPH_INTERNAL_PERMISSIONS if p not in existing]
-    if not needed:
-        return token  # Already has all permissions
+    # Determine the provenance identity for this execution entry
+    effective_agent_id = f"agent:{agent_id}" if agent_id else None
 
-    return ContextToken(
-        token_id=token.token_id,
-        permissions=token.permissions + tuple(needed),
-        allowed_tenants=token.allowed_tenants,
-        exp_unix=token.exp_unix,
-        revocation_id=token.revocation_id,
-        user_id=token.user_id,
-        agent_id=token.agent_id,
-        user_namespace=token.user_namespace,
-    )
+    # If no identity to set, return token unchanged
+    if not effective_agent_id and not platform:
+        return token
+
+    # For tokens without upstream provenance, inject platform origin
+    # so the execution chain doesn't look orphaned.
+    has_provenance = bool(getattr(token, "provenance", ()))
+
+    if not has_provenance and platform:
+        # Bootstrap provenance with platform origin, then attenuate with agent_id
+        clean_platform = platform if not platform.startswith("agent:") else platform[6:]
+        token = dataclasses.replace(token, provenance=(clean_platform,))
+
+    if effective_agent_id:
+        return TokenBuilder().attenuate(
+            token,
+            agent_id=effective_agent_id,
+        )
+
+    return token
 
 
 def extract_last_user_msg(input_data: dict) -> str:
@@ -86,6 +90,13 @@ def resolve_graph(graph_name: str, tenant_id: str, project_graphs: dict) -> tupl
     Returns:
         (resolved_graph_name, compiled_graph)
     """
+    logger.info(
+        "resolve_graph: name=%s, tenant=%s, project_graphs keys=%s, registry=%s",
+        graph_name,
+        tenant_id,
+        list(project_graphs.keys()),
+        graph_registry.has(graph_name),
+    )
     if not graph_registry.has(graph_name):
         # Built-in graphs use @register_graph decorators — trigger import
         _ensure_builtin_graphs_loaded()
@@ -138,6 +149,83 @@ def _ensure_builtin_graphs_loaded():
             logger.warning("Failed to load graph module %s: %s", mod_name, e)
 
 
+def _redact_sensitive_keys(data: Any) -> Any:
+    """Recursively redact large or sensitive values for observability persistence.
+
+    Domain considerations:
+    - ContextBrain (Storage/UI): Redact bulky texts (`_prompt`, `_prompts`, `schema_description`)
+      to prevent DB bloat and ensure fast rendering in ContextView traces.
+    - ContextShield (Security): Redact cryptographic artifacts (`_signature`) from
+      telemetry to minimize exposure of verification hashes outside the execution boundary.
+    """
+    if isinstance(data, dict):
+        return {
+            k: "**REDACTED**"
+            if isinstance(k, str)
+            and (k.endswith(("_signature", "_prompt", "_prompts")) or k == "schema_description")
+            else _redact_sensitive_keys(v)
+            for k, v in data.items()
+        }
+    return [_redact_sensitive_keys(i) for i in data] if isinstance(data, list) else data
+
+
+_LANGFUSE_KEYS = (
+    "langfuse_project_id",
+    "langfuse_public_key",
+    "langfuse_secret_key",
+    "langfuse_host",
+    "langfuse_trace_id",
+    "langfuse_trace_url",
+)
+
+
+def _clean_for_trace(metadata: dict) -> dict:
+    """Prepare execution metadata for Brain trace persistence.
+
+    Domain boundary: ContextRouter (Execution) -> ContextBrain (Observability).
+    The `project_config` contains heavy manifest definitions needed by ContextRouter
+    at runtime (e.g., SecureNode verification, tool resolution).
+    Before sending this payload over gRPC to Brain, we redact payload-heavy and
+    security-sensitive properties, preserving only the structural telemetry data.
+    """
+    clean_meta = dict(metadata)
+    config = clean_meta.get("project_config")
+
+    if isinstance(config, dict):
+        # Apply domain-appropriate redactions to the manifest configuration
+        clean_meta["project_config"] = _redact_sensitive_keys(config)
+
+    # 1. Target both the root metadata and the nested config for cleanup/sorting
+    targets = [clean_meta]
+    if isinstance(clean_meta.get("project_config"), dict):
+        targets.append(clean_meta["project_config"])
+
+    is_langfuse_enabled = clean_meta.get("langfuse_enabled", False)
+
+    # Base UI keys: always show whether it's enabled or not
+    ui_bottom_keys = ["langfuse_enabled"]
+
+    if is_langfuse_enabled:
+        # Include all actual Langfuse telemetry details
+        ui_bottom_keys.extend(_LANGFUSE_KEYS)
+
+    # Ensure provenance is strictly at the bottom
+    ui_bottom_keys.append("_inner_provenance")
+
+    for target in targets:
+        if not is_langfuse_enabled:
+            # Strip out all Langfuse details when perfectly disabled
+            for k in _LANGFUSE_KEYS:
+                target.pop(k, None)
+
+        # 2. Swap keys to the end so they stack neatly in the ContextView UI
+        for k in ui_bottom_keys:
+            if k in target:
+                target[k] = target.pop(k)
+
+    return clean_meta
+
+
 def prepare_execution(
     params: ExecuteAgentPayload,
     tenant_id: str,
@@ -155,14 +243,17 @@ def prepare_execution(
     if not isinstance(metadata, dict):
         metadata = {}
 
-    if not metadata.get("system_prompt") and project_config.get("planner_prompt"):
-        metadata["system_prompt"] = project_config["planner_prompt"]
-
     metadata["tenant_id"] = tenant_id
     metadata["agent_id"] = params.agent_id or ""
+    metadata["platform"] = metadata.get("platform") or "grpc"
+
+    # Fully intact config for the graph runtime
+    metadata["project_config"] = project_config
+
     execution_input["metadata"] = metadata
 
     effective_user_id = getattr(token, "user_id", None) if token else None
+
     if effective_user_id:
         metadata["user_id"] = effective_user_id
 
@@ -176,6 +267,10 @@ def prepare_execution(
         langfuse_ctx=langfuse_ctx,
     )
 
+    # Ensure the actual enabled state is stored back in metadata
+    # so ContextView can display the 'Langfuse (Disabled)' badge
+    metadata["langfuse_enabled"] = langfuse_ctx.enabled
+
     auto_tracer = BrainAutoTracer()
     if hasattr(callbacks, "callbacks"):
         callbacks.callbacks.append(auto_tracer)
@@ -185,7 +280,7 @@ def prepare_execution(
     return execution_input, metadata, effective_user_id, callbacks, auto_tracer, langfuse_ctx
 
 
-def merge_token_usage(auto_tracer: BrainAutoTracer, state: dict) -> dict[str, int]:
+def merge_token_usage(auto_tracer: BrainAutoTracer, state: dict) -> dict[str, int | float]:
     """Merge token usage from AutoTracer callbacks and graph state."""
     auto_tokens = auto_tracer.get_token_usage()
     state_tokens = state.get("_token_usage", {}) if isinstance(state, dict) else {}
@@ -196,6 +291,7 @@ def merge_token_usage(auto_tracer: BrainAutoTracer, state: dict) -> dict[str, in
         "output_tokens": max(
             auto_tokens.get("output_tokens", 0), state_tokens.get("output_tokens", 0)
         ),
+        "total_cost": max(auto_tokens.get("total_cost", 0.0), state_tokens.get("total_cost", 0.0)),
     }
 
 
@@ -230,7 +326,7 @@ async def log_execution_trace(
     *,
     auto_tracer: BrainAutoTracer,
     result: dict,
-    unit: Any,
+    token: ContextToken | None,
     tenant_id: str,
     params: ExecuteAgentPayload,
     metadata: dict,
@@ -243,74 +339,68 @@ async def log_execution_trace(
     stream: bool = False,
     error: str = "",
 ) -> None:
-    """Log execution trace to Brain via the log_execution_trace tool."""
-    import contextrouter.modules.tools.brain_trace_tools  # noqa
-    from contextrouter.modules.tools import get_tool
+    """Log execution trace to Brain via brain_trace_tools.
 
-    trace_tool = get_tool("log_execution_trace")
-    if not trace_tool:
-        return
-
+    Calls the underlying async function directly (not via LangChain ainvoke)
+    because this is an infrastructure call — LangChain schema validation on
+    TypedDict annotations (ToolCallSummary, TotalTokenUsage) causes
+    ``'dict' object is not callable`` errors.
+    """
     try:
+        from contextrouter.modules.tools.brain_trace_tools import (
+            log_execution_trace as _trace_fn,
+        )
+
         token_usage = merge_token_usage(auto_tracer, result)
         answer_content = extract_answer(result)
-        suffix = ":stream" if stream else ""
 
-        kwargs = {
-            "tenant_id": tenant_id,
-            "agent_id": params.agent_id or "",
-            "session_id": metadata.get("session_id", ""),
-            "user_id": effective_user_id or "",
-            "graph_name": graph_name,
-            "tool_calls": auto_tracer.get_tool_calls_summary(),
-            "token_usage": token_usage,
-            "timing_ms": wall_ms,
-            "steps": auto_tracer.get_nested_steps(),
-            "platform": metadata.get("platform", ""),
-            "model_key": metadata.get("model_key", ""),
-            "iterations": 1,
-            "message_count": len(execution_input.get("messages", [])),
-            "user_query": last_user_msg,
-            "final_answer": answer_content,
-            "metadata": metadata,
-            "provenance": (
-                list(unit.provenance)
-                + [f"router:agent:{graph_name}{suffix}"]
-                + auto_tracer.get_provenance()
-            ),
-            "security_flags": {
-                "shield_enabled": guard_result is not None,
-                **(
-                    {
-                        "error": error,
-                    }
-                    if error
-                    else {}
-                ),
-            }
-            if last_user_msg or error
-            else {},
-        }
+        base_prov = list(token.provenance) if token and hasattr(token, "provenance") else []
+        inner_prov = metadata.get("_inner_provenance", [])
 
-        from contextcore import ContextToken
+        # Accumulator stores flat strings (node:X, tool:Y:mode, scope:Z).
+        # Merge token provenance (delegation chain) with execution trace.
+        # Do not use global deduplication ('step not in provenance_flat') here,
+        # as it destroys identical scopes used by subsequent nodes. UI handles its own per-node deduplication.
+        provenance_flat = list(base_prov)
+        for step in inner_prov:
+            if isinstance(step, str):
+                provenance_flat.append(step)
 
-        from contextrouter.cortex.runtime_context import (
-            reset_current_access_token as _reset,
-        )
-        from contextrouter.cortex.runtime_context import (
-            set_current_access_token as _set,
-        )
+        steps_list = auto_tracer.get_nested_steps()
+        if error:
+            metadata["graph_error"] = error
+            steps_list.append(
+                {"tool": "graph_failure", "status": "error", "timing_ms": wall_ms, "result": error}
+            )
 
-        admin_token = ContextToken(
-            token_id="internal-trace",  # nosec B106 — service identity, not a password
-            permissions=("admin", "tool:log_execution_trace"),
-            allowed_tenants=(tenant_id,),
+        # Pre-compute security flags to avoid inline conditional expression
+        sec_flags: dict = {}
+        if last_user_msg or error:
+            sec_flags["shield_enabled"] = guard_result is not None
+            if error:
+                sec_flags["error"] = error
+
+        # Call the underlying coroutine directly — bypasses LangChain @tool
+        # schema validation which fails on TypedDict annotations.
+        await _trace_fn.coroutine(
+            tenant_id=tenant_id,
+            agent_id=params.agent_id or "",
+            session_id=metadata.get("session_id", ""),
             user_id=effective_user_id or "",
+            graph_name=graph_name,
+            tool_calls=auto_tracer.get_tool_calls_summary(),
+            token_usage=token_usage,
+            timing_ms=wall_ms,
+            steps=steps_list,
+            platform=metadata.get("platform", ""),
+            model_key=metadata.get("model_key", ""),
+            iterations=1,
+            message_count=len(execution_input.get("messages", [])),
+            user_query=last_user_msg,
+            final_answer=answer_content,
+            metadata=_clean_for_trace(metadata),
+            provenance=provenance_flat,
+            security_flags=sec_flags,
         )
-        ref = _set(admin_token)
-        try:
-            await trace_tool.ainvoke(kwargs)
-        finally:
-            _reset(ref)
     except Exception as tr_err:
-        logger.warning("AutoTracer failed to log execution: %s", tr_err)
+        logger.warning("AutoTracer failed to log execution: %s", tr_err, exc_info=True)

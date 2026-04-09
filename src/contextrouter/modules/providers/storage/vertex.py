@@ -9,15 +9,14 @@ Uses ContextUnit protocol for data transport.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
-from contextcore import ContextToken, ContextUnit
+from contextcore import ContextToken, ContextUnit, get_context_unit_logger
 
-from contextrouter.core.interfaces import BaseProvider, IRead, IWrite, secured
+from contextrouter.core.interfaces import BaseProvider, IRead, IWrite
 from contextrouter.modules.retrieval.rag.models import RetrievedDoc
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 # Shared utilities are now in vertex_search.py to avoid circular imports
@@ -37,7 +36,6 @@ def parse_search_result(result: object) -> RetrievedDoc | None:
 
 
 class VertexProvider(BaseProvider, IRead, IWrite):
-    @secured()
     async def read(
         self,
         query: str,
@@ -66,7 +64,6 @@ class VertexProvider(BaseProvider, IRead, IWrite):
             out.append(unit)
         return out
 
-    @secured()
     async def write(self, data: ContextUnit, *, token: ContextToken) -> None:
         _ = data, token
         raise NotImplementedError("VertexProvider.write is not implemented yet")

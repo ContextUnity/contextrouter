@@ -9,19 +9,18 @@ Routes to subgraphs based on intent:
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict
 
+from contextcore import get_context_unit_logger
 from langgraph.graph import END, StateGraph
 
 from contextrouter.core.registry import register_graph
 
-from .gardener import create_gardener_subgraph
 from .lexicon import create_lexicon_subgraph
 from .matcher import create_matcher_subgraph
 from .state import CommerceState
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 async def route_intent_node(state: CommerceState) -> Dict[str, Any]:
@@ -35,7 +34,6 @@ def _get_next_node(state: CommerceState) -> str:
     """Determine next node based on intent."""
     intent = state.get("intent", "search")
     routing = {
-        "enrich": "gardener",
         "generate_content": "lexicon",
         "match_products": "matcher",
     }
@@ -69,7 +67,6 @@ def build_commerce_graph():
     workflow.add_node("route", route_intent_node)
 
     # Subgraphs
-    workflow.add_node("gardener", create_gardener_subgraph())
     workflow.add_node("lexicon", create_lexicon_subgraph())
     workflow.add_node("matcher", create_matcher_subgraph())
 
@@ -84,7 +81,6 @@ def build_commerce_graph():
         "route",
         _get_next_node,
         {
-            "gardener": "gardener",
             "lexicon": "lexicon",
             "matcher": "matcher",
             END: END,
@@ -92,7 +88,6 @@ def build_commerce_graph():
     )
 
     # All subgraphs exit to END
-    workflow.add_edge("gardener", END)
     workflow.add_edge("lexicon", END)
     workflow.add_edge("matcher", END)
     workflow.add_edge("search", END)

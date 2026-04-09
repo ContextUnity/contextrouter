@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
+
+from contextcore import get_context_unit_logger
 
 from .types import BulkMatchResult, ProductMatch
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 async def fallback_chunked_match(

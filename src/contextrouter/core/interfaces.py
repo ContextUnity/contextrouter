@@ -6,75 +6,28 @@ Business logic lives in modules; orchestration lives in brain.
 
 from __future__ import annotations
 
-import functools
-import logging
 from abc import ABC, abstractmethod
 from typing import (
     TYPE_CHECKING,
     Any,
     AsyncIterator,
-    Callable,
     Protocol,
     runtime_checkable,
 )
 
+from contextcore import get_context_unit_logger
+
 if TYPE_CHECKING:
     from contextcore import ContextUnit
+    from contextcore.tokens import ContextToken
 
     from contextrouter.core.state import AgentState
-    from contextrouter.core.tokens import ContextToken
 else:
     ContextUnit = Any  # type: ignore[misc,assignment]
     ContextToken = Any  # type: ignore[misc,assignment]
     AgentState = Any  # type: ignore[misc,assignment]
 
-logger = logging.getLogger(__name__)
-
-
-def secured(permission: str | None = None) -> Callable:
-    """Decorator to enforce ContextUnit protocol security on IRead/IWrite methods.
-
-    If permission is None, it uses the default permission from core config.
-    """
-
-    def decorator(func: Callable):
-        @functools.wraps(func)
-        async def wrapper(self, *args, **kwargs):
-            from contextcore.exceptions import SecurityError
-
-            from contextrouter.core.tokens import AccessManager
-
-            token = kwargs.get("token")
-            if token is None:
-                # Try to find token in positional args if not in kwargs
-                # (Assumes standard signature: read(query, limit, filters, token))
-                # or write(data, token)
-                for arg in args:
-                    from contextrouter.core.tokens import ContextToken
-
-                    if isinstance(arg, ContextToken):
-                        token = arg
-                        break
-
-            if token is None and "sink" not in func.__name__:
-                # We allow sink to be called without token if it delegates to write which is secured
-                pass
-
-            access = AccessManager.from_core_config()
-            try:
-                if "read" in func.__name__:
-                    access.verify_read(token, permission=permission)
-                elif "write" in func.__name__ or "sink" in func.__name__:
-                    access.verify_write(token, permission=permission)
-            except Exception as e:
-                # Map to our internal exception hierarchy
-                raise SecurityError(f"Security verification failed: {str(e)}") from e
-
-            return await func(self, *args, **kwargs)
-
-        return wrapper
-
-    return decorator
+logger = get_context_unit_logger(__name__)
 
 
 class BaseAgent(ABC):

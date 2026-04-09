@@ -10,11 +10,12 @@ tool for real-time web search capabilities.
 
 from __future__ import annotations
 
-import logging
 from typing import AsyncIterator
 
+from contextcore import get_context_unit_logger
+from contextcore.tokens import ContextToken
+
 from contextrouter.core import Config
-from contextrouter.core.tokens import ContextToken
 
 from ..base import BaseModel
 from ..registry import model_registry
@@ -31,7 +32,7 @@ from ..types import (
 )
 from ._openai_compat import build_native_openai_messages, generate_asr_openai_compat
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 @model_registry.register_llm("openai", "*")
@@ -184,8 +185,8 @@ class OpenAILLM(BaseModel):
                 whisper_model="whisper-1",
             )
 
-        # o1/o3: need developer role + max_completion_tokens + reasoning_effort
-        # gpt-5: need system role + max_completion_tokens + reasoning_effort (NOT max_tokens)
+        # o1/o3: dedicated reasoning models — need developer role + max_completion_tokens + reasoning_effort
+        # gpt-5: reasoning model — uses system role + max_completion_tokens + reasoning_effort
         # others: system role + max_tokens + temperature
         name_lower = self._model_name.lower()
         uses_developer_role = any(x in name_lower for x in ["o1-", "o1_", "o3-", "o3_"])
@@ -202,7 +203,12 @@ class OpenAILLM(BaseModel):
         if uses_completion_tokens:
             if request.max_output_tokens:
                 kwargs["max_completion_tokens"] = request.max_output_tokens
-            kwargs["reasoning_effort"] = self._cfg.openai.reasoning_effort or "minimal"
+            # Use per-request reasoning_effort if provided, else config, else omit (API defaults to medium)
+            re_value = (
+                getattr(request, "reasoning_effort", None) or self._cfg.openai.reasoning_effort
+            )
+            if re_value:
+                kwargs["reasoning_effort"] = re_value
         else:
             if request.max_output_tokens:
                 kwargs["max_tokens"] = request.max_output_tokens
@@ -250,6 +256,16 @@ class OpenAILLM(BaseModel):
 
         choice = response.choices[0]
         text = str(choice.message.content or "")
+
+        finish_reason = getattr(choice, "finish_reason", None)
+        if finish_reason and finish_reason != "stop":
+            logger.warning(
+                "OpenAI response finish_reason=%s (model=%s, text_len=%d). "
+                "If 'length', response was truncated — increase max_completion_tokens.",
+                finish_reason,
+                self._model_name,
+                len(text),
+            )
 
         usage_val = None
         if hasattr(response, "usage") and response.usage:

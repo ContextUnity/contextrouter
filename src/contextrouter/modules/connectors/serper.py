@@ -7,14 +7,14 @@ Supports web, news, images search with filtering options.
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Literal
 
 import httpx
+from contextcore import get_context_unit_logger
 
 from contextrouter.core.config import Config
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 class SerperSearchConnector:

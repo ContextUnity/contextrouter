@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import logging
 import uuid
 from typing import Any
 
+from contextcore import get_context_unit_logger
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tools import BaseTool
 
+from contextrouter.cortex.graphs.config_resolution import get_node_attr
 from contextrouter.cortex.graphs.sql_analytics.helpers import (
     acc_tokens,
     extract_json,
@@ -17,10 +19,11 @@ from contextrouter.cortex.graphs.sql_analytics.helpers import (
 from contextrouter.cortex.graphs.sql_analytics.pii import (
     PiiSession,
 )
+from contextrouter.cortex.graphs.sql_analytics.schemas import SqlAnalyticsStateUpdate
 from contextrouter.cortex.graphs.sql_analytics.state import SqlAnalyticsState
 from contextrouter.modules.models import model_registry
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def make_planner_node(
@@ -28,6 +31,7 @@ def make_planner_node(
     planner_prompt: str,
     default_model_key: str | None,
     fallback_keys: list[str] | None = None,
+    shield_key_name: str | None = None,
     pii_masking: bool,
     anonymize_tool: BaseTool | None,
     deanonymize_tool: BaseTool | None = None,
@@ -42,7 +46,9 @@ def make_planner_node(
     automatically by BrainAutoTracer callbacks — no manual _steps needed.
     """
 
-    async def planner_node(state: SqlAnalyticsState):
+    async def planner_node(
+        state: SqlAnalyticsState, config: RunnableConfig
+    ) -> SqlAnalyticsStateUpdate:
         # Record pipeline start time on first entry
         updates: dict[str, Any] = {}
         if not state.get("_start_ts"):
@@ -51,7 +57,9 @@ def make_planner_node(
             updates["_start_ts"] = time.monotonic()
 
         messages = state["messages"]
-        llm = model_registry.get_llm_with_fallback(default_model_key, fallback_keys=fallback_keys)
+        llm = model_registry.get_llm_with_fallback(
+            default_model_key, fallback_keys=fallback_keys, shield_key_name=shield_key_name
+        )
 
         # Increment retry count if returning from error or failed validation
         current_retry = state.get("retry_count", 0)
@@ -82,6 +90,7 @@ def make_planner_node(
             session_id=session_id,
             anonymize_tool=anonymize_tool if pii_masking else None,
             deanonymize_tool=deanonymize_tool if pii_masking else None,
+            config=config,
         ) as pii:
             history = await pii.hide(history)
 
@@ -108,7 +117,12 @@ def make_planner_node(
                 )
 
             try:
-                response, usage = await invoke_model(llm, [sys_msg, *history])
+                project_config = metadata.get("project_config", {})
+                prompt_version = get_node_attr(project_config, "planner", "prompt_version")
+                response, usage = await invoke_model(
+                    llm, [sys_msg, *history], config=config, prompt_version=prompt_version
+                )
+
                 raw_content = response.content or ""
                 logger.info(
                     "planner_node: raw LLM response len=%d, first_500=%s",

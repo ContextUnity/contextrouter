@@ -8,16 +8,21 @@ Uses ContextUnit as the universal data contract for all operations.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import grpc
-from contextcore import ContextToken, ContextUnit, brain_pb2_grpc, context_unit_pb2
+from contextcore import (
+    ContextToken,
+    ContextUnit,
+    brain_pb2_grpc,
+    context_unit_pb2,
+    get_context_unit_logger,
+)
 
 from contextrouter.core.config import get_core_config
-from contextrouter.core.interfaces import BaseProvider, IRead, secured
+from contextrouter.core.interfaces import BaseProvider, IRead
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 class BrainProvider(BaseProvider, IRead):
@@ -39,7 +44,7 @@ class BrainProvider(BaseProvider, IRead):
             if self.endpoint and self.endpoint.startswith("postgres"):
                 raise ValueError(
                     f"Invalid Brain gRPC endpoint: expected a host:port for gRPC, but got a database URL "
-                    f"('{self.endpoint}'). Check CONTEXT_BRAIN_URL or BRAIN_GRPC_ENDPOINT in your environment "
+                    f"('{self.endpoint}'). Check CONTEXTBRAIN_GRPC_URL or BRAIN_GRPC_ENDPOINT in your environment "
                     "or setup discovery via Redis."
                 )
 
@@ -50,7 +55,8 @@ class BrainProvider(BaseProvider, IRead):
             self._channel = create_channel(self.endpoint)
             self._stub = brain_pb2_grpc.BrainServiceStub(self._channel)
 
-    @secured()
+    from contextcore.permissions import Permissions
+
     async def read(
         self,
         query: str,

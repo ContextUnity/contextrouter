@@ -34,8 +34,13 @@ async def execute_tool_node(state: dict[str, Any]) -> dict[str, Any]:
 @register_graph("tool_executor")
 def build_tool_executor_graph() -> Any:
     """Build the ToolExecutorProxy pseudo-graph."""
+    from contextrouter.cortex.graphs.secure_node import make_secure_node
+
     builder = StateGraph(dict)
-    builder.add_node("tool_executor", execute_tool_node)
+
+    secure_executor = make_secure_node("tool_executor", execute_tool_node)
+
+    builder.add_node("tool_executor", secure_executor)
     builder.add_edge(START, "tool_executor")
     builder.add_edge("tool_executor", END)
     return builder.compile()

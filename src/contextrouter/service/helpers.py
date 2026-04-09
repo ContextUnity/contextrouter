@@ -16,7 +16,6 @@ def parse_unit(request) -> ContextUnit:
 def make_response(
     payload: dict[str, Any],
     trace_id: str | None = None,
-    provenance: list[str] | None = None,
     security: SecurityScopes | None = None,
     parent_unit: ContextUnit | None = None,
 ) -> bytes:
@@ -25,9 +24,8 @@ def make_response(
     Args:
         payload: Response payload data
         trace_id: Trace identifier (inherited from parent_unit/request if None)
-        provenance: Provenance labels to append (extended from parent if given)
         security: Security scopes (inherited from request if None)
-        parent_unit: Parent ContextUnit to inherit trace_id and provenance from
+        parent_unit: Parent ContextUnit to inherit trace_id from
 
     Returns:
         Serialized protobuf bytes
@@ -35,18 +33,9 @@ def make_response(
     if trace_id is None and parent_unit:
         trace_id = parent_unit.trace_id
 
-    if provenance is None:
-        if parent_unit:
-            provenance = list(parent_unit.provenance) + ["router:response"]
-        else:
-            provenance = ["router:response"]
-    elif parent_unit:
-        provenance = list(parent_unit.provenance) + provenance
-
     kwargs: dict[str, Any] = {
         "payload": payload,
         "trace_id": trace_id or uuid.uuid4(),
-        "provenance": provenance,
     }
     if security is not None:
         kwargs["security"] = security
@@ -55,37 +44,34 @@ def make_response(
     return unit.to_protobuf(context_unit_pb2)
 
 
-def check_security_scopes(
-    unit: ContextUnit,
-    required_read: list[str] | None = None,
-    required_write: list[str] | None = None,
-) -> bool:
-    """Check if ContextUnit has required security scopes.
+def router_error_response_factory(request: Any, context: Any, error: Exception) -> bytes:
+    """Factory to create standardized ContextUnit error responses for Router.
 
-    Args:
-        unit: ContextUnit to check
-        required_read: Required read scopes (e.g., ["dispatcher:execute"])
-        required_write: Required write scopes
-
-    Returns:
-        True if all required scopes are present
+    Used with contextcore.exceptions.grpc_error_handler to prevent gRPC aborts
+    and instead return standard ContextUnity protocol payloads to clients.
     """
-    if not unit.security:
-        return False
+    if isinstance(error, ValueError):
+        error_type = "validation"
+    elif isinstance(error, PermissionError):
+        error_type = "permission_denied"
+    else:
+        # e.g., 'SecurityError', 'ConfigurationError', etc.
+        error_type = type(error).__name__
 
-    if required_read:
-        unit_read = set(unit.security.read or [])
-        required_read_set = set(required_read)
-        if not required_read_set.issubset(unit_read):
-            return False
+    try:
+        unit = parse_unit(request)
+        trace_id = str(unit.trace_id)
+        security = unit.security
+    except Exception:
+        # Fallback if request is malformed
+        trace_id = str(uuid.uuid4())
+        security = None
 
-    if required_write:
-        unit_write = set(unit.security.write or [])
-        required_write_set = set(required_write)
-        if not required_write_set.issubset(unit_write):
-            return False
-
-    return True
+    return make_response(
+        payload={"error": str(error) or repr(error), "error_type": error_type},
+        trace_id=trace_id,
+        security=security,
+    )
 
 
-__all__ = ["parse_unit", "make_response", "check_security_scopes"]
+__all__ = ["parse_unit", "make_response", "router_error_response_factory"]

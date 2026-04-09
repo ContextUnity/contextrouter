@@ -1,406 +1,481 @@
 """
-Gardener node implementations.
+Gardener v2 node implementations.
 
-Each node is a pure async function that takes state and returns state updates.
+Three-node pipeline:
+  fetch_and_prepare → normalize → write_results
+
+Each node is created via make_* factory that bakes config into closures
+(same pattern as sql_analytics nodes).
 """
 
 from __future__ import annotations
 
-import json
-import logging
 import time
-from typing import Any, Dict, List
 
-from .state import EnrichmentResult, GardenerState, Product
+from contextcore import get_context_unit_logger
 
-logger = logging.getLogger(__name__)
+from .bidi import GardenerBiDi
+from .normalizer import merge_results, run_deterministic_pass, run_llm_pass
+from .state import GardenerState
 
-
-# --- Helpers ---
-
-
-def _parse_json_response(content: str) -> List[Dict]:
-    """Extract JSON array from LLM response."""
-    import re
-
-    match = re.search(r"\[.*\]", content, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            pass
-
-    try:
-        result = json.loads(content)
-        if isinstance(result, list):
-            return result
-        return [result]
-    except json.JSONDecodeError:
-        return []
+logger = get_context_unit_logger(__name__)
 
 
-def _slugify(text: str) -> str:
-    """Convert text to slug."""
-    import re
+# ── Node 1: fetch_and_prepare ──
 
-    text = text.lower().strip()
-    text = re.sub(r"[^\w\s-]", "", text)
-    text = re.sub(r"[\s_-]+", "-", text)
-    return text
+
+def make_fetch_and_prepare():
+    """Create fetch_and_prepare node."""
+
+    async def fetch_and_prepare(state: GardenerState) -> dict:
+        """Load taxonomy, find few-shot examples, fetch products to normalize."""
+        import uuid
+
+        start = time.time()
+        brand = state.get("brand", "")
+        source = state.get("source", "dealer")
+        only_new = state.get("only_new", True)
+        batch_size = state.get("batch_size", 50)
+        tenant_id = state.get("tenant_id", "traverse")
+        trace_id = state.get("trace_id", uuid.uuid4().hex[:12])
+
+        bidi = GardenerBiDi(trace_id, tenant_id=tenant_id)
+        execution_mode = state.get("execution_mode", "sync")
+
+        if execution_mode in ("batch_status", "batch_import"):
+            return {
+                "trace_id": trace_id,
+                "products": [],
+                "taxonomy": {},
+                "examples": [],
+            }
+
+        # 1. Load taxonomy
+        taxonomy = await bidi.export_taxonomy()
+        logger.info("Loaded taxonomy: %d keys", len(taxonomy))
+
+        # 2. Find already-normalized examples - DISABLED to prevent passing poisoned examples from prior runs.
+        examples = []
+        logger.info("Examples disabled for robust LLM behavior")
+
+        # 3. Fetch unprocessed products
+        ids = state.get("ids", [])
+        products = await bidi.export_products_for_normalization(
+            brand=brand,
+            source=source,
+            only_new=only_new,
+            batch_size=batch_size,
+            ids=ids,
+        )
+        logger.info(
+            "Fetched %d %s products for normalization (brand=%s)",
+            len(products),
+            source,
+            brand,
+        )
+
+        step_trace = {
+            "step": "fetch_and_prepare",
+            "brand": brand,
+            "source": source,
+            "examples": len(examples),
+            "products": len(products),
+            "duration_ms": int((time.time() - start) * 1000),
+        }
+
+        return {
+            "taxonomy": taxonomy,
+            "examples": examples,
+            "products": products,
+            "trace_id": trace_id,
+            "step_traces": state.get("step_traces", []) + [step_trace],
+        }
+
+    return fetch_and_prepare
+
+
+# ── Node 2: normalize ──
+
+
+def make_normalize(
+    *,
+    model_key: str,
+    reasoning_effort: str = "none",
+):
+    """Create normalize node with model config baked in.
+
+    Args:
+        model_key: LLM model key (e.g. 'openai/gpt-5-nano')
+        reasoning_effort: LLM reasoning effort level
+    """
+
+    async def normalize(state: GardenerState) -> dict:
+        """Two-pass normalization: deterministic + LLM."""
+        start = time.time()
+        products = state.get("products", [])
+        taxonomy = state.get("taxonomy", {})
+        examples = state.get("examples", [])
+        custom_hint = state.get("custom_hint", "")
+        total_tokens = 0
+
+        if not products:
+            logger.info("No products to normalize")
+            return {"results": [], "taxonomy_candidates": []}
+
+        # ── Pass 1: Deterministic color/size resolution ──
+        deterministic_results = run_deterministic_pass(products, taxonomy)
+        det_colors = sum(1 for r in deterministic_results if r.get("normalized_color"))
+        det_sizes = sum(1 for r in deterministic_results if r.get("normalized_size"))
+        logger.info(
+            "Deterministic pass: %d colors, %d sizes resolved (of %d products)",
+            det_colors,
+            det_sizes,
+            len(products),
+        )
+
+        logger.info(
+            "Gardener LLM config: model=%s, reasoning=%s",
+            model_key,
+            reasoning_effort,
+        )
+
+        # ── Pass 2: LLM normalization ──
+        tenant_id = state.get("tenant_id", "traverse")
+        execution_mode = state.get("execution_mode", "sync")
+
+        # Handle Batch API Flow
+        if execution_mode == "batch_status":
+            from contextrouter.core.config import get_config
+            from contextrouter.modules.models.llm.openai_batch import OpenAIBatchClient
+
+            client = OpenAIBatchClient(get_config())
+            job_id = state.get("batch_job_id", "")
+            if not job_id:
+                return {"errors": ["missing batch_job_id for status request"]}
+
+            job = await client.get_batch(job_id)
+            return {
+                "results": [],
+                "taxonomy_candidates": [],
+                "batch_info": {
+                    "id": job.id,
+                    "status": job.status,
+                    "request_counts": job.request_counts,
+                },
+            }
+
+        elif execution_mode == "batch_import":
+            from contextrouter.core.config import get_config
+            from contextrouter.cortex.graphs.commerce.gardener.normalizer import (
+                _parse_json_response,
+            )
+            from contextrouter.modules.models.llm.openai_batch import OpenAIBatchClient
+
+            client = OpenAIBatchClient(get_config())
+            job_id = state.get("batch_job_id", "")
+            if not job_id:
+                return {"errors": ["missing batch_job_id for import request"]}
+
+            job = await client.get_batch(job_id)
+            if job.status != "completed":
+                return {"errors": [f"Cannot import batch {job_id} in status: {job.status}"]}
+
+            batch_results = await client.get_batch_results(job)
+            llm_results = []
+
+            for item in batch_results:
+                if item.error:
+                    logger.error("Batch error %s: %s", item.custom_id, item.error)
+                    continue
+                parsed = _parse_json_response(item.content)
+                llm_results.extend(parsed)
+
+            # For imports, the LLM results are directly merged as final. They already have `method=llm` marked
+            # We don't have deterministic results here (they were written during submit)
+            results = []
+            taxonomy_candidates = []
+
+            for llm_res in llm_results:
+                llm_res["method"] = "llm"  # guarantee it's marked
+                results.append(llm_res)
+                for candidate in llm_res.get("taxonomy_candidates", []):
+                    taxonomy_candidates.append(candidate)
+
+            return {
+                "results": results,
+                "taxonomy_candidates": taxonomy_candidates,
+                "batch_info": {"imported": len(results)},
+                "step_traces": state.get("step_traces", [])
+                + [
+                    {
+                        "step": "normalize_import",
+                        "total": len(results),
+                        "duration_ms": int((time.time() - start) * 1000),
+                    }
+                ],
+            }
+
+        elif execution_mode == "batch_submit":
+            if not model_key.startswith("openai/"):
+                return {
+                    "results": [],
+                    "taxonomy_candidates": [],
+                    "errors": [
+                        f"Batch Submission requires an OpenAI model. Currently configured: {model_key}"
+                    ],
+                    "step_traces": [{"error": "Unsupported model for Batch API"}],
+                }
+
+            from contextrouter.core.config import get_config
+            from contextrouter.cortex.graphs.commerce.gardener.normalizer import prepare_llm_payload
+            from contextrouter.modules.models.llm.openai_batch import (
+                BatchRequest,
+                OpenAIBatchClient,
+            )
+
+            chunk_size = 50
+            requests = []
+
+            # Find products that still need LLM (didn't fully resolve in deterministic pass)
+            {r["id"]: r for r in deterministic_results}
+            llm_products = products  # pass all to LLM anyway, or only those missing fields? We pass all for now to extract name, gender, category
+
+            for i in range(0, len(llm_products), chunk_size):
+                chunk = llm_products[i : i + chunk_size]
+                system_prompt, user_message = prepare_llm_payload(
+                    chunk, taxonomy, examples, deterministic_results, custom_hint
+                )
+                req_id = f"gardener_{state.get('trace_id', 'unknown')}_{i}"
+                requests.append(
+                    {
+                        "id": req_id,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_message},
+                        ],
+                    }
+                )
+
+            batch_job_id = None
+            if requests:
+                client = OpenAIBatchClient(get_config())
+                batch_requests = [
+                    BatchRequest(
+                        custom_id=req["id"],
+                        messages=req["messages"],
+                        model="gpt-4o-mini",
+                        response_format={"type": "json_object"},
+                    )
+                    for req in requests
+                ]
+                brand = state.get("brand", "")
+                source = state.get("source", "unknown")
+                job = await client.create_batch(
+                    batch_requests,
+                    description=f"Gardener Normalization brand={brand} source={source}",
+                )
+                batch_job_id = job.id
+
+            # Return deterministic results to be written immediately, and the batch ID for LLM
+            return {
+                "results": deterministic_results,
+                "taxonomy_candidates": [],
+                "batch_job_id": batch_job_id,
+                "batch_info": {"job_id": batch_job_id, "status": "validating"}
+                if batch_job_id
+                else {},
+                "step_traces": state.get("step_traces", [])
+                + [
+                    {
+                        "step": "normalize_batch_submit",
+                        "deterministic_colors": det_colors,
+                        "deterministic_sizes": det_sizes,
+                        "duration_ms": int((time.time() - start) * 1000),
+                    }
+                ],
+            }
+
+        else:
+            # Sync execution
+            llm_results = await run_llm_pass(
+                products,
+                taxonomy,
+                examples,
+                deterministic_results,
+                custom_hint,
+                tenant_id=tenant_id,
+                model_key=model_key,
+                reasoning_effort=reasoning_effort,
+            )
+            results = merge_results(deterministic_results, llm_results)
+
+            # Collect taxonomy candidates
+            taxonomy_candidates = []
+            for result in results:
+                for candidate in result.get("taxonomy_candidates", []):
+                    taxonomy_candidates.append(candidate)
+
+        step_trace = {
+            "step": "normalize",
+            "total": len(products),
+            "deterministic_colors": det_colors,
+            "deterministic_sizes": det_sizes,
+            "llm_processed": len(llm_results),
+            "taxonomy_candidates": len(taxonomy_candidates),
+            "tokens": total_tokens,
+            "duration_ms": int((time.time() - start) * 1000),
+        }
+
+        return {
+            "results": results,
+            "taxonomy_candidates": taxonomy_candidates,
+            "total_tokens": state.get("total_tokens", 0) + total_tokens,
+            "step_traces": state.get("step_traces", []) + [step_trace],
+        }
+
+    return normalize
+
+
+# ── Node 3: write_results ──
+
+
+def make_write_results():
+    """Create write_results node."""
+
+    async def write_results(state: GardenerState) -> dict:
+        """Write normalized fields back to Commerce DB via BiDi."""
+        import uuid
+        from datetime import datetime, timezone
+
+        start = time.time()
+        results = state.get("results", [])
+        source = state.get("source", "dealer")
+        custom_hint = state.get("custom_hint", "")
+        trace_id = state.get("trace_id", uuid.uuid4().hex[:12])
+
+        tenant_id = state.get("tenant_id", "traverse")
+
+        if not results:
+            return {
+                "stats": {"total": 0, "written": 0},
+                "errors": [],
+            }
+
+        bidi = GardenerBiDi(trace_id, tenant_id=tenant_id)
+        now_iso = datetime.now(tz=timezone.utc).isoformat()
+
+        updates = []
+        for result in results:
+            method = result.get("method", "llm")
+            if custom_hint:
+                method = "llm_with_hint"
+
+            update = {
+                "id": result.get("id"),
+                "product_type": result.get("product_type"),
+                "model_name": result.get("model_name"),
+                "normalized_category": result.get("normalized_category"),
+                "normalized_color": result.get("normalized_color"),
+                "normalized_size": result.get("normalized_size"),
+                "enrichment_gardener": {
+                    "version": "2.0",
+                    "normalized_at": now_iso,
+                    "original_color": result.get("original_color"),
+                    "manufacturer_sku": result.get("manufacturer_sku"),
+                    "gender": result.get("gender"),
+                    "extra": result.get("extra"),
+                    "method": method,
+                    "confidence": 0.9 if result.get("product_type") else 0.5,
+                    "custom_hint": custom_hint or None,
+                    "taxonomy_candidates": result.get("taxonomy_candidates", []),
+                },
+            }
+            updates.append(update)
+
+        written = await bidi.update_normalized_products(updates, source=source)
+
+        step_trace = {
+            "step": "write_results",
+            "source": source,
+            "total": len(results),
+            "written": written,
+            "duration_ms": int((time.time() - start) * 1000),
+        }
+
+        stats = {
+            "total": len(state.get("products", [])),
+            "normalized": written,
+            "deterministic": sum(1 for r in results if "deterministic" in (r.get("method") or "")),
+            "llm": sum(1 for r in results if r.get("method") == "llm"),
+            "taxonomy_candidates": len(state.get("taxonomy_candidates", [])),
+        }
+
+        logger.info(
+            "Gardener v2 complete: %d/%d written (source=%s, brand=%s)",
+            written,
+            len(results),
+            source,
+            state.get("brand", ""),
+        )
+
+        return {
+            "stats": stats,
+            "errors": state.get("errors", []),
+            "step_traces": state.get("step_traces", []) + [step_trace],
+        }
+
+    return write_results
+
+
+# ── Helpers (used by tests) ──
 
 
 def _load_prompt(prompts_dir: str, filename: str) -> str:
     """Load prompt template from file."""
-    from pathlib import Path
+    import os
 
-    path = Path(prompts_dir) / filename
-    if path.exists():
-        return path.read_text()
-
-    package_path = Path(__file__).parent.parent.parent / "prompts" / filename
-    if package_path.exists():
-        return package_path.read_text()
-
-    raise FileNotFoundError(f"Prompt not found: {filename}")
+    path = os.path.join(prompts_dir, filename)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Prompt not found: {path}")
+    with open(path) as f:
+        return f.read()
 
 
-# --- Node Implementations ---
+def _slugify(text: str) -> str:
+    """Convert text to URL-friendly slug."""
+    import re
+    import unicodedata
+
+    text = unicodedata.normalize("NFKD", text)
+    text = text.encode("ascii", "ignore").decode("ascii")
+    text = text.lower().strip()
+    text = re.sub(r"[^\w\s-]", "", text)
+    text = re.sub(r"[-\s]+", "-", text)
+    return text
 
 
-async def fetch_pending_node(state: GardenerState) -> dict:
-    """Fetch products needing enrichment from queue."""
-    from ..queue import get_enrichment_queue
+def _parse_json_response(content: str) -> list:
+    """Parse JSON array from LLM response, handling markdown wrapping."""
+    import json
+    import re
 
-    queue = get_enrichment_queue()
-    product_ids = await queue.dequeue(
-        tenant_id=state["tenant_id"],
-        batch_size=state["batch_size"],
-        batch_id=state["trace_id"],
-    )
-
-    if not product_ids:
-        logger.info("No products in enrichment queue")
-        return {"products": []}
-
-    # Use BrainClient instead of direct DB access for security
-    from contextcore import BrainClient
-
-    brain_url = state["brain_url"]
-    token = state.get("access_token")  # Get token from state
-    client = BrainClient(host=brain_url, mode="grpc", token=token)
-
-    products_data = await client.get_products(
-        tenant_id=state["tenant_id"],
-        product_ids=product_ids,
-        trace_id=state["trace_id"],
-        parent_provenance=["router:gardener:fetch_pending"],
-    )
-
-    products = [
-        Product(
-            id=p.get("id", 0),
-            name=p.get("name", ""),
-            category=p.get("category", ""),
-            description=p.get("description", ""),
-            params=p.get("params", {}),
-            enrichment=p.get("enrichment", {}),
-            brand_name=p.get("brand_name"),
-        )
-        for p in products_data
-    ]
-
-    logger.info("Fetched %s products from queue for enrichment via Brain gRPC", len(products))
-    return {"products": products}
-
-
-async def classify_taxonomy_node(state: GardenerState) -> dict:
-    """Classify taxonomy using LLM (batched)."""
-    from ....llm import get_llm
-
-    start = time.time()
-    products = [p for p in state["products"] if p.needs_task("taxonomy")]
-
-    if not products:
-        logger.info("No products need taxonomy classification")
-        return {}
-
-    llm = get_llm()
-    items = [{"id": p.id, "name": p.name, "category": p.category} for p in products[:50]]
-    system_prompt = _load_prompt(state["prompts_dir"], "taxonomy_classification.txt")
-
-    taxonomy_results = []
-    total_tokens = 0
-
+    # Try direct parse
+    content = content.strip()
     try:
-        response = await llm.ainvoke(
-            [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": json.dumps(items, ensure_ascii=False)},
-            ]
-        )
+        result = json.loads(content)
+        if isinstance(result, list):
+            return result
+    except json.JSONDecodeError:
+        pass
 
-        content = response.content if hasattr(response, "content") else str(response)
-        results = _parse_json_response(content)
-        tokens = response.usage.total_tokens if hasattr(response, "usage") else 0
-        total_tokens = tokens
-
-        for r in results:
-            taxonomy_results.append(
-                EnrichmentResult(
-                    product_id=r["id"],
-                    task="taxonomy",
-                    status="done",
-                    result={
-                        "category": r.get("category"),
-                        "color": r.get("color"),
-                        "size": r.get("size"),
-                        "gender": r.get("gender"),
-                        "confidence": r.get("confidence", 0.8),
-                    },
-                    tokens=tokens // len(results) if results else 0,
-                )
-            )
-
-    except Exception as e:
-        logger.error("Taxonomy classification failed: %s", e)
-        return {"errors": state.get("errors", []) + [f"taxonomy: {str(e)}"]}
-
-    step_trace = {
-        "step": "taxonomy",
-        "products": len(products),
-        "tokens": total_tokens,
-        "duration_ms": int((time.time() - start) * 1000),
-    }
-
-    return {
-        "taxonomy_results": state.get("taxonomy_results", []) + taxonomy_results,
-        "total_tokens": state.get("total_tokens", 0) + total_tokens,
-        "step_traces": state.get("step_traces", []) + [step_trace],
-    }
-
-
-async def extract_ner_node(state: GardenerState) -> dict:
-    """Extract NER (product_type, brand, model) using LLM (batched)."""
-    from ....llm import get_llm
-
-    start = time.time()
-    products = [p for p in state["products"] if p.needs_task("ner")]
-
-    if not products:
-        logger.info("No products need NER extraction")
-        return {}
-
-    llm = get_llm()
-    items = [{"id": p.id, "name": p.name, "brand": p.brand_name or ""} for p in products[:50]]
-    system_prompt = _load_prompt(state["prompts_dir"], "ner_extraction.txt")
-
-    ner_results = []
-    total_tokens = 0
-
-    try:
-        response = await llm.ainvoke(
-            [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": json.dumps(items, ensure_ascii=False)},
-            ]
-        )
-
-        content = response.content if hasattr(response, "content") else str(response)
-        results = _parse_json_response(content)
-        tokens = response.usage.total_tokens if hasattr(response, "usage") else 0
-        total_tokens = tokens
-
-        for r in results:
-            ner_results.append(
-                EnrichmentResult(
-                    product_id=r["id"],
-                    task="ner",
-                    status="done",
-                    result={
-                        "product_type": r.get("product_type"),
-                        "brand": r.get("brand"),
-                        "model": r.get("model"),
-                        "technologies": r.get("technologies", []),
-                    },
-                    tokens=tokens // len(results) if results else 0,
-                )
-            )
-
-    except Exception as e:
-        logger.error("NER extraction failed: %s", e)
-        return {"errors": state.get("errors", []) + [f"ner: {str(e)}"]}
-
-    step_trace = {
-        "step": "ner",
-        "products": len(products),
-        "tokens": total_tokens,
-        "duration_ms": int((time.time() - start) * 1000),
-    }
-
-    return {
-        "ner_results": state.get("ner_results", []) + ner_results,
-        "total_tokens": state.get("total_tokens", 0) + total_tokens,
-        "step_traces": state.get("step_traces", []) + [step_trace],
-    }
-
-
-async def update_kg_node(state: GardenerState) -> dict:
-    """Create Knowledge Graph relations from NER results."""
-    from pathlib import Path
-
-    start = time.time()
-
-    # Path: gardener/ -> commerce/ontology/
-    ontology_path = Path(__file__).parent.parent / "ontology" / "relations.json"
-    if ontology_path.exists():
-        with open(ontology_path) as f:
-            ontology = json.load(f)
-    else:
-        ontology = {}
-
-    # Use BrainClient instead of direct DB access for security
-    from contextcore import BrainClient
-
-    brain_url = state["brain_url"]
-    token = state.get("access_token")  # Get token from state
-    client = BrainClient(host=brain_url, mode="grpc", token=token)
-    tenant_id = state["tenant_id"]
-
-    relations_created = 0
-    kg_results = []
-
-    for ner in state.get("ner_results", []):
-        if ner.status != "done":
-            continue
-
-        product_id = str(ner.product_id)
-        result = ner.result
-
-        if result.get("brand") and "MADE_BY" in ontology:
-            brand_slug = _slugify(result["brand"])
-            await client.create_kg_relation(
-                tenant_id=tenant_id,
-                source_type="product",
-                source_id=product_id,
-                relation="MADE_BY",
-                target_type="brand",
-                target_id=brand_slug,
-                trace_id=state["trace_id"],
-                parent_provenance=["router:gardener:create_kg"],
-            )
-            relations_created += 1
-
-        for tech in result.get("technologies", []):
-            if "USES" in ontology:
-                tech_slug = _slugify(tech)
-                await client.create_kg_relation(
-                    tenant_id=tenant_id,
-                    source_type="product",
-                    source_id=product_id,
-                    relation="USES",
-                    target_type="technology",
-                    target_id=tech_slug,
-                    trace_id=state["trace_id"],
-                    parent_provenance=["router:gardener:create_kg"],
-                )
-                relations_created += 1
-
-        kg_results.append(
-            EnrichmentResult(
-                product_id=ner.product_id,
-                task="kg",
-                status="done",
-                result={"relations_created": relations_created},
-            )
-        )
-
-    logger.info("Created %s KG relations", relations_created)
-
-    step_trace = {
-        "step": "kg",
-        "relations": relations_created,
-        "duration_ms": int((time.time() - start) * 1000),
-    }
-
-    return {
-        "kg_results": state.get("kg_results", []) + kg_results,
-        "step_traces": state.get("step_traces", []) + [step_trace],
-    }
-
-
-async def write_results_node(state: GardenerState) -> dict:
-    """Write all enrichment results back to DealerProduct."""
-    start = time.time()
-
-    # Use BrainClient instead of direct DB access for security
-    from contextcore import BrainClient
-
-    brain_url = state["brain_url"]
-    token = state.get("access_token")  # Get token from state
-    client = BrainClient(host=brain_url, mode="grpc", token=token)
-    products_updated = 0
-    errors = []
-
-    # Build enrichment map per product
-    enrichment_map: Dict[int, Dict[str, Any]] = {}
-
-    for result in (
-        state.get("taxonomy_results", [])
-        + state.get("ner_results", [])
-        + state.get("kg_results", [])
-    ):
-        if result.product_id not in enrichment_map:
-            product = next((p for p in state["products"] if p.id == result.product_id), None)
-            enrichment_map[result.product_id] = product.enrichment.copy() if product else {}
-
-        enrichment_map[result.product_id][result.task] = {
-            "status": result.status,
-            "result": result.result,
-            "tokens": result.tokens,
-        }
-
-    # Write to DB via Brain gRPC
-    for product_id, enrichment in enrichment_map.items():
+    # Try extracting from markdown code block
+    match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", content, re.DOTALL)
+    if match:
         try:
-            success = await client.update_enrichment(
-                tenant_id=state["tenant_id"],
-                product_id=product_id,
-                enrichment=enrichment,
-                trace_id=state["trace_id"],
-                status="enriched",
-                parent_provenance=["router:gardener:write_results"],
-            )
+            result = json.loads(match.group(1).strip())
+            if isinstance(result, list):
+                return result
+        except json.JSONDecodeError:
+            pass
 
-            if not success:
-                raise RuntimeError(f"update_enrichment returned False for product {product_id}")
-
-            # TODO: NER fields (product_type, model_name) should be included in enrichment dict
-            # and updated via update_enrichment. Separate update_product_ner_fields is not available in BrainClient.
-            # ner_result = next(
-            #     (r for r in state.get("ner_results", []) if r.product_id == product_id),
-            #     None,
-            # )
-            # if ner_result and ner_result.status == "done":
-            #     # Include NER fields in enrichment dict instead
-            #     pass
-
-            products_updated += 1
-
-        except Exception as e:
-            logger.error("Failed to write results for product %s: %s", product_id, e)
-            errors.append(f"write:{product_id}:{str(e)}")
-
-    logger.info("Updated %s products", products_updated)
-
-    step_trace = {
-        "step": "write",
-        "products": products_updated,
-        "errors": len(errors),
-        "duration_ms": int((time.time() - start) * 1000),
-    }
-
-    return {
-        "products_updated": products_updated,
-        "errors": state.get("errors", []) + errors,
-        "step_traces": state.get("step_traces", []) + [step_trace],
-    }
+    return []

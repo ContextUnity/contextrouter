@@ -55,7 +55,7 @@ def __getattr__(name: str) -> Any:
         "MatcherState",
         "build_commerce_graph",
         "create_chat_subgraph",
-        "create_gardener_subgraph",
+        "build_gardener_graph",
         "create_lexicon_subgraph",
         "create_matcher_subgraph",
         "create_rlm_bulk_matcher_subgraph",
@@ -91,7 +91,7 @@ __all__ = [
     "invoke_chat",
     "ChatState",
     # Gardener
-    "create_gardener_subgraph",
+    "build_gardener_graph",
     "GardenerState",
     # Lexicon
     "create_lexicon_subgraph",

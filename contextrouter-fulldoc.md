@@ -46,7 +46,7 @@ src/contextrouter/
 │   │   ├── registry.py                  ← LLM provider registry, BUILTIN_LLMS
 │   │   ├── base.py                      ← BaseLLMProvider
 │   │   ├── types.py                     ← ModelRequest, error types
-│   │   ├── llm/                         ← 13 LLM providers
+│   │   ├── llm/                         ← 12 LLM providers
 │   │   │   ├── openai.py                ← OpenAI (GPT-5, o1, o3)
 │   │   │   ├── anthropic.py             ← Anthropic (Claude Sonnet/Haiku)
 │   │   │   ├── vertex.py                ← Google Vertex AI (Gemini)
@@ -56,7 +56,6 @@ src/contextrouter/
 │   │   │   ├── huggingface.py           ← HuggingFace Inference
 │   │   │   ├── hf_hub.py                ← HuggingFace Hub
 │   │   │   ├── openrouter.py            ← OpenRouter (multi-provider)
-│   │   │   ├── litellm.py               ← LiteLLM (universal adapter)
 │   │   │   ├── local_openai.py          ← Local OpenAI-compat (Ollama, vLLM)
 │   │   │   ├── openai_batch.py          ← OpenAI Batch API
 │   │   │   ├── runpod.py                ← RunPod inference
@@ -243,6 +242,30 @@ if manager.is_available("acme", "execute_analytics_sql"):
 - SQL validation enforced on the project side (SELECT/WITH only)
 - Statement timeout and row limits applied per tool config
 
+### SecureNode Execution Wrapper (`cortex/graphs/secure_node.py`)
+
+Every LLM and tool node in a registered graph is wrapped via `make_secure_node()`.
+This wrapper enforces three security boundaries at runtime:
+
+1. **Capability Stripping** — Attenuates the `ContextToken` to the minimum scope required by the node before execution.
+2. **Prompt Integrity Verification** — If the node has a `prompt_signature` (set during SDK bootstrap), `SecureNode` verifies the prompt text against its HMAC signature before LLM invocation. A mismatch raises `TamperDetectedError` → `grpc.StatusCode.ABORTED`.
+3. **Provenance Injection** — Records `node:{name}`, `shield:secrets:read:{path}`, and `prompt:{llm_name}:{version}` entries into the execution provenance for observability.
+
+```python
+workflow.add_node(
+    "planner",
+    make_secure_node(
+        "planner",
+        planner,
+        pii_masking=pii_masking,
+        model_secret_ref=planner_shield_key,
+        prompt_signature=config.get("planner_prompt_signature"),
+        schema_tools=_get_tools("planner", "schema"),
+        execute_tools=_get_tools("planner", "execute"),
+    ),
+)
+```
+
 ---
 
 ## Agents (cortex/graphs/)
@@ -275,16 +298,11 @@ Supplier-to-catalog product linking with RLM support for massive datasets.
 - Process: Multi-factor matching (name, brand, attributes)
 - Output: Matched pairs with confidence scores
 
-**RLM Model Selection**: The matcher accepts a project-scoped API key and model name
-via the LangGraph state (`rlm_api_key`, `rlm_model`). The model name determines the
-provider: `gemini-*` → `GEMINI_API_KEY`, `gpt-*` → `OPENAI_API_KEY`. If no project key
-is provided, the matcher falls back to Router's global `OPENAI_API_KEY`.
-
-> ⚠️ **TEMPORARY**: API key is passed as plaintext in the gRPC payload
-> (`.env → Django settings → execute_agent payload → LangGraph state`).
-> The correct approach is ContextShield credential management, where
-> the project registers its credentials once and Router fetches them
-> server-side at execution time.
+**RLM Model Selection**: The matcher uses a project-scoped model configured at registration time
+in the `contextunity.project.yaml` manifest via `model_secret_ref`. The ContextCore SDK automatically
+resolves the secret from the project's environment and syncs it to ContextShield during bootstrap.
+Router resolves the key at runtime via `shield_get_secret()`. If Shield is unavailable,
+the secret is passed inline within the execution bundle.
 
 ### 4. News Engine (`news_engine/`)
 
@@ -326,7 +344,7 @@ model = model_registry.get_llm_with_fallback(
 model = model_registry.create_llm("perplexity/sonar", config=config)
 ```
 
-### Supported Providers (13 LLM + 2 Embedding)
+### Supported Providers (12 LLM + 2 Embedding)
 
 | Provider | Module | Models | Use Case |
 |----------|--------|--------|----------|
@@ -337,7 +355,6 @@ model = model_registry.create_llm("perplexity/sonar", config=config)
 | **Groq** | `groq.py` | Llama 3.3 70B | Ultra-fast inference |
 | **RLM** | `rlm.py` | Recursive LM | Massive context (50k+ items) |
 | **OpenRouter** | `openrouter.py` | Multi-provider | Aggregated access |
-| **LiteLLM** | `litellm.py` | Universal | Adapter for any provider |
 | **Local OpenAI** | `local_openai.py` | Ollama, vLLM | Development, privacy |
 | **RunPod** | `runpod.py` | Custom models | GPU inference |
 | **HuggingFace** | `huggingface.py` | HF Inference | HuggingFace models |
@@ -380,16 +397,17 @@ if is_reasoning_model:
 ### Environment Variables
 
 ```bash
-# Core
-CONTEXTROUTER_DEFAULT_LLM="openai/gpt-5-mini"
-# Optional list of global fallback models for the entire router
-CONTEXTROUTER_FALLBACK_LLMS="anthropic/claude-sonnet-4.5,vertex/gemini-2.5-flash"
-# Whether to allow using global fallbacks when a specific graph doesn't provide its own
-CONTEXTROUTER_ALLOW_GLOBAL_FALLBACK="true"
+# Core Discovery (Primary)
+REDIS_URL="redis://localhost:6379/0"
+REDIS_SECRET_KEY="..."
 
-# Brain connection
-BRAIN_MODE="grpc"
-BRAIN_GRPC_HOST="localhost:50051"
+# Optional gRPC overrides (Bypass discovery)
+CONTEXTBRAIN_GRPC_URL="localhost:50051"
+
+# Router Fallback Strategy
+CONTEXTROUTER_DEFAULT_LLM="openai/gpt-5-mini"
+CONTEXTROUTER_FALLBACK_LLMS="anthropic/claude-sonnet-4.5,vertex/gemini-2.5-flash"
+CONTEXTROUTER_ALLOW_GLOBAL_FALLBACK="true"
 
 # LLM providers
 GOOGLE_CLOUD_PROJECT="my-project"
@@ -449,9 +467,9 @@ Project .env                 Project code                  Router
 
 #### Project Examples
 
-**NSZU** (tracing enabled, shared credentials):
+**CONTEXTMED** (tracing enabled, shared credentials):
 ```bash
-# nszu/.env
+# contextmed/.env
 LANGFUSE_ENABLED=true
 LANGFUSE_PROJECT_ID=cmlmgptn300s4ad07ev9xl13u
 ```
@@ -469,11 +487,14 @@ LANGFUSE_ENABLED=false
 3. Pass `{"langfuse_enabled": True, "langfuse_project_id": "..."}` in request metadata
 4. Router handles the rest — no Router config changes needed
 
-#### Future: Shield-Managed Credentials
+#### API Key Resolution (Shield)
 
-Currently project-specific credentials are passed in metadata. Future versions
-will use ContextShield to fetch credentials server-side, eliminating credential
-transit in request payloads.
+API keys for LLM providers are resolved via a two-tier fallback chain:
+
+1. **Shield**: `shield_get_secret({tenant}/api_keys/{provider})` — project-scoped keys synced at startup
+2. **Router env**: Provider-specific env vars (`OPENAI_API_KEY`, `INCEPTION_API_KEY`, etc.) — global fallback
+
+Projects sync their keys to Shield during `RegisterTools`. Router never stores keys in memory.
 
 
 ---
@@ -684,9 +705,19 @@ Predefined profiles in `contextcore.permissions.PROJECT_PROFILES`:
 - The `security_guard_node` uses `has_tool_access()` from `contextcore.permissions` for token-based enforcement, falling back to `allowed_tools`/`denied_tools` state lists.
 - `extract_tool_names(token.permissions)` pre-populates `allowed_tools` from the token at state initialization.
 - `check_tool_scope()` classifies tool risk: `SAFE` → auto-execute, `CONFIRM` → HITL interrupt, `DENY` → block.
-- HITL mechanism: when a `ToolRisk.CONFIRM` tool is invoked, `security_guard_node` pauses the graph via `langgraph.types.interrupt()` and waits for human approval (`hitl_approved`).
+- HITL mechanism: when a `ToolRisk.CONFIRM` tool is invoked, `securityц_guard_node` pauses the graph via `langgraph.types.interrupt()` and waits for human approval (`hitl_approved`).
 - All security events (blocked calls, HITL confirmations) are accumulated in `state['security_flags']` for trace enrichment.
 - Security violation events are observable and auditable.
+
+### AI Firewall (Shield) Inline Checks (Enterprise / Pro)
+
+Before the Router executes any LangGraph (Agent or Dispatcher), the user's input is sent to the **ContextShield microservice (Enterprise/Pro version)** via a gRPC `Scan` call (`shield_check.py`). 
+This allows the ecosystem to securely scan for Prompt Injection, Jailbreaks, and PII without loading validators into the Router memory space. 
+*Note: In the Open Source version (when `CONTEXTSHIELD_GRPC_URL` is unset), the Router fails-open and skips these enterprise firewall checks completely.*
+
+**SPOT Authentication**: The Router implements the **Token as Single Point of Truth (SPOT)** pattern when calling Shield. Instead of making the gRPC `Scan` call under a generic "Router" service token, the Router **propagates the end-user's token** as `authorization: Bearer <token_string>` directly to Shield structure context (`_shield_metadata()`). 
+
+**Permission Inheritance**: Because Shield strictly enforces authorization via interceptors (`RPC_PERMISSION_MAP["Scan"] = Permissions.SHIELD_CHECK`), end users need the `shield:check` permission to be scanned. This is handled automatically through `contextcore.permissions.inheritance` — any token possessing `router:execute` implicitly inherits `shield:check`, allowing self-service security scanning without friction.
 
 ### Token as Single Point of Truth (SPOT)
 
@@ -1127,8 +1158,8 @@ model = model_registry.get_llm_with_fallback(
 **Fallback Rules:**
 - Only models supporting **all required modalities** are considered
 - No automatic conversion (e.g., image → text description)
-- **Global vs Project Fallback:** By default, if a project (like a remote agent or downstream app) registers a graph but does NOT provide `fallback_keys`, the graph will fail if the primary model fails.
-- To allow the Router to use its own system-wide fallback list (`CONTEXTROUTER_FALLBACK_LLMS`) when projects omit their own, you MUST set `CONTEXTROUTER_ALLOW_GLOBAL_FALLBACK=true` in the Router's configuration.
+- **Fallback Constraints:** Projects specify their `fallback_keys` array in the `contextunity.project.yaml` manifest. The list must be ordered by priority (usually cheapest first).
+- **Graceful Failure:** If a node exhausts its defined `fallback_keys`, the request fails gracefully and signals the agent to either retry or return an error.
 
 ### Fallback Strategies
 
@@ -1154,7 +1185,6 @@ model = model_registry.get_llm_with_fallback(
 | **Local (vLLM/Ollama)** | `local/*`, `local-vllm/*` | Text + Image | Requires `contextrouter[models-openai]`. Vision models support images. |
 | **HuggingFace Transformers** | `hf/*` | Task-dependent (Text/Image/Audio) | Local inference. Task controls modality: text-gen, ASR, image-classification. |
 | **RLM (Recursive)** | `rlm/*` | Text | Wraps any LLM with recursive REPL. For massive contexts (50k+ items). Requires `pip install rlm`. |
-| **LiteLLM** | `litellm/*` | - | **Stub only** (not implemented). |
 
 ### HuggingFace Transformers ⚠️
 
@@ -1232,15 +1262,6 @@ Write code to match products efficiently.
 | `docker` | Production | High (isolated container) |
 | `modal` | Cloud scaling | High |
 | `prime` | High-performance cloud | High |
-
-### LiteLLM (stub)
-
-`litellm/*` exists as a **stub provider** (raises `NotImplementedError`).
-
-Reasons:
-- We prefer explicit providers (Vertex/OpenAI/Anthropic/OpenRouter/local) for clearer debugging and control.
-- LiteLLM would add another abstraction layer that can complicate streaming/multimodal/error mapping.
-- Observability/cost tracking is handled via Langfuse + our own normalized `UsageStats`.
 
 ### Running Local Models (vLLM / Ollama)
 

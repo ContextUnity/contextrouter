@@ -173,13 +173,16 @@ pip install contextrouter[observability]
 ## Configuration
 
 ```bash
-# LLM routing
-export CONTEXTROUTER_DEFAULT_LLM="openai/gpt-5-mini"
-export CONTEXTROUTER_FALLBACK_LLMS="anthropic/claude-sonnet-4,vertex/gemini-2.0-flash"
+# Core Discovery (Primary)
+export REDIS_URL="redis://localhost:6379/0"
+export REDIS_SECRET_KEY="..."
 
-# Brain connection
-export BRAIN_MODE="grpc"
-export BRAIN_GRPC_HOST="localhost:50051"
+# Optional gRPC overrides
+export CONTEXTBRAIN_GRPC_URL="localhost:50051"
+
+# Router Fallback Strategy
+export CONTEXTROUTER_DEFAULT_LLM="openai/gpt-5-mini"
+export CONTEXTROUTER_FALLBACK_LLMS="anthropic/claude-sonnet-4,vertex/gemini-2.5-flash"
 
 # LLM providers
 export OPENAI_API_KEY="sk-..."

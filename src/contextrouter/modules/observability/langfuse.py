@@ -24,14 +24,15 @@ created once and reused for subsequent requests from the same project.
 from __future__ import annotations
 
 import importlib.util
-import logging
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Generator
 
+from contextcore import get_context_unit_logger
+
 from contextrouter.core import get_core_config
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 _warned_missing_langfuse = False
 _global_initialized = False
@@ -181,8 +182,8 @@ def _get_or_create_client(ctx: LangfuseRequestCtx | None) -> object | None:
         import os
 
         service_name = cfg.langfuse.service_name
-        if service_name and not os.environ.get("OTEL_SERVICE_NAME"):
-            os.environ["OTEL_SERVICE_NAME"] = service_name
+        if service_name:
+            os.environ.setdefault("OTEL_SERVICE_NAME", service_name)
         _ensure_threading_instrumented()
 
     try:

@@ -15,12 +15,12 @@ Security model:
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
+from contextcore import get_context_unit_logger
 from langchain_core.tools import BaseTool
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def create_tool_from_config(
@@ -147,6 +147,8 @@ def _create_sql_tools(
         elif "validate" in tool.name:
             tool.name = f"{name}_validate"
 
+        tool.tags = (tool.tags or []) + ["federated"]
+
     mode = "stream-only"
     logger.info(
         "Created SQL tools for '%s' (mode=%s, project=%s, max_rows=%d, timeout=%dms)",
@@ -220,6 +222,7 @@ def _create_bidi_tool(
         func=bidi_executor,
         name=name,
         description=description or f"BiDi tool: {name}",
+        tags=["federated"],
     )
 
     logger.info(

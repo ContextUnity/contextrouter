@@ -20,6 +20,8 @@ from typing import Any
 
 from langchain_core.callbacks import AsyncCallbackHandler
 
+from contextrouter.modules.tools.schemas import ToolCallSummary, TraceStep
+
 
 class BrainAutoTracer(AsyncCallbackHandler):
     """Automatically records all Langchain/LangGraph execution steps into a hierarchical
@@ -34,11 +36,11 @@ class BrainAutoTracer(AsyncCallbackHandler):
         # running total — we need the DELTA for per-node display.
         self._last_token_usage: dict[str, int | float] = {}
 
-    def get_nested_steps(self) -> list[dict[str, Any]]:
+    def get_nested_steps(self) -> list[TraceStep]:
         """Return the fully built hierarchical steps tree."""
         return self.root_spans
 
-    def get_tool_calls_summary(self) -> list[dict[str, Any]]:
+    def get_tool_calls_summary(self) -> list[ToolCallSummary]:
         """Return a flat list of executed tools for high-level summary."""
 
         def walk(spans, acc):
@@ -52,71 +54,30 @@ class BrainAutoTracer(AsyncCallbackHandler):
         walk(self.root_spans, summary)
         return summary
 
-    # Tools that are internal infrastructure — never show in provenance
-    _INFRA_TOOLS = frozenset(
-        {
-            "log_execution_trace",
-            "brain_client_log_trace",
-        }
-    )
-
-    def get_provenance(self) -> list[str]:
-        """Build a provenance chain from executed graph nodes and tools.
-
-        Returns an ordered, deduplicated list of provenance labels like:
-        ["router:node:planner", "tool:anonymize_text", "router:node:execute_sql",
-         "tool:execute_medical_sql", "router:node:verifier", "router:node:visualizer"]
-
-        Includes graph nodes and real tool calls. Excludes:
-        - LLM class names (ChatOpenAI, etc.) — internal implementation detail
-        - Infrastructure tools (log_execution_trace) — trace logging itself
-        - SDK/brain internal calls
-        """
-        seen: set[str] = set()
-        chain: list[str] = []
-
-        def _add(label: str) -> None:
-            if label not in seen:
-                seen.add(label)
-                chain.append(label)
-
-        def walk(spans: list) -> None:
-            for s in spans:
-                node = s.get("node", "")
-                tool_name = s.get("tool", "")
-                stype = s.get("type", "")
-
-                if stype == "chain" and node and not node.startswith("__"):
-                    _add(f"router:node:{node}")
-                elif stype == "tool_call" and tool_name:
-                    # Skip infra tools that log traces
-                    if tool_name not in self._INFRA_TOOLS:
-                        _add(f"tool:{tool_name}")
-                # Skip "assistant" (LLM class names) — not useful in provenance
-
-                if s.get("children"):
-                    walk(s["children"])
-
-        walk(self.root_spans)
-        return chain
-
-    def get_token_usage(self) -> dict[str, int]:
-        """Aggregate token usage across all LLM spans."""
+    def get_token_usage(self) -> dict[str, float]:
+        """Aggregate token usage and cost across all LLM spans."""
         input_tokens = 0
         output_tokens = 0
+        total_cost = 0.0
 
         def walk(spans):
-            nonlocal input_tokens, output_tokens
+            nonlocal input_tokens, output_tokens, total_cost
             for s in spans:
                 if "tokens_in" in s:
                     input_tokens += s["tokens_in"]
                 if "tokens_out" in s:
                     output_tokens += s["tokens_out"]
+                if "cost_usd" in s:
+                    total_cost += s["cost_usd"]
                 if s.get("children"):
                     walk(s["children"])
 
         walk(self.root_spans)
-        return {"input_tokens": input_tokens, "output_tokens": output_tokens}
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_cost": round(total_cost, 8),
+        }
 
     def _get_active_parent_list(self, parent_run_id: str | None) -> list:
         if not parent_run_id or parent_run_id not in self._spans:
@@ -198,26 +159,6 @@ class BrainAutoTracer(AsyncCallbackHandler):
 
         span["has_result"] = bool(outputs)
 
-        # ── Provider-agnostic token usage ──
-        # _token_usage from acc_tokens() is CUMULATIVE across the graph.
-        # We compute the per-node DELTA by subtracting the last seen values.
-        if isinstance(outputs, dict) and "_token_usage" in outputs:
-            tu = outputs["_token_usage"]
-            prev = self._last_token_usage
-            delta_in = tu.get("input_tokens", 0) - prev.get("input_tokens", 0)
-            delta_out = tu.get("output_tokens", 0) - prev.get("output_tokens", 0)
-            delta_cost = tu.get("total_cost", 0.0) - prev.get("total_cost", 0.0)
-            # Update last seen
-            self._last_token_usage = dict(tu)
-
-            span["tokens_in"] = max(delta_in, 0)
-            span["tokens_out"] = max(delta_out, 0)
-            span["tokens"] = span["tokens_in"] + span["tokens_out"]
-            span["cumulative_tokens"] = span.get("cumulative_tokens", 0) + span["tokens"]
-            if delta_cost > 0:
-                span["cost_usd"] = round(delta_cost, 8)
-                span["cumulative_usd"] = span.get("cumulative_usd", 0.0) + span["cost_usd"]
-
         # Bubble up cumulative values to parent
         parent = self._spans.get(parent_run_id)
         if parent and not parent.get("ignore"):
@@ -283,22 +224,22 @@ class BrainAutoTracer(AsyncCallbackHandler):
     ) -> None:
         name = serialized.get("name", "llm") if serialized else "llm"
 
-        # Summarise input WITHOUT system prompt — only message count + user preview
-        user_msgs = []
+        # Format full messages (including system) for ContextView observability
+        msgs_fmt = []
         if messages:
             for msg_list in messages:
                 for msg in msg_list:
-                    role = getattr(msg, "type", "") if hasattr(msg, "type") else ""
-                    if role != "system":
-                        content = getattr(msg, "content", str(msg))
-                        user_msgs.append(str(content)[:200])
-        in_str = (
-            json.dumps(
-                {"message_count": len(user_msgs), "preview": user_msgs[:2]}, ensure_ascii=False
-            )[:3000]
-            if user_msgs
-            else ""
-        )
+                    role = (
+                        getattr(msg, "type", "")
+                        if hasattr(msg, "type")
+                        else str(type(msg).__name__)
+                    )
+                    content = getattr(msg, "content", str(msg))
+                    msgs_fmt.append(f"[{role.upper()}]\n{str(content)}")
+
+        in_str = "\n\n".join(msgs_fmt)
+        if len(in_str) > 15000:
+            in_str = in_str[:15000] + "\n...[TRUNCATED]"
 
         span = {
             "id": run_id,
@@ -316,9 +257,16 @@ class BrainAutoTracer(AsyncCallbackHandler):
         self._spans[run_id] = span
         self._get_active_parent_list(parent_run_id).append(span)
 
-    async def on_chat_model_end(
+    async def _handle_model_end(
         self, response: Any, *, run_id: str, parent_run_id: str | None = None, **kwargs: Any
     ) -> None:
+        """Shared logic for LLM completion — token extraction, timing, cost.
+
+        Called by both on_chat_model_end and on_llm_end since LangChain
+        dispatches to different handler methods depending on how the run
+        was started (on_chat_model_start vs on_llm_start) while the
+        response format (LLMResult) is identical.
+        """
         span = self._spans.get(run_id)
         if not span:
             return
@@ -370,7 +318,8 @@ class BrainAutoTracer(AsyncCallbackHandler):
                             "total_tokens": int(tot or 0) or int(inp or 0) + int(out or 0),
                         }
 
-        # Path 3: AIMessage.response_metadata.token_usage (langchain-openai ≥0.1.8)
+        # Path 3: AIMessage.response_metadata.token_usage (langchain-openai >=0.1.8)
+        # Also check for direct total_cost in response_metadata (our custom invoke_model output)
         if not usage and hasattr(response, "generations") and response.generations:
             msg = getattr(response.generations[0][0], "message", None)
             if msg:
@@ -379,6 +328,15 @@ class BrainAutoTracer(AsyncCallbackHandler):
                     tu = rm.get("token_usage", {})
                     if tu:
                         usage = tu
+                    if "total_cost" in rm:
+                        usage["total_cost"] = rm["total_cost"]
+        elif hasattr(response, "generations") and response.generations:
+            # We already have usage, but let's see if total_cost is in rm
+            msg = getattr(response.generations[0][0], "message", None)
+            if msg:
+                rm = getattr(msg, "response_metadata", {}) or {}
+                if isinstance(rm, dict) and "total_cost" in rm:
+                    usage["total_cost"] = rm["total_cost"]
 
         total_tokens = usage.get("total_tokens", 0)
         span["tokens"] = total_tokens
@@ -386,7 +344,10 @@ class BrainAutoTracer(AsyncCallbackHandler):
         span["tokens_out"] = usage.get("completion_tokens", 0)
 
         # ── Cost estimation for ChatModel span ──
-        if total_tokens:
+        # Use provided cost if available
+        if usage.get("total_cost"):
+            span["cost_usd"] = usage["total_cost"]
+        elif total_tokens:
             model_name = span.get("tool", "")
             # Try to get model from llm_output or invocation_params
             actual_model = (
@@ -405,12 +366,26 @@ class BrainAutoTracer(AsyncCallbackHandler):
                 if est.total_cost:
                     span["cost_usd"] = est.total_cost
 
-        # Add timing to parent (but NOT tokens/cost — those bubble via
-        # _token_usage in on_chain_end to avoid double-counting).
+        # Bubble up tracking values to parent
         parent = self._spans.get(parent_run_id)
         if parent and not parent.get("ignore"):
             parent.setdefault("cumulative_ms", 0)
             parent["cumulative_ms"] += timing
+            parent.setdefault("cumulative_tokens", 0)
+            parent["cumulative_tokens"] += span.get("tokens", 0)
+            if span.get("cost_usd"):
+                parent.setdefault("cumulative_usd", 0.0)
+                parent["cumulative_usd"] += span["cost_usd"]
+
+    async def on_chat_model_end(
+        self, response: Any, *, run_id: str, parent_run_id: str | None = None, **kwargs: Any
+    ) -> None:
+        await self._handle_model_end(response, run_id=run_id, parent_run_id=parent_run_id, **kwargs)
+
+    async def on_llm_end(
+        self, response: Any, *, run_id: str, parent_run_id: str | None = None, **kwargs: Any
+    ) -> None:
+        await self._handle_model_end(response, run_id=run_id, parent_run_id=parent_run_id, **kwargs)
 
     async def on_tool_error(
         self, error: Exception, *, run_id: str, parent_run_id: str | None = None, **kwargs: Any

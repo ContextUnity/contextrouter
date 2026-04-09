@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import logging
 
+from contextcore import get_context_unit_logger
 from langchain_core.tools import BaseTool, tool
 
 from contextrouter.modules.tools.secure import SecureTool
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 # Global tool registry — ALL values are SecureTool instances
 _tool_registry: dict[str, SecureTool] = {}
@@ -372,7 +372,7 @@ def discover_all_tools() -> list[SecureTool]:
             secure_tools.append(t)
         else:
             wrapped = SecureTool.wrap(t)
-            logger.warning(
+            logger.debug(
                 "Tool '%s' discovered as raw BaseTool — auto-wrapped to SecureTool",
                 t.name,
             )

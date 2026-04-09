@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import AsyncIterator
 
-from contextrouter.core.tokens import ContextToken
+from contextcore.tokens import ContextToken
 
 from .types import (
     ModelCapabilities,

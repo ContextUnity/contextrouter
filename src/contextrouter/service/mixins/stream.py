@@ -120,7 +120,7 @@ class StreamMixin:
                         continue
 
                     # ── Verify stream secret (one-time use) ──────────
-                    # Secret was generated in RegisterTools and stored
+                    # Secret was generated in RegisterManifest and stored
                     # in self._stream_secrets.  After successful verify,
                     # the secret is DELETED (consumed) → per-registration.
                     # Reconnect requires re-registration → fresh secret.

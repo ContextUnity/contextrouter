@@ -6,14 +6,15 @@ Provides fast in-memory caching with Redis as backing store for persistence.
 from __future__ import annotations
 
 import hashlib
-import logging
 import time
 from typing import Any
+
+from contextcore import get_context_unit_logger
 
 from contextrouter.core import get_core_config
 from contextrouter.modules.providers.redis import RedisProvider
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 class CacheEntry:

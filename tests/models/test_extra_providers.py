@@ -47,6 +47,10 @@ class TestExtraProviders:
         assert model.capabilities.supports_image is True
 
     def test_hf_hub_initialization(self, mock_config):
+        try:
+            from huggingface_hub import AsyncInferenceClient  # noqa: F401
+        except ImportError:
+            pytest.skip("AsyncInferenceClient not found in huggingface_hub")
         model = HuggingFaceHubLLM(mock_config, model_name="mistralai/Mistral-7B-Instruct-v0.2")
         assert isinstance(model.capabilities, ModelCapabilities)
         assert model.capabilities.supports_text is True
@@ -54,17 +58,15 @@ class TestExtraProviders:
 
     @pytest.mark.anyio
     async def test_groq_generate(self, mock_config):
+        model = GroqLLM(mock_config)
+
+        mock_resp = MagicMock()
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = "Groq response"
+
         from unittest.mock import AsyncMock
 
-        mock_choice = MagicMock()
-        mock_choice.message.content = "Groq response"
-        mock_response = MagicMock()
-        mock_response.choices = [mock_choice]
-
-        model = GroqLLM(mock_config)
-        mock_client = MagicMock()
-        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
-        model._client = mock_client
+        model._client.chat.completions.create = AsyncMock(return_value=mock_resp)
 
         request = ModelRequest(parts=[TextPart(text="Hello")])
         resp = await model.generate(request)
@@ -74,6 +76,10 @@ class TestExtraProviders:
 
     @pytest.mark.anyio
     async def test_hf_hub_generate_text(self, mock_config):
+        try:
+            from huggingface_hub import AsyncInferenceClient  # noqa: F401
+        except ImportError:
+            pytest.skip("AsyncInferenceClient not found in huggingface_hub")
         # Patch the AsyncInferenceClient class that was mocked in sys.modules
         with patch("huggingface_hub.AsyncInferenceClient") as mock_client_class:
             mock_client = mock_client_class.return_value
@@ -105,17 +111,16 @@ class TestExtraProviders:
 
     @pytest.mark.anyio
     async def test_inception_generate(self, mock_config):
+        model = InceptionLLM(mock_config)
+
+        mock_resp = MagicMock()
+        mock_resp.usage = None
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = "Mercury-2 response"
+
         from unittest.mock import AsyncMock
 
-        mock_choice = MagicMock()
-        mock_choice.message.content = "Mercury-2 response"
-        mock_response = MagicMock()
-        mock_response.choices = [mock_choice]
-
-        model = InceptionLLM(mock_config)
-        mock_client = MagicMock()
-        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
-        model._client = mock_client
+        model._client.chat.completions.create = AsyncMock(return_value=mock_resp)
 
         request = ModelRequest(parts=[TextPart(text="Hello")])
         resp = await model.generate(request)

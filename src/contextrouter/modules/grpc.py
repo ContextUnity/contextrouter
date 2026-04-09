@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Optional
 
-from contextcore import ContextToken, WorkerClient
+from contextcore import ContextToken, WorkerClient, get_context_unit_logger
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 # Global client instances
 _worker_client: Optional[WorkerClient] = None

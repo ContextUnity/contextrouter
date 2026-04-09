@@ -7,15 +7,15 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
-from typing import Any
 
+from contextcore import get_context_unit_logger
 from langchain_core.tools import tool
 
 from contextrouter.core import get_core_config
 from contextrouter.modules.providers.redis import RedisProvider
+from contextrouter.modules.tools.schemas import DataToolResult
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 # Singleton Redis provider instance
 _redis_provider: RedisProvider | None = None
@@ -77,7 +77,7 @@ async def store_memory(
     session_id: str,
     tenant_id: str | None = None,
     ttl_seconds: int = 3600,
-) -> dict[str, Any]:
+) -> DataToolResult:
     """Store a value in Redis memory for later retrieval.
 
     This tool allows the agent to store information in memory that persists
@@ -134,7 +134,7 @@ async def retrieve_memory(
     key: str,
     session_id: str,
     tenant_id: str | None = None,
-) -> dict[str, Any]:
+) -> DataToolResult:
     """Retrieve a value from Redis memory.
 
     Retrieves previously stored memory by key and session.
@@ -176,7 +176,7 @@ async def cache_query_result(
     result: str,
     tenant_id: str | None = None,
     ttl_seconds: int = 1800,
-) -> dict[str, Any]:
+) -> DataToolResult:
     """Cache a query result for faster future retrieval.
 
     Use this to cache expensive query results (e.g., LLM responses, API calls).
@@ -225,7 +225,7 @@ async def cache_query_result(
 async def get_cached_query(
     query: str,
     tenant_id: str | None = None,
-) -> dict[str, Any]:
+) -> DataToolResult:
     """Retrieve a cached query result.
 
     Checks if a query result is cached and returns it if found.
@@ -264,7 +264,7 @@ async def get_cached_query(
 async def get_session_data(
     session_id: str,
     tenant_id: str | None = None,
-) -> dict[str, Any]:
+) -> DataToolResult:
     """Retrieve all session data from Redis.
 
     Gets all stored data for a session, including memory entries and metadata.
@@ -308,7 +308,7 @@ async def clear_memory(
     key: str | None = None,
     session_id: str | None = None,
     tenant_id: str | None = None,
-) -> dict[str, Any]:
+) -> DataToolResult:
     """Clear memory entries.
 
     Clears specific memory entry or all memory for a session.

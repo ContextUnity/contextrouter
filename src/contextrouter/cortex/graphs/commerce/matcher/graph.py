@@ -9,16 +9,16 @@ Supports both:
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict, List, TypedDict
 
+from contextcore import get_context_unit_logger
 from langgraph.graph import END, START, StateGraph
 
 from contextrouter.core.registry import register_graph
 
 from .nodes import fetch_unmatched_node, link_or_queue_node, match_products_node
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 class MatcherState(TypedDict):
@@ -53,8 +53,7 @@ class RLMBulkMatcherState(TypedDict):
     custom_prompt: str
     force_not_matched: bool
 
-    # RLM model config (project-scoped, passed from Commerce payload)
-    rlm_api_key: str
+    # RLM model config (model name only — API key resolved via Shield)
     rlm_model: str
 
     # Input products (can be very large)

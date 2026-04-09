@@ -41,4 +41,25 @@ class DispatcherState(TypedDict):
     healing_triggered: bool  # Flag to track if healing was triggered
 
 
-__all__ = ["DispatcherState"]
+class DispatcherStateUpdate(TypedDict, total=False):
+    """Partial State update for dispatcher agent graph."""
+
+    messages: Annotated[Sequence[BaseMessage], add_messages]
+    tenant_id: str
+    session_id: str
+    platform: str
+    metadata: dict[str, Any]
+    iteration: int
+    max_iterations: int
+    allowed_tools: list[str]
+    denied_tools: list[str]
+    access_token: Any | None
+    trace_id: str | None
+    _start_ts: float
+    security_flags: list[dict[str, Any]]
+    hitl_approved: bool
+    error_detected: bool
+    healing_triggered: bool
+
+
+__all__ = ["DispatcherState", "DispatcherStateUpdate"]

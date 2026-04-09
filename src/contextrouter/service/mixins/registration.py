@@ -6,115 +6,259 @@ import secrets
 
 from contextcore import get_context_unit_logger
 
-from contextrouter.core import get_core_config
 from contextrouter.service.decorators import grpc_error_handler
 from contextrouter.service.helpers import make_response, parse_unit
-from contextrouter.service.payloads import DeregisterToolsPayload, RegisterToolsPayload
 from contextrouter.service.tool_factory import create_tool_from_config
 
 logger = get_context_unit_logger(__name__)
 
+# Module-level store for inline API keys (no-Shield fallback).
+# Populated by RegisterManifest when bundle includes inline secrets.
+# Accessed by ModelRegistry.create_llm() as Shield fallback.
+# Dict: project_id → {provider: api_key}
+_project_secrets: dict[str, dict[str, str]] = {}
+
+
+def _extract_registration_token_string(context) -> str:
+    """Extract bearer token from gRPC metadata for registration RPCs."""
+    metadata = dict(context.invocation_metadata() or [])
+
+    auth_header = str(metadata.get("authorization", "")).strip()
+    if auth_header.startswith("Bearer "):
+        return auth_header[7:].strip()
+
+    token_str = str(metadata.get("x-context-token", "")).strip()
+    if token_str:
+        return token_str
+
+    return ""
+
+
+async def _build_registration_verifier(
+    *,
+    token_str: str,
+    project_id: str,
+):
+    """Build a verifier backend for registration/auth bootstrap.
+
+    Resolution order:
+    1. Redis: stored project_secret or public_key (from previous registration)
+    2. Shield: fetch Ed25519 public key (Enterprise mode)
+    3. Env: CU_PROJECT_SECRET from SharedConfig (HMAC single-project mode)
+    """
+    parts = token_str.split(".")
+    if len(parts) != 3:
+        raise PermissionError("Registration token must use composite kid wire format")
+
+    kid = parts[0]
+    if ":" not in kid:
+        raise PermissionError(
+            "Registration token must use composite kid format '<project>:<key-version>'"
+        )
+
+    caller_project_id, key_version = kid.split(":", 1)
+    if caller_project_id != project_id:
+        raise PermissionError(
+            f"Registration token project mismatch: token project '{caller_project_id}' "
+            f"cannot register project '{project_id}'"
+        )
+
+    from contextcore.discovery import get_project_key
+
+    key_data = get_project_key(project_id) or {}
+    stored_secret = key_data.get("project_secret")
+
+    if "session" in key_version:
+        public_key_b64 = key_data.get("public_key_b64")
+        if not public_key_b64:
+            from contextrouter.service.shield_client import _get_shield_url
+
+            shield_url = _get_shield_url()
+            if not shield_url:
+                raise PermissionError(
+                    f"No public key cached for project '{project_id}' and Shield is not configured"
+                )
+
+            from contextcore.token_utils import fetch_project_public_key_async
+
+            public_key_b64, returned_kid = await fetch_project_public_key_async(
+                project_id,
+                kid,
+                shield_url,
+                provenance="router:register_manifest:fetch_public_key",
+            )
+
+            from contextcore.discovery import update_project_public_key
+
+            update_project_public_key(project_id, public_key_b64, returned_kid)
+
+        try:
+            from contextcore.ed25519 import Ed25519Backend
+        except ImportError as exc:
+            raise PermissionError("contextcore.ed25519 failed to import") from exc
+
+        return Ed25519Backend(public_key_b64=public_key_b64, kid=kid)
+
+    # HMAC mode: try stored secret first, then env fallback
+    if stored_secret:
+        from contextcore.signing import HmacBackend
+
+        return HmacBackend(project_id, stored_secret)
+
+    # Env fallback: CU_PROJECT_SECRET from SharedConfig
+    from contextcore.config import get_core_config
+
+    env_secret = get_core_config().security.project_secret
+    if env_secret:
+        from contextcore.signing import HmacBackend
+
+        return HmacBackend(project_id, env_secret)
+
+    raise PermissionError(
+        f"No HMAC secret available for project '{project_id}'. "
+        f"Set CU_PROJECT_SECRET env var or use Shield mode (Ed25519)."
+    )
+
+
+async def _get_verified_registration_auth_context(
+    context,
+    *,
+    project_id: str,
+):
+    """Verify registration token and return canonical auth context."""
+    from contextcore.authz.context import VerifiedAuthContext
+    from contextcore.token_utils import verify_token_string
+
+    token_str = _extract_registration_token_string(context)
+    if not token_str:
+        raise PermissionError("Missing registration token in gRPC metadata")
+
+    backend = await _build_registration_verifier(
+        token_str=token_str,
+        project_id=project_id,
+    )
+    token = verify_token_string(token_str, backend)
+    if token is None:
+        raise PermissionError("Registration token cryptographic verification failed")
+    if token.is_expired():
+        raise PermissionError(f"Registration token expired for project '{project_id}'")
+
+    return VerifiedAuthContext.from_token(token, token_str, project_id=project_id)
+
 
 class RegistrationMixin:
-    """Mixin providing RegisterTools, DeregisterTools, and graph management."""
+    """Mixin providing RegisterManifest, and graph management."""
 
     @grpc_error_handler
-    async def RegisterTools(self, request, context):
-        """Register project tools and graph in Router.
+    async def RegisterManifest(self, request, context):
+        """Register project tools and graph via manifest or pre-compiled bundle.
 
-        Creates real BaseTool instances in Router's process.
-        DB URLs are stored securely in closure scope.
+        Accepts either:
+          - bundle: pre-compiled by ArtifactGenerator on project side (preferred)
+          - manifest: raw ContextUnityProject dict (backward compat — compiled here)
 
-        Security: Requires 'tools:register' write scope.
+        When bundle includes inline secrets (no-Shield scenario), stores them
+        per-tenant in _project_secrets for create_llm() fallback.
         """
         unit = parse_unit(request)
 
-        # Accept both generic "tools:register" and project-specific "tools:register:{id}"
-        unit_write = set(unit.security.write or []) if unit.security else set()
-        has_scope = any(
-            w == "tools:register" or w.startswith("tools:register:") for w in unit_write
-        )
-        if not has_scope:
-            config = get_core_config()
-            if config.security.enabled:
-                raise PermissionError("Missing 'tools:register' write scope")
+        from contextrouter.service.payloads import RegisterManifestPayload
 
         try:
-            params = RegisterToolsPayload(**unit.payload)
+            params = RegisterManifestPayload(**unit.payload)
         except Exception as e:
-            raise ValueError(f"Invalid RegisterTools payload: {e}") from e
+            raise ValueError(f"Invalid RegisterManifest payload: {e}") from e
 
-        # ── VULN-5: Validate graph config (prompt injection defense) ──
-        if params.graph and hasattr(params.graph, "config"):
-            cfg = params.graph.config if isinstance(params.graph.config, dict) else {}
-            prompt = cfg.get("planner_prompt", "")
-            if isinstance(prompt, str) and len(prompt) > 10_000:
-                raise ValueError(
-                    f"planner_prompt exceeds maximum length (10,000 chars, "
-                    f"got {len(prompt)}). Reduce prompt size to prevent "
-                    f"context window exhaustion."
+        bundle = params.bundle
+        if not bundle:
+            raise ValueError(
+                "RegisterManifest requires 'bundle' — a pre-compiled registration bundle "
+                "from ArtifactGenerator (contextcore.manifest.generators)"
+            )
+
+        project_id = bundle.get("project_id", "")
+        tenant_id = bundle.get("tenant_id", project_id)
+
+        if "project_secret" in bundle:
+            raise ValueError(
+                "RegisterManifest payload must NOT contain 'project_secret'. "
+                "HMAC secrets are resolved from CU_PROJECT_SECRET env var. "
+                "Update your contextcore SDK."
+            )
+
+        from contextcore.authz import authorize
+        from contextcore.discovery import register_project, verify_project_owner
+
+        auth_ctx = await _get_verified_registration_auth_context(
+            context,
+            project_id=project_id,
+        )
+        decision = authorize(
+            auth_ctx,
+            registration_project_id=project_id,
+            tenant_id=tenant_id,
+            service="router",
+            rpc_name="RegisterManifest",
+        )
+        if decision.denied:
+            raise PermissionError(
+                f"Registration denied for project '{project_id}': {decision.reason}"
+            )
+
+        if not verify_project_owner(project_id, tenant_id):
+            raise PermissionError(
+                f"Project '{project_id}' is already registered to "
+                f"a different tenant. Cannot hijack identity."
+            )
+        register_project(project_id, tenant_id, tools=[])
+
+        # Hash Idempotency check
+        if params.hash:
+            is_matched = await self._check_manifest_hash(project_id, params.hash)
+            if is_matched:
+                logger.debug(
+                    "Project '%s' manifest hash matched. Skipping re-registration.", project_id
+                )
+                from contextrouter.service.shield_client import _get_shield_url
+
+                stream_secret = self._stream_secrets.get(project_id)
+                return make_response(
+                    payload={
+                        "registered_tools": self._project_tools.get(project_id, []),
+                        "graph": self._project_graphs.get(project_id, "").replace(
+                            f"project:{project_id}:", ""
+                        ),
+                        "status": "ok",
+                        "hash_matched": True,
+                        "stream_secret": stream_secret,
+                        "shield_url": _get_shield_url(),
+                    },
+                    trace_id=str(unit.trace_id),
+                    security=unit.security,
                 )
 
-        # ── Three-layer registration security ──────────────
-        # Layer A: token.allowed_tenants — is this tenant mine?
-        # Layer B: tools:register:{project_id} — granular permission
-        # Layer C: Redis project registry — server-side ownership
-        config = get_core_config()
-        if config.security.enabled:
-            from contextcore import extract_token_from_grpc_metadata
-            from contextcore.permissions import has_registration_access
+        # ── Store inline secrets (no-Shield fallback) ──────────────
+        inline_secrets = bundle.pop("secrets", None)
+        if inline_secrets:
+            _project_secrets[project_id] = inline_secrets
+            logger.info(
+                "Stored %d inline API key(s) for project '%s' (no-Shield mode)",
+                len(inline_secrets),
+                project_id,
+            )
 
-            token = extract_token_from_grpc_metadata(context)
-            if token is not None:
-                # Layer A: Tenant binding
-                allowed = getattr(token, "allowed_tenants", ()) or ()
-                if allowed and params.project_id not in allowed:
-                    raise PermissionError(
-                        f"Tenant ownership violation: cannot register tools for "
-                        f"project '{params.project_id}'. Token allows: {list(allowed)}"
-                    )
-
-                # Layer B: Granular registration permission
-                perms = getattr(token, "permissions", ()) or ()
-                if not has_registration_access(perms, params.project_id):
-                    raise PermissionError(
-                        f"Missing registration permission for project "
-                        f"'{params.project_id}'. Need 'tools:register' or "
-                        f"'tools:register:{params.project_id}'"
-                    )
-
-                # Layer C: Redis project registry
-                # Use project_id as canonical owner identity
-                owner_tenant = params.project_id
-                from contextcore.discovery import register_project, verify_project_owner
-
-                if not verify_project_owner(params.project_id, owner_tenant):
-                    raise PermissionError(
-                        f"Project '{params.project_id}' is already registered by "
-                        f"a different owner. Cannot hijack."
-                    )
-                register_project(
-                    params.project_id,
-                    owner_tenant,
-                    tools=[t.name for t in params.tools],
-                )
-            else:
-                # Fail-closed: no token → reject registration
-                raise PermissionError(
-                    "No token in gRPC metadata for RegisterTools — "
-                    f"cannot verify tenant ownership for project '{params.project_id}'. "
-                    "Provide a ContextToken with allowed_tenants and "
-                    "tools:register permission."
-                )
-
-        # Idempotent re-registration
-        if params.project_id in self._project_tools:
-            self._deregister_project(params.project_id)
+        # De-register existing tools
+        if project_id in self._project_tools:
+            self._deregister_project(project_id)
 
         registered_tools: list[str] = []
 
-        for tool_def in params.tools:
+        from contextrouter.service.payloads import GraphConfig, ToolConfig
+
+        for tool_dict in bundle.get("tools", []):
             try:
+                tool_name = tool_dict.get("name")
+                tool_def = ToolConfig(**tool_dict)
                 tools = create_tool_from_config(
                     name=tool_def.name,
                     tool_type=tool_def.type,
@@ -124,44 +268,49 @@ class RegistrationMixin:
                 from contextrouter.modules.tools import register_tool
 
                 for tool_instance in tools:
-                    register_tool(tool_instance, tenant=params.project_id)
+                    register_tool(tool_instance, tenant=tenant_id)
                     registered_tools.append(tool_instance.name)
-                    logger.info(
-                        "Registered tool '%s' for project '%s'",
-                        tool_instance.name,
-                        params.project_id,
-                    )
             except Exception as e:
                 logger.error(
-                    "Failed to create tool '%s' for project '%s': %s",
-                    tool_def.name,
-                    params.project_id,
-                    e,
+                    "Failed to create tool '%s' for project '%s': %s", tool_name, project_id, e
                 )
-                raise ValueError(f"Failed to create tool '{tool_def.name}': {e}") from e
+                raise ValueError(f"Failed to create tool '{tool_name}': {e}") from e
 
-        self._project_tools[params.project_id] = registered_tools
+        self._project_tools[project_id] = registered_tools
 
         graph_name = None
-        if params.graph:
-            graph_name = self._register_graph(params.project_id, params.graph)
+        graph_dict = bundle.get("graph")
+        if graph_dict:
+            graph_config = GraphConfig(
+                name=graph_dict["id"],
+                template=graph_dict.get("template", "custom"),
+                nodes=graph_dict.get("nodes", []),
+                edges=graph_dict.get("edges", []),
+                config=graph_dict.get("config", {}),
+            )
+            graph_name = self._register_graph(project_id, graph_config)
 
-        await self._persist_registration(params.project_id, unit.payload)
+            # Enrich the stored config with manifest-level metadata required for execution (policies, nodes)
+            if project_id not in self._project_configs:
+                self._project_configs[project_id] = {}
+            self._project_configs[project_id]["nodes"] = graph_dict.get("nodes", [])
+            self._project_configs[project_id]["policy"] = bundle.get("policy", {})
+            self._project_configs[project_id]["tools"] = bundle.get("tools", [])
 
-        # ── Per-registration stream secret (one-time use) ──────────
-        # Generated here, stored in Router memory, returned to project.
-        # Consumed (deleted) on first stream connect → one-time use.
-        # Enterprise deployments can additionally use Shield for audit.
+        await self._persist_registration(project_id, bundle)
+
+        if params.hash:
+            await self._save_manifest_hash(project_id, params.hash)
+
+        # Update registered tools list in redis
+        if len(registered_tools) > 0:
+            from contextcore.discovery import register_project
+
+            register_project(project_id, tenant_id, tools=registered_tools)
+
         stream_secret = secrets.token_urlsafe(32)
         with self._stream_secrets_lock:
-            self._stream_secrets[params.project_id] = stream_secret
-
-        logger.info(
-            "Project '%s' registered: %d tools, graph=%s",
-            params.project_id,
-            len(registered_tools),
-            graph_name or "none",
-        )
+            self._stream_secrets[project_id] = stream_secret
 
         from contextrouter.service.shield_client import _get_shield_url
 
@@ -169,6 +318,7 @@ class RegistrationMixin:
             "registered_tools": registered_tools,
             "graph": graph_name,
             "status": "ok",
+            "hash_matched": False,
             "stream_secret": stream_secret,
             "shield_url": _get_shield_url(),
         }
@@ -176,82 +326,13 @@ class RegistrationMixin:
         return make_response(
             payload=response_payload,
             trace_id=str(unit.trace_id),
-            provenance=list(unit.provenance) + ["router:register_tools"],
-            security=unit.security,
-        )
-
-    @grpc_error_handler
-    async def DeregisterTools(self, request, context):
-        """Deregister project tools and graph.
-
-        Security: Enforces tenant ownership — only the project owner
-        can deregister their own tools.
-        """
-        unit = parse_unit(request)
-
-        # Accept both generic and project-specific scopes
-        unit_write = set(unit.security.write or []) if unit.security else set()
-        has_scope = any(
-            w == "tools:register" or w.startswith("tools:register:") for w in unit_write
-        )
-        if not has_scope:
-            config = get_core_config()
-            if config.security.enabled:
-                raise PermissionError("Missing 'tools:register' write scope")
-
-        try:
-            params = DeregisterToolsPayload(**unit.payload)
-        except Exception as e:
-            raise ValueError(f"Invalid DeregisterTools payload: {e}") from e
-
-        # ── Ownership check (mirrors RegisterTools layers A+B) ──
-        config = get_core_config()
-        if config.security.enabled:
-            from contextcore import extract_token_from_grpc_metadata
-            from contextcore.permissions import has_registration_access
-
-            token = extract_token_from_grpc_metadata(context)
-            if token is None:
-                raise PermissionError(
-                    "No token in gRPC metadata for DeregisterTools — "
-                    f"cannot verify ownership for project '{params.project_id}'."
-                )
-
-            # Layer A: Tenant binding
-            allowed = getattr(token, "allowed_tenants", ()) or ()
-            if allowed and params.project_id not in allowed:
-                raise PermissionError(
-                    f"Tenant ownership violation: cannot deregister tools for "
-                    f"project '{params.project_id}'. Token allows: {list(allowed)}"
-                )
-
-            # Layer B: Granular permission
-            perms = getattr(token, "permissions", ()) or ()
-            if not has_registration_access(perms, params.project_id):
-                raise PermissionError(
-                    f"Missing registration permission for deregistering "
-                    f"project '{params.project_id}'."
-                )
-
-        deregistered = self._deregister_project(params.project_id)
-        await self._remove_persisted_registration(params.project_id)
-
-        # Clean up stream secret (thread-safe)
-        with self._stream_secrets_lock:
-            self._stream_secrets.pop(params.project_id, None)
-
-        return make_response(
-            payload={"deregistered": deregistered, "status": "ok"},
-            trace_id=str(unit.trace_id),
-            provenance=list(unit.provenance) + ["router:deregister_tools"],
             security=unit.security,
         )
 
     def _register_graph(self, project_id: str, graph_config: object) -> str:
         """Register a graph from config.
 
-        Currently supports template-based graphs (Option A).
-        Declarative graphs (Option B) are a future extension.
+        v1alpha runtime supports template-based graphs only.
         """
         from contextrouter.core.registry import graph_registry
 
@@ -259,12 +340,19 @@ class RegistrationMixin:
         original_name = graph_config.name
         name = f"project:{project_id}:{original_name}"
 
-        if graph_config.template:
+        if graph_config.template and graph_config.template != "custom":
             template = graph_config.template
             config = graph_config.config
 
             if template == "sql_analytics":
                 builder = self._build_sql_analytics_graph_factory(config)
+            elif template == "gardener":
+                from contextrouter.cortex.graphs.commerce.gardener.graph import (
+                    build_gardener_graph,
+                )
+
+                def builder(_config=config):
+                    return build_gardener_graph(_config)
             elif template == "dispatcher":
                 from contextrouter.cortex.graphs.dispatcher_agent import (
                     build_dispatcher_graph,
@@ -277,10 +365,16 @@ class RegistrationMixin:
                 )
 
                 builder = build_rag_graph
+            elif template == "news_engine":
+                from contextrouter.cortex.graphs.news_engine.graph import (
+                    build_news_engine_graph,
+                )
+
+                builder = build_news_engine_graph
             else:
                 raise ValueError(
                     f"Unknown graph template: {template}. "
-                    f"Available: sql_analytics, dispatcher, rag_retrieval"
+                    f"Available: sql_analytics, gardener, dispatcher, rag_retrieval, news_engine"
                 )
 
             # Prevent overwriting since it's already properly namespaced and deregistered first
@@ -296,13 +390,28 @@ class RegistrationMixin:
             )
             return original_name
 
-        elif graph_config.nodes and graph_config.edges:
-            raise ValueError(
-                "Declarative graph registration is not yet implemented. "
-                "Use template-based registration (Option A)."
-            )
+        elif graph_config.template == "custom":
+            name = f"project:{project_id}:{graph_config.name}"
+
+            def builder():
+                from contextrouter.cortex.graphs.custom.builder import build_custom_graph
+
+                return build_custom_graph(
+                    graph_config.nodes, graph_config.edges, graph_config.config
+                )
+
+            from contextrouter.core.registry import graph_registry
+
+            graph_registry.register(name, builder, overwrite=True)
+            self._project_graphs[project_id] = name
+            if isinstance(graph_config.config, dict):
+                self._project_configs[project_id] = graph_config.config
+
+            logger.info("Registered custom graph '%s' for project '%s'", name, project_id)
+            return graph_config.name
+
         else:
-            raise ValueError("Graph config must have either 'template' or 'nodes'+'edges'")
+            raise ValueError("Graph config must have either template=<name> or template='custom'")
 
     def _build_sql_analytics_graph_factory(self, config: dict):
         """Create a graph builder function for sql_analytics template."""

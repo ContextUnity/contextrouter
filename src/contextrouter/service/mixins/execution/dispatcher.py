@@ -17,6 +17,7 @@ from contextrouter.service.payloads import (
     StreamDispatcherEventPayload,
 )
 from contextrouter.service.security import validate_dispatcher_access
+from contextrouter.service.shield_check import check_user_input
 
 from .helpers import _resolve_tenant_id
 
@@ -28,7 +29,7 @@ class DispatcherExecutionMixin:
     async def ExecuteDispatcher(self, request, context):
         """Execute dispatcher agent (non-streaming).
 
-        Security: Requires "dispatcher:execute" read scope.
+        Security: Requires "router:execute" read scope.
         """
         unit = parse_unit(request)
 
@@ -45,7 +46,7 @@ class DispatcherExecutionMixin:
         # Shield firewall check
         last_user_msg = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
         if last_user_msg:
-            guard_result = await self._guard.check_input(
+            guard_result = await check_user_input(
                 last_user_msg,
                 request_id=str(unit.trace_id),
                 tenant=tenant_id,
@@ -117,7 +118,6 @@ class DispatcherExecutionMixin:
         return make_response(
             payload=response_payload.model_dump(),
             trace_id=str(unit.trace_id),
-            provenance=list(unit.provenance) + ["router:dispatcher:execute"],
             security=unit.security,
         )
 
@@ -125,7 +125,7 @@ class DispatcherExecutionMixin:
     async def StreamDispatcher(self, request, context):
         """Stream dispatcher agent execution.
 
-        Security: Requires "dispatcher:execute" read scope.
+        Security: Requires "router:execute" read scope.
 
         Yields: ContextUnit events with event_type and data.
         """
@@ -144,7 +144,7 @@ class DispatcherExecutionMixin:
         # Shield firewall check
         last_user_msg = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
         if last_user_msg:
-            guard_result = await self._guard.check_input(
+            guard_result = await check_user_input(
                 last_user_msg,
                 request_id=str(unit.trace_id),
                 tenant=tenant_id,
@@ -173,7 +173,6 @@ class DispatcherExecutionMixin:
                 yield make_response(
                     payload=event_payload.model_dump(),
                     trace_id=str(unit.trace_id),
-                    provenance=list(unit.provenance) + ["router:dispatcher:stream"],
                     security=unit.security,
                 )
         finally:

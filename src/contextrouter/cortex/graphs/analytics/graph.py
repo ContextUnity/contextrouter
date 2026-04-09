@@ -7,9 +7,9 @@ ContextUnity ecosystem performance, errors, and usage patterns.
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict, Literal
 
+from contextcore import get_context_unit_logger
 from contextunity.analytics.analytics_agent import AnalyticsAgent
 from contextunity.api.admin_client import AdminClient
 from langgraph.graph import END, StateGraph
@@ -18,7 +18,7 @@ from contextrouter.core.registry import register_graph
 
 from .state import AnalyticsState
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 # Initialize clients
 admin_client = AdminClient(

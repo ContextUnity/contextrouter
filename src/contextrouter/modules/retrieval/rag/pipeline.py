@@ -6,13 +6,13 @@
 
 from __future__ import annotations
 
-import logging
 import time
 from dataclasses import dataclass
 
+from contextcore import get_context_unit_logger
+
 from contextrouter.core import (
     ContextToken,
-    TokenBuilder,
     get_core_config,
 )
 from contextrouter.cortex.state import AgentState, get_last_user_query
@@ -32,7 +32,7 @@ from .pipeline_retrieval import RetrievalMixin
 from .rerankers import get_reranker
 from .settings import get_rag_retrieval_settings
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -57,15 +57,8 @@ class RetrievalPipeline(RetrievalMixin):
         if isinstance(tok, ContextToken):
             return tok
 
-        if self.core_cfg.security.enabled:
-            raise PermissionError("Access token missing from AgentState in security-enabled mode")
-
-        builder = TokenBuilder(enabled=False)
-        return builder.mint_root(
-            user_ctx={},
-            permissions=(self.core_cfg.security.policies.read_permission,),
-            ttl_s=300.0,
-        )
+        # Security is always enforced — missing token is an error.
+        raise PermissionError("Access token missing from AgentState")
 
     async def execute(self, state: AgentState) -> RetrievalResult:
         """Execute retrieval pipeline and return results."""

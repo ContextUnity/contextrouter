@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 
 import grpc
-from contextcore import ContextUnit, SecurityScopes, create_channel, router_pb2_grpc
+from contextcore import ContextUnit, create_channel, router_pb2_grpc
 
 
 async def example_execute_dispatcher() -> None:
@@ -29,9 +29,6 @@ async def example_execute_dispatcher() -> None:
             "platform": "grpc",
             "max_iterations": 10,
         },
-        security=SecurityScopes(
-            read=["dispatcher:execute"],  # Required scope
-        ),
     )
 
     # Call gRPC method
@@ -66,9 +63,6 @@ async def example_stream_dispatcher() -> None:
             "session_id": "grpc_stream_session",
             "platform": "grpc",
         },
-        security=SecurityScopes(
-            read=["dispatcher:execute"],
-        ),
     )
 
     # Stream events
@@ -94,9 +88,6 @@ async def example_without_permission() -> None:
             "tenant_id": "example_tenant",
             "messages": [{"role": "user", "content": "Hello"}],
         },
-        security=SecurityScopes(
-            read=["other:scope"],  # Missing dispatcher:execute
-        ),
     )
 
     try:

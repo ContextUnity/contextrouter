@@ -5,32 +5,6 @@ Tests for Gardener enrichment graph.
 import pytest
 
 
-class TestGardenerConfig:
-    """Test GardenerConfig validation."""
-
-    def test_gardener_config_no_business_defaults(self):
-        """Verify no business-specific defaults in config."""
-        from contextrouter.core.config import GardenerConfig
-
-        config = GardenerConfig()
-
-        # tenant_id should be empty, not "traverse" or similar
-        assert config.tenant_id == ""
-
-        # Should NOT have prompts_path or ontology_path
-        assert not hasattr(config, "prompts_path")
-        assert not hasattr(config, "ontology_path")
-
-    def test_gardener_config_has_processing_defaults(self):
-        """Verify processing defaults are set."""
-        from contextrouter.core.config import GardenerConfig
-
-        config = GardenerConfig()
-
-        assert config.batch_size == 50
-        assert config.poll_interval_sec == 900  # 15 min
-
-
 class TestLoadPrompt:
     """Test prompt loading from files."""
 

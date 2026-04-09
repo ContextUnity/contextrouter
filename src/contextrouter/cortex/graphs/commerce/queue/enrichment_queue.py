@@ -14,14 +14,15 @@ Features:
 """
 
 import json
-import logging
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+from contextcore import get_context_unit_logger
+
+logger = get_context_unit_logger(__name__)
 
 
 class Priority(str, Enum):

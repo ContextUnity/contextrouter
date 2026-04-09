@@ -15,15 +15,15 @@ Usage:
 
 from __future__ import annotations
 
-import logging
 import time
 from typing import Any
 
+from contextcore import get_context_unit_logger
 from contextcore.exceptions import ProviderError
 
 from .redis import RedisProvider
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 class RateLimitExceeded(ProviderError):

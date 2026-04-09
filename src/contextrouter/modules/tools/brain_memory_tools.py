@@ -6,36 +6,48 @@ These tools expose episodic memory and entity (fact) storage to LLM agents.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
+from contextcore import get_context_unit_logger
 from langchain_core.tools import tool
 
-logger = logging.getLogger(__name__)
+from contextrouter.modules.tools.schemas import MemoryRecallResult, MemoryStoreResult
 
-# Singleton BrainClient instance
-_brain_client = None
+logger = get_context_unit_logger(__name__)
+
+# Per-tenant BrainClient cache — each tenant gets a properly scoped client
+_brain_clients: dict[str, object] = {}
 
 
-def _get_brain_client():
-    """Get or create BrainClient singleton."""
-    global _brain_client
-    if _brain_client is None:
-        from contextcore.permissions import Permissions
-        from contextcore.sdk import SmartBrainClient
-        from contextcore.tokens import mint_service_token
+def _get_brain_client(tenant_id: str):
+    """Get or create BrainClient for a specific tenant.
 
-        _brain_client = SmartBrainClient(
-            tenant_id=None,
-            token=lambda: mint_service_token(
-                "router-memory-service",
-                permissions=(
-                    Permissions.MEMORY_WRITE,
-                    Permissions.MEMORY_READ,
-                ),
-            ),
+    Uses the client's **pre-serialized token string** from the current
+    auth context. The token is already signed by the project's backend
+    (HMAC or Shield) — no Router-level signing backend needed.
+
+    Memory operations require ``memory:write``, which is granted to
+    the primary client token.
+    """
+    if tenant_id not in _brain_clients:
+        from contextcore.sdk import BrainClient
+
+        _brain_clients[tenant_id] = BrainClient(
+            tenant_id=tenant_id,
+            token=lambda: _get_auth_token_string(),
         )
-    return _brain_client
+    return _brain_clients[tenant_id]
+
+
+def _get_auth_token_string() -> str | None:
+    """Extract the pre-serialized token string from the current gRPC auth context."""
+    try:
+        from contextcore.authz.context import get_auth_context
+
+        ctx = get_auth_context()
+        return ctx.token_string if ctx else None
+    except Exception:
+        return None
 
 
 # ============================================================================
@@ -50,7 +62,7 @@ async def remember_episode(
     session_id: str,
     tenant_id: str = "default",
     metadata: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+) -> MemoryStoreResult:
     """Store a conversation episode in long-term memory.
 
     Use this to persist important interaction moments that should be
@@ -71,7 +83,7 @@ async def remember_episode(
         Dict with episode_id and success status
     """
     try:
-        brain = _get_brain_client()
+        brain = _get_brain_client(tenant_id)
         episode_id = await brain.add_episode(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -95,7 +107,7 @@ async def recall_episodes(
     user_id: str,
     tenant_id: str = "default",
     limit: int = 5,
-) -> dict[str, Any]:
+) -> MemoryStoreResult:
     """Recall recent conversation episodes from long-term memory.
 
     Use this to retrieve past interactions with a user, providing
@@ -110,7 +122,7 @@ async def recall_episodes(
         Dict with list of episodes (content, created_at, metadata)
     """
     try:
-        brain = _get_brain_client()
+        brain = _get_brain_client(tenant_id)
         episodes = await brain.get_recent_episodes(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -140,7 +152,7 @@ async def learn_user_fact(
     value: str,
     tenant_id: str = "default",
     confidence: float = 1.0,
-) -> dict[str, Any]:
+) -> MemoryRecallResult:
     """Store a persistent fact about the user.
 
     Use this to remember user preferences, attributes, and other
@@ -164,7 +176,7 @@ async def learn_user_fact(
         Dict with success status
     """
     try:
-        brain = _get_brain_client()
+        brain = _get_brain_client(tenant_id)
         await brain.upsert_fact(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -188,7 +200,7 @@ async def learn_user_fact(
 async def recall_user_facts(
     user_id: str,
     tenant_id: str = "default",
-) -> dict[str, Any]:
+) -> MemoryRecallResult:
     """Recall all known facts about a user.
 
     Use this to retrieve persistent knowledge about a user,
@@ -203,7 +215,7 @@ async def recall_user_facts(
         Dict with facts mapping (key -> value)
     """
     try:
-        brain = _get_brain_client()
+        brain = _get_brain_client(tenant_id)
         facts = await brain.get_user_facts(
             tenant_id=tenant_id,
             user_id=user_id,

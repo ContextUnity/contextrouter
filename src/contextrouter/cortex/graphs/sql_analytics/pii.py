@@ -8,13 +8,13 @@ These are thin wrappers around ContextZero tools that ensure:
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
+from contextcore import get_context_unit_logger
 from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.tools import BaseTool
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 async def pii_anonymize(
@@ -22,12 +22,13 @@ async def pii_anonymize(
     *,
     tool: BaseTool | None,
     session_id: str,
+    config: Any | None = None,
 ) -> str:
     """Anonymize text via Zero tool. Returns original on failure or if tool is None."""
     if not tool or not text or not session_id:
         return text
     try:
-        result = await tool.ainvoke({"text": text, "session_id": session_id})
+        result = await tool.ainvoke({"text": text, "session_id": session_id}, config=config)
         if isinstance(result, dict):
             anonymized = result.get("anonymized_text", text)
             entities = result.get("entities_masked", 0)
@@ -44,8 +45,10 @@ async def pii_anonymize(
         if isinstance(result, str):
             return result
     except Exception as e:
-        logger.exception("pii_anonymize FAILED — PII sent to LLM unmasked: %s", e)
-    return text
+        logger.exception("pii_anonymize FAILED: %s", e)
+        raise RuntimeError(f"ContextZero anonymization failed: {e}") from e
+
+    raise RuntimeError("ContextZero anonymization failed: tool returned unexpected format")
 
 
 async def pii_deanonymize(
@@ -53,12 +56,13 @@ async def pii_deanonymize(
     *,
     tool: BaseTool | None,
     session_id: str,
+    config: Any | None = None,
 ) -> str:
     """Deanonymize text via Zero tool. Returns original on failure or if tool is None."""
     if not tool or not text or not session_id:
         return text
     try:
-        restored = await tool.ainvoke({"text": text, "session_id": session_id})
+        restored = await tool.ainvoke({"text": text, "session_id": session_id}, config=config)
         # Tool returns str (local and RPC modes)
         if isinstance(restored, str):
             if restored.strip():
@@ -84,10 +88,14 @@ async def pii_deanonymize(
                     restored["error"],
                     session_id,
                 )
-            return text
+            raise RuntimeError(
+                f"ContextZero deanonymization failed: {restored.get('error', 'unknown error')}"
+            )
     except Exception as e:
-        logger.exception("pii_deanonymize FAILED — PII tokens may leak to user: %s", e)
-    return text
+        logger.exception("pii_deanonymize FAILED: %s", e)
+        raise RuntimeError(f"ContextZero deanonymization failed: {e}") from e
+
+    raise RuntimeError("ContextZero deanonymization failed: tool returned unexpected format")
 
 
 __all__ = ["pii_anonymize", "pii_deanonymize", "PiiSession"]
@@ -109,11 +117,13 @@ class PiiSession:
         session_id: str,
         anonymize_tool: BaseTool | None,
         deanonymize_tool: BaseTool | None,
+        config: Any | None = None,
     ):
         self.sub_steps = sub_steps
         self.session_id = session_id
         self.anonymize_tool = anonymize_tool
         self.deanonymize_tool = deanonymize_tool
+        self.config = config
 
     async def __aenter__(self):
         return self
@@ -134,6 +144,7 @@ class PiiSession:
                         item.content,
                         tool=self.anonymize_tool,
                         session_id=self.session_id,
+                        config=self.config,
                     )
                     res.append(HumanMessage(content=masked))
                 elif isinstance(item, BaseMessage):
@@ -143,6 +154,7 @@ class PiiSession:
                         item,
                         tool=self.anonymize_tool,
                         session_id=self.session_id,
+                        config=self.config,
                     )
                     res.append(masked)
                 else:
@@ -153,6 +165,7 @@ class PiiSession:
                 data,
                 tool=self.anonymize_tool,
                 session_id=self.session_id,
+                config=self.config,
             )
         return data
 
@@ -170,20 +183,38 @@ class PiiSession:
 
         import json
 
+        # If data is already a string, no need to JSON round-trip it.
+        # This avoids issues where the original text contains quotes/newlines
+        # that get incorrectly escaped or unescaped during replacement.
+        if isinstance(data, str):
+            try:
+                return await pii_deanonymize(
+                    data,
+                    tool=self.deanonymize_tool,
+                    session_id=self.session_id,
+                    config=self.config,
+                )
+            except Exception as e:
+                logger.warning("reveal: string deanonymize failed: %s", e)
+                return data
+
+        # For complex structures, serialize them first.
+        # Note: If the replaced values contain quotes, this may break standard JSON!
+        # We try our best to round-trip it.
         try:
-            # Serialize → single deanonymize → deserialize
             raw = json.dumps(data, ensure_ascii=False, default=str)
             restored = await pii_deanonymize(
                 raw,
                 tool=self.deanonymize_tool,
                 session_id=self.session_id,
+                config=self.config,
             )
             return json.loads(restored)
         except (json.JSONDecodeError, TypeError) as e:
             logger.warning("reveal: JSON round-trip failed, falling back to original: %s", e)
             return data
         except Exception as e:
-            logger.warning("reveal: deanonymize failed: %s", e)
+            logger.warning("reveal: complex deanonymize failed: %s", e)
             return data
 
 

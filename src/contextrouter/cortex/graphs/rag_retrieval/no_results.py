@@ -5,18 +5,19 @@ Lives under `cortex/steps` so direct-mode doesn't import `cortex/nodes`.
 
 from __future__ import annotations
 
-import logging
 import re
 
+from contextcore import get_context_unit_logger
 from langchain_core.messages import AIMessage
 
-from contextrouter.core import get_core_config
+from contextrouter.cortex import AgentState
+from contextrouter.cortex.graphs.config_resolution import get_node_manifest_config
 from contextrouter.modules.observability.langfuse import retrieval_span
 
 from ...llm import get_no_results_response
 from ...utils.json import strip_json_fence
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def _strip_leading_translation_json(text: str) -> str:
@@ -40,6 +41,7 @@ async def no_results_response(
     *,
     user_query: str,
     conversation_history: str,
+    state: AgentState,
     prompt_override: str = "",
 ) -> AIMessage:
     """Generate a verbose no-results response using an LLM."""
@@ -48,26 +50,13 @@ async def no_results_response(
         input_data={"query": user_query[:200]},
     ) as span_ctx:
         try:
-            core_cfg = get_core_config()
             from contextrouter.modules.models.registry import model_registry
             from contextrouter.modules.models.types import ModelRequest, TextPart
 
-            # Get no_results model with fallback support
-            # TODO: Update to use new config structure once breaking changes are applied
-            no_results_cfg = core_cfg.models.rag.no_results
-            no_results_model_key = no_results_cfg.model or core_cfg.models.default_llm
-            fallback_keys = list(no_results_cfg.fallback or [])
-            strategy = no_results_cfg.strategy or "fallback"
+            node_config = get_node_manifest_config(state, "generate")
+            model_key = node_config.get("model") or "vertex/gemini-2.5-flash-lite"
 
-            model = model_registry.get_llm_with_fallback(
-                key=no_results_model_key,
-                fallback_keys=fallback_keys,
-                strategy=strategy,
-                config=core_cfg,
-            )
-
-            # Direct model usage with new multimodal interface
-            llm = model
+            llm = model_registry.create_llm(model_key)
 
             from contextrouter.cortex.prompting import NO_RESULTS_PROMPT
 
@@ -82,7 +71,7 @@ async def no_results_response(
 
             request = ModelRequest(
                 parts=[TextPart(text=full_prompt)],
-                temperature=core_cfg.llm.temperature,
+                temperature=0.0,
                 max_output_tokens=512,
             )
 

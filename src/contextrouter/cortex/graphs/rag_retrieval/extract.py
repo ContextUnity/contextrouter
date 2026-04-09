@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import logging
 import time
+
+from contextcore import get_context_unit_logger
 
 from contextrouter.cortex import AgentState, get_last_user_query
 
 from ...utils.pipeline import pipeline_log
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def extract_user_query(state: AgentState) -> dict[str, object]:

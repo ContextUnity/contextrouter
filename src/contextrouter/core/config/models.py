@@ -30,39 +30,17 @@ def _selector_factory(model: str):
     return partial(ModelSelector, model=model)
 
 
-class _ModelsGroup(BaseModel):
-    """Shared base for model-group configs (RAG, ingestion, etc.)."""
-
-    model_config = ConfigDict(extra="ignore")
-
-
-class RagModelsConfig(_ModelsGroup):
-    """Per-RAG-component model configuration (canonical)."""
-
-    intent: ModelSelector = Field(default_factory=_selector_factory("vertex/gemini-2.5-flash-lite"))
-    suggestions: ModelSelector = Field(
-        default_factory=_selector_factory("vertex/gemini-2.5-flash-lite")
-    )
-    generation: ModelSelector = Field(default_factory=_selector_factory("vertex/gemini-2.5-flash"))
-    no_results: ModelSelector = Field(
-        default_factory=_selector_factory("vertex/gemini-2.5-flash-lite")
-    )
-
-
 class ModelsConfig(BaseModel):
     # Accept both `default_llm` and canonical `default` from TOML/env.
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
-    default_llm: str = Field(default="vertex/gemini-2.5-flash", alias="default")
+    default_llm: str = Field(default="openai/gpt-5-mini", alias="default")
     default_embeddings: str = "hf/sentence-transformers"
 
     # Fallback LLM chain - used when default_llm fails (e.g., quota exceeded)
     # Set via CONTEXTROUTER_FALLBACK_LLMS="anthropic/claude-sonnet-4,google/gemini-2.5-flash"
     fallback_llms: list[str] = Field(default_factory=list)
     allow_global_fallback: bool = False
-
-    # Canonical per-component configuration:
-    rag: RagModelsConfig = Field(default_factory=RagModelsConfig)
 
 
 class LLMConfig(BaseModel):
@@ -84,15 +62,6 @@ class LLMConfig(BaseModel):
 class RouterConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    override_path: str | None = None
-    # Which cortex graph to run (lookup key in graph registry).
-    # Examples: "rag_retrieval", "rag_ingestion", "brain" (if you register it)
-    graph: str = "rag_retrieval"
-    # Graph assembly mode:
-    # - "agent": class-based nodes registered in `agent_registry` (default)
-    # - "direct": function-based nodes (simple flows, no agent instantiation)
-    mode: Literal["agent", "direct"] = "agent"
-
     # ── Server settings ───────────────────────────────────────────
     port: str = "50050"
     instance_name: str = "default"
@@ -104,31 +73,6 @@ class RouterConfig(BaseModel):
     contextshield_grpc_host: str = ""
     gcs_default_bucket: str = ""
     brain_index_tools: bool = False
-
-
-class GardenerConfig(BaseModel):
-    """Configuration for Gardener enrichment agent.
-
-    Gardener processes DealerProduct enrichment:
-    - taxonomy classification
-    - NER extraction (product_type, brand, model)
-    - Knowledge Graph updates
-
-    Note: Paths to prompts/ontology are commerce-specific.
-    They should be passed from Worker config, not stored here.
-    """
-
-    model_config = ConfigDict(extra="ignore")
-
-    # Processing
-    batch_size: int = 50
-    poll_interval_sec: int = 900  # 15 min default
-
-    # LLM settings
-    llm_model: str = "vertex/gemini-2.5-flash-lite"
-
-    # Tenant - MUST be set via env/config
-    tenant_id: str = ""
 
 
 class NewsEngineConfig(BaseModel):

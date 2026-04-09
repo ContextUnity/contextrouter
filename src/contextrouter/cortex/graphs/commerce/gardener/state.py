@@ -1,71 +1,46 @@
 """
-Gardener state definitions.
+Gardener v2 state definitions.
+
+Simplified state for a 3-node normalization pipeline:
+  fetch_and_prepare → normalize → write_results
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, TypedDict
-
-
-@dataclass
-class Product:
-    """Product to enrich from DealerProduct."""
-
-    id: int
-    name: str
-    category: str
-    description: str
-    params: Dict[str, Any]
-    enrichment: Dict[str, Any]
-    brand_name: Optional[str] = None
-
-    def needs_task(self, task: str) -> bool:
-        """Check if this task needs to be done."""
-        task_data = self.enrichment.get(task, {})
-        status = task_data.get("status")
-        return status in (None, "pending", "error")
-
-
-@dataclass
-class EnrichmentResult:
-    """Result of an enrichment task."""
-
-    product_id: int
-    task: str  # taxonomy, ner, params, tech, kg
-    status: str  # done, error
-    result: Dict[str, Any]
-    tokens: int = 0
-    error: Optional[str] = None
+from typing import Any, TypedDict
 
 
 class GardenerState(TypedDict):
-    """State for Gardener subgraph."""
+    """State for Gardener v2 normalization subgraph."""
 
-    # Config (passed from CommerceState)
-    batch_size: int
-    brain_url: str  # Brain gRPC endpoint (e.g., "brain.contextunity.ts.net:50051")
+    # --- Input (from payload) ---
     tenant_id: str
-    prompts_dir: str
+    brand: str  # Filter by brand name
+    source: str  # "dealer" or "oscar" — MANDATORY, never mix!
+    batch_size: int  # Default 50
+    only_new: bool  # Only unprocessed products
+    force: bool  # Re-normalize all products
+    ids: list[int]  # Specific product IDs to normalize
+    custom_hint: str  # Operator prompt hint for re-normalization
+    execution_mode: str  # "sync" | "batch_submit" | "batch_status" | "batch_import"
+    batch_job_id: str | None  # For querying/importing OpenAI Batch Jobs
 
-    # Security
-    access_token: Optional[Any]  # ContextToken for authorization (from Router)
+    # --- Security ---
+    access_token: Any | None  # ContextToken for authorization
 
-    # Products to process
-    products: List[Product]
+    # --- Loaded data (set by fetch_and_prepare) ---
+    taxonomy: dict[str, Any]  # categories + colors + sizes from YAML
+    examples: list[dict[str, Any]]  # Few-shot examples (ONLY same source!)
+    products: list[dict[str, Any]]  # Products to normalize
 
-    # Results per task
-    taxonomy_results: List[EnrichmentResult]
-    ner_results: List[EnrichmentResult]
-    params_results: List[EnrichmentResult]
-    tech_results: List[EnrichmentResult]
-    kg_results: List[EnrichmentResult]
+    # --- Output (set by normalize + write_results) ---
+    results: list[dict[str, Any]]  # Normalization results
+    taxonomy_candidates: list[dict[str, Any]]  # New values for taxonomy review
+    stats: dict[str, Any]  # Counters and timings
+    errors: list[str]  # Error messages
+    batch_info: dict[str, Any]  # Returned from batch API (job_id, status, counts)
 
-    # Trace
+    # --- Trace ---
     trace_id: str
-    step_traces: List[Dict[str, Any]]
+    step_traces: list[dict[str, Any]]
     total_tokens: int
-
-    # Output
-    products_updated: int
-    errors: List[str]

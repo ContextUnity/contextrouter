@@ -5,10 +5,12 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
+from contextcore import get_context_unit_logger
+
 from .models import Citation, RetrievedDoc
 from .settings import get_rag_retrieval_settings
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 CitationBuilder = Callable[[RetrievedDoc], Citation | None]

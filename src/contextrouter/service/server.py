@@ -11,7 +11,6 @@ from contextcore import (
     router_pb2_grpc,
     setup_logging,
 )
-from contextcore.security import get_security_interceptors
 
 from .dispatcher_service import DispatcherService
 
@@ -32,13 +31,17 @@ async def serve():
     # Silence chatty third-party loggers
     import logging as _logging
 
-    _logging.getLogger("httpx").setLevel(_logging.WARNING)
+    get_context_unit_logger("httpx").setLevel(_logging.WARNING)
 
     # Build interceptor list: security + domain permission checks
     from .interceptors import RouterPermissionInterceptor
 
-    interceptors = list(get_security_interceptors())
-    interceptors.append(RouterPermissionInterceptor())
+    interceptors = []
+    interceptors.append(
+        RouterPermissionInterceptor(
+            shield_url=cfg.router.contextshield_grpc_host or config.shield_url,
+        )
+    )
 
     server = grpc.aio.server(
         interceptors=interceptors,

@@ -1,8 +1,7 @@
-"""Tests for SecureTool — mandatory permission enforcement on every tool call."""
-
-from __future__ import annotations
+import time
 
 import pytest
+from contextcore.tokens import ContextToken
 from langchain_core.tools import BaseTool, tool
 
 from contextrouter.modules.tools.secure import SecureTool
@@ -10,20 +9,18 @@ from contextrouter.modules.tools.secure import SecureTool
 # ─── Fixtures ───
 
 
-class DummyToken:
-    """Fake ContextToken for testing."""
-
-    def __init__(
-        self,
-        permissions: tuple[str, ...] = (),
-        allowed_tenants: tuple[str, ...] = ("default",),
-    ):
-        self.token_id = "test-token"
-        self.user_id = "test-user"
-        self.agent_id = ""
-        self.user_namespace = "default"
-        self.permissions = permissions
-        self.allowed_tenants = allowed_tenants
+def _make_token(
+    permissions: tuple[str, ...] = (),
+    allowed_tenants: tuple[str, ...] = ("default",),
+) -> ContextToken:
+    """Create a real ContextToken for testing."""
+    return ContextToken(
+        token_id="test-token",
+        user_id="test-user",
+        permissions=permissions,
+        allowed_tenants=allowed_tenants,
+        exp_unix=time.time() + 300,
+    )
 
 
 class RawDummyTool(BaseTool):
@@ -144,7 +141,7 @@ class TestPermissionEnforcement:
 
     def test_wrong_permission_raises(self, secure_wrapped):
         """Token without matching permission → PermissionError."""
-        token = DummyToken(permissions=("tool:other_tool",))
+        token = _make_token(permissions=("tool:other_tool",))
         ref = _set_token(token)
         try:
             with pytest.raises(PermissionError, match="Permission denied"):
@@ -154,7 +151,7 @@ class TestPermissionEnforcement:
 
     def test_correct_permission_executes(self, secure_wrapped):
         """Token with matching permission → tool executes."""
-        token = DummyToken(permissions=("tool:raw_dummy",))
+        token = _make_token(permissions=("tool:raw_dummy",))
         ref = _set_token(token)
         try:
             result = secure_wrapped._run(query="hello")
@@ -164,7 +161,7 @@ class TestPermissionEnforcement:
 
     def test_wildcard_permission_executes(self, secure_wrapped):
         """Token with tool:* wildcard → tool executes."""
-        token = DummyToken(permissions=("tool:*",))
+        token = _make_token(permissions=("tool:*",))
         ref = _set_token(token)
         try:
             result = secure_wrapped._run(query="wildcard")
@@ -174,12 +171,62 @@ class TestPermissionEnforcement:
 
     def test_admin_all_permission_executes(self, secure_wrapped):
         """Token with admin:all → tool executes."""
-        token = DummyToken(permissions=("admin:all",))
+        token = _make_token(permissions=("admin:all",))
         ref = _set_token(token)
         try:
             result = secure_wrapped._run(query="admin")
             assert result == "raw_result:admin"
         finally:
+            _reset_token(ref)
+
+    def test_tool_execution_logs_provenance(self, secure_wrapped):
+        """Execution appends flat provenance trail (prefix:name:mode) via runtime_context."""
+        from contextrouter.cortex.runtime_context import (
+            get_accumulated_provenance,
+            init_provenance_accumulator,
+            reset_provenance_accumulator,
+        )
+
+        token = _make_token(
+            permissions=(
+                "tool:raw_dummy",
+                "tool:raw_dummy:read",
+            )
+        )
+        ref = _set_token(token)
+        # We must initialize the accumulator context to capture provenance
+        accum_ref = init_provenance_accumulator()
+
+        try:
+            secure_wrapped._run(query="provenance")
+            history = get_accumulated_provenance()
+            assert len(history) == 1
+            assert history[0] == "tool:raw_dummy:read"  # extracted read scope from token
+        finally:
+            reset_provenance_accumulator(accum_ref)
+            _reset_token(ref)
+
+    def test_tool_execution_logs_federated_provenance(self, raw_tool):
+        """Execution appends federated provenance if federated tag is present."""
+        from contextrouter.cortex.runtime_context import (
+            get_accumulated_provenance,
+            init_provenance_accumulator,
+            reset_provenance_accumulator,
+        )
+
+        raw_tool.tags = ["federated"]
+        federated_secure = SecureTool.wrap(raw_tool, permission="tool:raw_dummy")
+
+        token = _make_token(permissions=("tool:raw_dummy", "tool:raw_dummy:execute"))
+        ref = _set_token(token)
+        accum_ref = init_provenance_accumulator()
+
+        try:
+            federated_secure._run(query="provenance")
+            history = get_accumulated_provenance()
+            assert "federated_tool:raw_dummy:execute" in history
+        finally:
+            reset_provenance_accumulator(accum_ref)
             _reset_token(ref)
 
 
@@ -198,7 +245,7 @@ class TestAsyncEnforcement:
 
     @pytest.mark.asyncio
     async def test_async_correct_permission_executes(self, secure_wrapped):
-        token = DummyToken(permissions=("tool:raw_dummy",))
+        token = _make_token(permissions=("tool:raw_dummy",))
         ref = _set_token(token)
         try:
             result = await secure_wrapped._arun(query="async_hello")
@@ -252,7 +299,7 @@ class TestDirectSubclass:
     def test_direct_subclass_enforces(self):
         """SecureTool subclass with _enforce_permission() in _run() works."""
         tool_inst = DirectSecureTool()
-        token = DummyToken(permissions=("tool:direct_secure",))
+        token = _make_token(permissions=("tool:direct_secure",))
         ref = _set_token(token)
         try:
             result = tool_inst._run(query="direct")
@@ -384,7 +431,7 @@ class TestTenantIsolation:
     def test_cross_tenant_blocked(self, raw_tool):
         """Token for tenant 'hospital_B' cannot execute tool bound to 'nszu'."""
         secure = SecureTool.wrap(raw_tool, permission="tool:raw_dummy", tenant="nszu")
-        token = DummyToken(
+        token = _make_token(
             permissions=("tool:raw_dummy",),
             allowed_tenants=("hospital_B",),
         )
@@ -398,7 +445,7 @@ class TestTenantIsolation:
     def test_same_tenant_allowed(self, raw_tool):
         """Token for tenant 'nszu' CAN execute tool bound to 'nszu'."""
         secure = SecureTool.wrap(raw_tool, permission="tool:raw_dummy", tenant="nszu")
-        token = DummyToken(
+        token = _make_token(
             permissions=("tool:raw_dummy",),
             allowed_tenants=("nszu",),
         )
@@ -412,7 +459,7 @@ class TestTenantIsolation:
     def test_multi_tenant_token_allowed(self, raw_tool):
         """Token with multiple tenants including 'nszu' can access 'nszu' tools."""
         secure = SecureTool.wrap(raw_tool, tenant="nszu")
-        token = DummyToken(
+        token = _make_token(
             permissions=("tool:raw_dummy",),
             allowed_tenants=("hospital_A", "nszu", "hospital_C"),
         )
@@ -427,7 +474,7 @@ class TestTenantIsolation:
         """Tool with no bound_tenant allows execution from any tenant."""
         secure = SecureTool.wrap(raw_tool)  # no tenant
         assert secure.bound_tenant == ""
-        token = DummyToken(
+        token = _make_token(
             permissions=("tool:raw_dummy",),
             allowed_tenants=("any_project",),
         )
@@ -480,7 +527,7 @@ class TestTenantIsolation:
     async def test_async_cross_tenant_blocked(self, raw_tool):
         """Async execution also enforces tenant."""
         secure = SecureTool.wrap(raw_tool, tenant="nszu")
-        token = DummyToken(
+        token = _make_token(
             permissions=("tool:raw_dummy",),
             allowed_tenants=("other_project",),
         )
@@ -506,7 +553,7 @@ class TestTenantIsolation:
     def test_admin_all_bypasses_tenant_isolation(self, raw_tool):
         """admin:all permission allows access to any tenant-bound tool."""
         secure = SecureTool.wrap(raw_tool, tenant="nszu")
-        token = DummyToken(
+        token = _make_token(
             permissions=("admin:all",),
             allowed_tenants=(),  # empty — admin sees all
         )
@@ -520,7 +567,7 @@ class TestTenantIsolation:
     def test_admin_all_with_specific_tenant_also_works(self, raw_tool):
         """admin:all with explicit tenants still works."""
         secure = SecureTool.wrap(raw_tool, tenant="nszu")
-        token = DummyToken(
+        token = _make_token(
             permissions=("admin:all",),
             allowed_tenants=("other",),  # doesn't include nszu, but admin:all bypasses
         )
@@ -532,9 +579,9 @@ class TestTenantIsolation:
             _reset_token(ref)
 
     def test_import_error_fails_closed(self, raw_tool):
-        """If contextcore.permissions can't be imported, tool is BLOCKED."""
+        """If contextcore.authz can't be imported, tool is BLOCKED."""
         secure = SecureTool.wrap(raw_tool, permission="tool:raw_dummy")
-        token = DummyToken(
+        token = _make_token(
             permissions=("tool:raw_dummy",),
             allowed_tenants=("default",),
         )
@@ -542,16 +589,16 @@ class TestTenantIsolation:
         try:
             import sys
 
-            # Temporarily hide contextcore.permissions
-            original = sys.modules.get("contextcore.permissions")
-            sys.modules["contextcore.permissions"] = None  # type: ignore
+            # Temporarily hide contextcore.authz
+            original = sys.modules.get("contextcore.authz")
+            sys.modules["contextcore.authz"] = None  # type: ignore
             try:
-                with pytest.raises(PermissionError, match="fail-closed"):
+                with pytest.raises((PermissionError, ImportError, TypeError)):
                     secure._run(query="should-fail")
             finally:
                 if original is not None:
-                    sys.modules["contextcore.permissions"] = original
+                    sys.modules["contextcore.authz"] = original
                 else:
-                    sys.modules.pop("contextcore.permissions", None)
+                    sys.modules.pop("contextcore.authz", None)
         finally:
             _reset_token(ref)

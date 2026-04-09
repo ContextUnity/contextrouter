@@ -4,17 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import logging
 import random
 import time
 from dataclasses import dataclass
+
+from contextcore import get_context_unit_logger
 
 from contextrouter.core import ContextToken
 from contextrouter.modules.retrieval import BaseRetrievalPipeline
 
 from .models import RetrievedDoc
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 @dataclass(frozen=True)

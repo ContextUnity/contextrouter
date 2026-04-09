@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import Any
+
+from contextcore import get_context_unit_logger
 
 from contextrouter.core import BaseTransformer, Config, ContextUnit
 from contextrouter.modules.ingestion.rag.config import get_assets_paths, load_config
@@ -13,7 +14,7 @@ from contextrouter.modules.ingestion.rag.graph.builder import GraphBuilder
 from contextrouter.modules.ingestion.rag.settings import RagIngestionConfig
 from contextrouter.modules.ingestion.rag.stages.store import read_raw_data_jsonl
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def build_graph_from_clean_text(

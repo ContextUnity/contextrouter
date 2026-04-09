@@ -6,16 +6,20 @@ is consistent across all graphs (dispatcher, sql_analytics, custom).
 
 from __future__ import annotations
 
-import logging
 import time
 from typing import Any
 
-from contextrouter.cortex.graphs.dispatcher_agent.state import DispatcherState
+from contextcore import get_context_unit_logger
 
-logger = logging.getLogger(__name__)
+from contextrouter.cortex.graphs.dispatcher_agent.state import (
+    DispatcherState,
+    DispatcherStateUpdate,
+)
+
+logger = get_context_unit_logger(__name__)
 
 
-async def reflect_dispatcher(state: DispatcherState) -> dict[str, Any]:
+async def reflect_dispatcher(state: DispatcherState) -> DispatcherStateUpdate:
     """Log a detailed execution trace at the end of the dispatcher flow.
 
     Captures a step-by-step timeline of every LLM call, tool invocation,
@@ -24,6 +28,7 @@ async def reflect_dispatcher(state: DispatcherState) -> dict[str, Any]:
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
     from contextrouter.modules.tools import get_tool
+    from contextrouter.modules.tools.schemas import ToolCallSummary, TraceStep
 
     trace_tool = get_tool("log_execution_trace")
     if not trace_tool:
@@ -41,11 +46,11 @@ async def reflect_dispatcher(state: DispatcherState) -> dict[str, Any]:
     current_iteration = state.get("iteration", 0)
 
     # ── Reconstruct timeline from messages ──
-    steps: list[dict[str, Any]] = []
-    tool_calls_summary: list[dict[str, Any]] = []
+    steps: list[TraceStep] = []
+    tool_calls_summary: list[ToolCallSummary] = []
     pending_tool_calls: dict[str, dict[str, Any]] = {}
     step_idx = 0
-    token_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
+    token_usage: dict[str, int | float] = {"input_tokens": 0, "output_tokens": 0, "total_cost": 0.0}
 
     all_messages = state.get("messages", [])
     user_query = ""
@@ -188,10 +193,6 @@ async def reflect_dispatcher(state: DispatcherState) -> dict[str, Any]:
     )
 
     graph_name = meta.get("graph_name", "dispatcher")
-    provenance = [f"agent:{agent_id}"]
-    for tc in tool_calls_summary:
-        provenance.append(f"tool:{tc['tool']}")
-    provenance.append(f"router:{graph_name}:execute")
 
     # ── Log via universal tool ──
     try:
@@ -221,7 +222,6 @@ async def reflect_dispatcher(state: DispatcherState) -> dict[str, Any]:
                     "langfuse_trace_id": meta.get("langfuse_trace_id", ""),
                     "langfuse_trace_url": meta.get("langfuse_trace_url", ""),
                 },
-                "provenance": provenance,
                 "security_flags": {"events": security_flags, **token_info},
                 "record_episode": True,
             }
@@ -232,9 +232,11 @@ async def reflect_dispatcher(state: DispatcherState) -> dict[str, Any]:
             len(steps),
         )
     except Exception as e:
-        detail = e.details() if hasattr(e, "details") else str(e)
-        code = e.code() if hasattr(e, "code") else ""
-        logger.error("Brain trace failed [%s]: %s", code or type(e).__name__, detail)
+        detail_attr = getattr(e, "details", None)
+        detail = detail_attr() if callable(detail_attr) else str(detail_attr or e)
+        code_attr = getattr(e, "code", None)
+        code = code_attr() if callable(code_attr) else str(code_attr or type(e).__name__)
+        logger.error("Brain trace failed [%s]: %s", code, detail)
 
     return {}
 

@@ -192,18 +192,15 @@ class TestOpenAILLM:
     @pytest.mark.anyio
     async def test_generate(self, mock_config):
         """Test generate."""
+        model = OpenAILLM(mock_config)
+        mock_resp = MagicMock()
+        mock_resp.usage = None
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = "OpenAI response"
+
         from unittest.mock import AsyncMock
 
-        model = OpenAILLM(mock_config)
-
-        mock_choice = MagicMock()
-        mock_choice.message.content = "OpenAI response"
-        mock_response = MagicMock()
-        mock_response.choices = [mock_choice]
-
-        mock_client = MagicMock()
-        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
-        model._openai_client = mock_client
+        model._openai_client.chat.completions.create = AsyncMock(return_value=mock_resp)
 
         request = ModelRequest(parts=[TextPart(text="test")])
         response = await model.generate(request)
@@ -212,20 +209,18 @@ class TestOpenAILLM:
     @pytest.mark.anyio
     async def test_stream(self, mock_config):
         """Test stream."""
-        from unittest.mock import AsyncMock
-
         model = OpenAILLM(mock_config)
-
         mock_chunk = MagicMock()
         mock_chunk.choices = [MagicMock()]
         mock_chunk.choices[0].delta.content = "chunk"
 
-        async def _mock_iter():
+        async def _mock_stream_generator():
             yield mock_chunk
 
-        mock_client = MagicMock()
-        mock_client.chat.completions.create = AsyncMock(return_value=_mock_iter())
-        model._openai_client = mock_client
+        async def _mock_create(*args, **kwargs):
+            return _mock_stream_generator()
+
+        model._openai_client.chat.completions.create = _mock_create
 
         request = ModelRequest(parts=[TextPart(text="test")])
         events = []

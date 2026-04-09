@@ -11,9 +11,9 @@ Routes to subgraphs based on intent:
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict
 
+from contextcore import get_context_unit_logger
 from langgraph.graph import END, StateGraph
 
 from contextrouter.core.registry import register_graph
@@ -24,7 +24,7 @@ from .harvest import create_harvest_subgraph
 from .showrunner import create_showrunner_subgraph
 from .state import NewsEngineState
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 async def route_intent_node(state: NewsEngineState) -> Dict[str, Any]:

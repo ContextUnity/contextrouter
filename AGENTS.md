@@ -12,7 +12,7 @@ Gateway layer: Dispatcher, LangGraph orchestrations, RAG retrieval pipelines, LL
 ## Architecture Context (Current Code State)
 - **Cortex (`cortex/`)**: The beating heart of the reasoning engine.
   - `graphs/`: LangGraph definitions (`dispatcher.py`, `rag_retrieval/`, `commerce/gardener/`).
-  - `models/`: The central LLM registry wrapping diverse providers (`litellm`, `openai`, `anthropic`, `vertexai`, `runpod`, `hf`).
+  - `models/`: The central LLM registry wrapping diverse providers (`openai`, `anthropic`, `vertexai`, `runpod`, `hf`).
   - `tool_executor/`: Handles dynamic execution of tools defined by external projects via a bidirectional gRPC shell (`stream.py`, `shell.py`, `persistence.py`).
 - **Core (`core/`)**: Configuration maps and the Plugin manifest loader (`plugins.py`).
 - **Service (`service/`)**: gRPC implementation mappings, strictly validating inbound `ContextUnit` payloads in `dispatch.py` and `register.py`.

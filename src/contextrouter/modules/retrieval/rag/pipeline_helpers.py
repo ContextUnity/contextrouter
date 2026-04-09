@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 from typing import List
+
+from contextcore import get_context_unit_logger
 
 from contextrouter.cortex.services import get_graph_service
 from contextrouter.cortex.state import AgentState
@@ -12,7 +13,7 @@ from contextrouter.cortex.state import AgentState
 from .models import RetrievedDoc
 from .settings import RagRetrievalSettings
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def deduplicate_docs(docs: List[RetrievedDoc]) -> List[RetrievedDoc]:

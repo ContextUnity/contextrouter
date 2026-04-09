@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
+from contextcore import get_context_unit_logger
 from langchain_core.tools import tool
 
 from contextrouter.cortex.subagents.spawner import SubAgentSpawner
 from contextrouter.modules.tools import register_tool
+from contextrouter.modules.tools.schemas import DataToolResult
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 # Global spawner instance
 _spawner: SubAgentSpawner | None = None
@@ -31,7 +32,7 @@ async def spawn_subagent(
     strategy: str = "sequential",
     tenant_id: str | None = None,
     session_id: str | None = None,
-) -> dict[str, Any]:
+) -> DataToolResult:
     """Spawn a sub-agent to handle a specific task.
 
     Use this tool when:
@@ -77,6 +78,19 @@ async def spawn_subagent(
         # when the tool is called from within the dispatcher graph
         trace_id = None  # Will be set by dispatcher graph integration
         tenant_id = tenant_id or "default"
+        from contextcore.tokens import TokenBuilder
+
+        from contextrouter.cortex.runtime_context import get_current_access_token
+
+        current_token = get_current_access_token()
+        attenuated_token = None
+        if current_token:
+            attenuated_token = TokenBuilder().attenuate(
+                current_token,
+                permissions=None,
+                agent_id=f"subagent:{agent_type}",
+            )
+
         subagent_id = await spawner.spawn_subagent(
             parent_agent_id="dispatcher",
             task=task,
@@ -85,7 +99,7 @@ async def spawn_subagent(
             trace_id=trace_id,
             agent_type=agent_type,
             config={"strategy": strategy},
-            token=None,  # Spawner will fetch token from runtime context if needed
+            token=attenuated_token,
         )
 
         logger.info(

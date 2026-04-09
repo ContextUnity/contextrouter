@@ -1,9 +1,9 @@
-import logging
 from typing import Optional
 
 import redis.asyncio as redis
+from contextcore import get_context_unit_logger
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 class RedisProvider:

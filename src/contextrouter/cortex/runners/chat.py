@@ -22,16 +22,12 @@ Usage:
 
 from __future__ import annotations
 
-import logging
 from typing import AsyncIterator, Sequence
 
+from contextcore import get_context_unit_logger
 from langchain_core.messages import BaseMessage, HumanMessage
 
 from contextrouter.core import TokenBuilder, UserCtx, get_core_config
-from contextrouter.core.agent_config_cache import (
-    get_agent_config_cache,
-    intersect_permissions,
-)
 from contextrouter.cortex import compile_graph, get_last_user_query
 from contextrouter.cortex.callbacks.tool_handler import ToolEventCallbackHandler
 from contextrouter.modules.observability import get_langfuse_callbacks, trace_context
@@ -42,7 +38,7 @@ from contextrouter.modules.retrieval.rag import (
 )
 from contextrouter.modules.retrieval.rag.types import RuntimeRagSettings
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def _trace_input_from_messages(messages: Sequence[BaseMessage]) -> dict[str, object]:
@@ -124,46 +120,22 @@ async def _mint_access_token(
     user_ctx: UserCtx | None,
     agent_id: str = "",
 ) -> object | None:
-    """Mint a ContextToken with agent-aware permissions.
+    """Mint a ContextToken with default config permissions.
 
-    If ``agent_id`` is provided, fetches the agent's max permissions from
-    ContextView (cached) and intersects with default permissions.
-    Otherwise uses default_permissions from config.
-
-    Returns None if security is disabled.
+    Returns None only if minting fails.
     """
     core_cfg = get_core_config()
-    if not core_cfg.security.enabled:
-        logger.debug("Security disabled: providers will run without token verification")
-        return None
-
-    default_perms = core_cfg.security.policies.default_permissions
-
-    # Agent-aware: intersect with agent's max permissions
-    if agent_id:
-        cache = get_agent_config_cache()
-        profile = await cache.get_agent_permissions(agent_id, default_permissions=default_perms)
-        effective_perms = intersect_permissions(
-            agent_max=profile.permissions,
-            request_permissions=default_perms,
-        )
-        logger.debug(
-            "Agent-aware permissions: agent=%s profile=%s effective=%d",
-            agent_id,
-            profile.profile_name or "(custom)",
-            len(effective_perms),
-        )
-    else:
-        effective_perms = default_perms
+    effective_perms = core_cfg.security.policies.default_permissions
 
     tenant_id = user_ctx.get("tenant_id") if user_ctx else None
-    builder = TokenBuilder(enabled=True, private_key_path=core_cfg.security.private_key_path)
+    builder = TokenBuilder()
     token = builder.mint_root(
         user_ctx=user_ctx or {},
         permissions=effective_perms,
         ttl_s=300.0,
         user_id=user_ctx.get("user_id") if user_ctx else None,
         allowed_tenants=[tenant_id] if tenant_id else None,
+        agent_id=agent_id,
     )
     logger.debug(
         "Minted access_token token_id=%s perms=%s",

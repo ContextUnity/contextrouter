@@ -8,11 +8,12 @@ Config: `ANTHROPIC_API_KEY` env var or `config.anthropic.api_key`
 
 from __future__ import annotations
 
-import logging
 from typing import AsyncIterator
 
+from contextcore import get_context_unit_logger
+from contextcore.tokens import ContextToken
+
 from contextrouter.core import Config, set_env_default
-from contextrouter.core.tokens import ContextToken
 
 from ..base import BaseModel
 from ..registry import model_registry
@@ -28,7 +29,7 @@ from ..types import (
     TextPart,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def _build_anthropic_messages(

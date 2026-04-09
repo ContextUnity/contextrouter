@@ -88,7 +88,7 @@ import logging
 from typing import AsyncIterator
 
 from contextrouter.core import Config
-from contextrouter.core.tokens import ContextToken
+from contextcore.tokens import ContextToken
 
 from ..base import BaseModel
 from ..registry import model_registry

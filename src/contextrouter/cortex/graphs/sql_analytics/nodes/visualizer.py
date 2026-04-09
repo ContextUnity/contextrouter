@@ -17,12 +17,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from typing import Any
 
+from contextcore import get_context_unit_logger
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tools import BaseTool
 
+from contextrouter.cortex.graphs.config_resolution import get_node_attr, get_node_config
 from contextrouter.cortex.graphs.sql_analytics.helpers import (
     acc_tokens,
     extract_json,
@@ -32,10 +34,11 @@ from contextrouter.cortex.graphs.sql_analytics.pii import (
     PiiSession,
     pii_deanonymize,
 )
+from contextrouter.cortex.graphs.sql_analytics.schemas import SqlAnalyticsStateUpdate
 from contextrouter.cortex.graphs.sql_analytics.state import SqlAnalyticsState
 from contextrouter.modules.models import model_registry
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 # ── Heuristics ──────────────────────────────────────────────────────
@@ -73,6 +76,7 @@ def make_visualizer_node(
     visualizer_sub_prompts: dict[str, str] | None = None,
     default_model_key: str | None,
     fallback_keys: list[str] | None = None,
+    shield_key_name: str | None = None,
     pii_masking: bool = False,
     anonymize_tool: BaseTool | None = None,
     deanonymize_tool: BaseTool | None = None,
@@ -102,7 +106,9 @@ def make_visualizer_node(
     else:
         logger.info("Visualizer: single-call mode")
 
-    async def visualizer_node(state: SqlAnalyticsState):
+    async def visualizer_node(
+        state: SqlAnalyticsState, config: RunnableConfig
+    ) -> SqlAnalyticsStateUpdate:
         sql_result = state.get("sql_result") or {}
         rows = sql_result.get("rows", []) if isinstance(sql_result, dict) else []
         columns = sql_result.get("columns", []) if isinstance(sql_result, dict) else []
@@ -140,14 +146,16 @@ def make_visualizer_node(
             session_id=session_id,
             anonymize_tool=anonymize_tool if pii_masking else None,
             deanonymize_tool=deanonymize_tool if pii_masking else None,
+            config=config,
         ) as pii:
             data_context = await pii.hide(data_context)
 
             llm = model_registry.get_llm_with_fallback(
-                default_model_key, fallback_keys=fallback_keys
+                default_model_key, fallback_keys=fallback_keys, shield_key_name=shield_key_name
             )
 
             try:
+                project_config = metadata.get("project_config", {})
                 if use_parallel:
                     comps, usage = await _parallel_path(
                         llm,
@@ -155,6 +163,8 @@ def make_visualizer_node(
                         data_context,
                         rows,
                         columns,
+                        config=config,
+                        project_config=project_config,
                     )
                 else:
                     comps, usage = await _single_path(
@@ -162,6 +172,10 @@ def make_visualizer_node(
                         visualizer_prompt,
                         data_context,
                         rows,
+                        config=config,
+                        prompt_version=get_node_attr(
+                            project_config, "visualizer", "prompt_version"
+                        ),
                     )
 
                 comps = await pii.reveal(comps)
@@ -195,10 +209,14 @@ async def _single_path(
     prompt: str,
     data_context: str,
     rows: list,
+    config: RunnableConfig,
+    prompt_version: str | None = None,
 ) -> tuple[list[dict], dict]:
     """Single LLM call path."""
     messages = [SystemMessage(content=prompt), HumanMessage(content=data_context)]
-    response, usage = await invoke_model(llm, messages)
+    response, usage = await invoke_model(
+        llm, messages, config=config, prompt_version=prompt_version
+    )
 
     data = extract_json(response.content)
     comps = data.get("components", []) if data else []
@@ -217,16 +235,29 @@ async def _parallel_path(
     data_context: str,
     rows: list,
     columns: list,
+    config: RunnableConfig,
+    project_config: dict[str, Any],
 ) -> tuple[list[dict], dict]:
     """Parallel LLM calls path — runs report/table/chart concurrently."""
-    # Determine which sub-calls to run
-    tasks: dict[str, str] = {"report": sub_prompts["report"]}
-    if _needs_table(rows) and "table" in sub_prompts:
-        tasks["table"] = sub_prompts["table"]
-    if _needs_chart(rows, columns) and "chart" in sub_prompts:
-        tasks["chart"] = sub_prompts["chart"]
+    visualizer_node = get_node_config(project_config, "visualizer")
+    variants_versions = visualizer_node.get("prompt_variants_versions", {})
 
-    results = await _run_parallel_calls(llm, tasks, data_context)
+    # Determine which sub-calls to run and grab their pre-computed bootstrap hashes
+    tasks: dict[str, tuple[str, str | None]] = {
+        "report": (sub_prompts["report"], variants_versions.get("report"))
+    }
+    if _needs_table(rows) and "table" in sub_prompts:
+        tasks["table"] = (
+            sub_prompts["table"],
+            variants_versions.get("table"),
+        )
+    if _needs_chart(rows, columns) and "chart" in sub_prompts:
+        tasks["chart"] = (
+            sub_prompts["chart"],
+            variants_versions.get("chart"),
+        )
+
+    results = await _run_parallel_calls(llm, tasks, data_context, config)
 
     # Merge components in order and accumulate usage
     all_components, total_usage = _merge_results(results, rows)
@@ -285,19 +316,24 @@ def _build_data_context(
 
 async def _run_parallel_calls(
     llm: Any,
-    tasks: dict[str, str],
+    tasks: dict[str, tuple[str, str | None]],
     data_context: str,
+    config: RunnableConfig,
 ) -> dict[str, tuple[list[dict], dict]]:
     """Run sub-calls in parallel and return {name: (components, usage)}."""
 
-    async def _one_call(name: str, system_prompt: str) -> tuple[str, list[dict], dict]:
+    async def _one_call(
+        name: str, system_prompt: str, prompt_version: str | None
+    ) -> tuple[str, list[dict], dict]:
         messages = [SystemMessage(content=system_prompt), HumanMessage(content=data_context)]
-        response, usage = await invoke_model(llm, messages)
+        response, usage = await invoke_model(
+            llm, messages, config=config, prompt_version=prompt_version
+        )
         data = extract_json(response.content)
         comps = data.get("components", []) if data else []
         return name, comps, usage
 
-    coros = [_one_call(name, prompt) for name, prompt in tasks.items()]
+    coros = [_one_call(name, prompt, pv) for name, (prompt, pv) in tasks.items()]
     results_list = await asyncio.gather(*coros, return_exceptions=True)
 
     results: dict[str, tuple[list[dict], dict]] = {}

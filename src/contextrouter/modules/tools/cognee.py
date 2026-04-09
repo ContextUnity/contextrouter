@@ -5,10 +5,13 @@ This tool provides LLM-free graph building capabilities using cognee library.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from contextcore import get_context_unit_logger
+
+from contextrouter.modules.tools.schemas import DataToolResult
+
+logger = get_context_unit_logger(__name__)
 
 
 class CogneeGraphBuilder:
@@ -82,7 +85,7 @@ class CogneeGraphTool:
     def __init__(self) -> None:
         self.builder = CogneeGraphBuilder()
 
-    def run(self, content: str) -> dict[str, Any]:
+    def run(self, content: str) -> DataToolResult:
         """Run cognee graph extraction on content.
 
         Args:

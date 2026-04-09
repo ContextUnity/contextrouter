@@ -61,7 +61,8 @@ def test_retrieval_pipeline_calls_vertex_and_builds_citations(monkeypatch) -> No
         ),
     )
 
-    from contextrouter.core.tokens import ContextToken
+    from contextcore.tokens import ContextToken
+
     from contextrouter.cortex.state import AgentState
 
     state: AgentState = {

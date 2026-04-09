@@ -6,14 +6,14 @@ This is intentionally minimal and additive (does not change existing SSE shapes)
 
 from __future__ import annotations
 
-from typing import Any
-
 from contextcore import ContextUnit
 
 from contextrouter.modules.retrieval.rag.formatting.citations import format_citations_to_ui
 
+from .events import AguiEventDict
 
-def context_unit_to_agui_event(unit: ContextUnit) -> dict[str, Any]:
+
+def context_unit_to_agui_event(unit: ContextUnit) -> AguiEventDict:
     """Convert ContextUnit into a generic AG-UI event payload."""
 
     payload = unit.payload or {}

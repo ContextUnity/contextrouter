@@ -2,26 +2,36 @@
 
 from __future__ import annotations
 
-import logging
 import time
 from typing import Any
 
+from contextcore import get_context_unit_logger
+
+from contextrouter.core import get_core_config
+from contextrouter.cortex.graphs.config_resolution import get_node_manifest_config
 from contextrouter.cortex.graphs.dispatcher_agent.prompts import SYSTEM_PROMPT
-from contextrouter.cortex.graphs.dispatcher_agent.state import DispatcherState
+from contextrouter.cortex.graphs.dispatcher_agent.state import (
+    DispatcherState,
+    DispatcherStateUpdate,
+)
 from contextrouter.modules.models import model_registry
 from contextrouter.modules.tools import discover_all_tools
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
-async def agent_node(state: DispatcherState) -> dict[str, Any]:
+async def agent_node(state: DispatcherState) -> DispatcherStateUpdate:
     """LLM reasoning node — decides which tools to use."""
     # Record pipeline start time on first iteration
     updates: dict[str, Any] = {}
     if not state.get("_start_ts"):
         updates["_start_ts"] = time.monotonic()
 
-    llm = model_registry.get_llm_with_fallback()
+    node_config = get_node_manifest_config(state, "agent")
+    config = get_core_config()
+    model_name = node_config.get("model", config.models.default_llm)
+
+    llm = model_registry.create_llm(model_name)
 
     # Self-healing trigger
     if state.get("error_detected") and not state.get("healing_triggered"):

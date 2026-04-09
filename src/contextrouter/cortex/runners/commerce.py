@@ -27,12 +27,13 @@ Usage:
 
 from __future__ import annotations
 
-import logging
 from typing import Any
+
+from contextcore import get_context_unit_logger
 
 from contextrouter.core import get_core_config
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 # Confidence threshold for fallback to agentic mode
 CONFIDENCE_THRESHOLD = 0.8

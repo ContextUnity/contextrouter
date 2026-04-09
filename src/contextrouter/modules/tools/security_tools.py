@@ -19,15 +19,16 @@ Tools:
 
 from __future__ import annotations
 
-import logging
 import uuid
 from typing import Any
 
+from contextcore import get_context_unit_logger
 from langchain_core.tools import tool
 
 from contextrouter.modules.tools import register_tool
+from contextrouter.modules.tools.schemas import DataToolResult
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 # ── RPC client (lazy init) ────────────────────────────────────────
 
@@ -93,7 +94,7 @@ def _use_rpc() -> bool:
 @tool
 async def shield_scan(
     text: str, context: str = "", validators: list[str] | None = None
-) -> dict[str, Any]:
+) -> DataToolResult:
     """Scan text for prompt injection, jailbreak attempts, and PII leaks.
 
     Use this tool BEFORE sending any user input to an external LLM.
@@ -174,7 +175,7 @@ async def check_policy(
     tenant_id: str = "default",
     permissions: list[str] | None = None,
     token_id: str | None = None,
-) -> dict[str, Any]:
+) -> DataToolResult:
     """Check if an action is allowed by the ContextShield policy engine.
 
     Use this to verify authorization before performing sensitive operations.
@@ -261,7 +262,7 @@ async def check_policy(
 @tool
 async def check_compliance(
     standards: list[str] | None = None,
-) -> dict[str, Any]:
+) -> DataToolResult:
     """Run a compliance audit on the current security posture.
 
     Checks:

@@ -1,0 +1,7 @@
+Execute NER (Named Entity Recognition) extraction. Discover all patented technologies, fabric trademarks or systems mentioned in the text (e.g. "GORE-TEX", "YKK", "Vibram", "Primaloft", "Cordura").
+Ignore generic terms like "nylon" or "cotton".
+Return ONLY an array of strings in JSON format.
+[
+    "GORE-TEX",
+    "Primaloft Silver"
+]

@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Literal
+
+from contextcore import get_context_unit_logger
 
 from contextrouter.cortex import AgentState
 
 from ...utils.pipeline import pipeline_log
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def should_retrieve(state: AgentState) -> Literal["retrieve", "skip_retrieve"]:

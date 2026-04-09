@@ -11,10 +11,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from contextcore.tokens import ContextToken, TokenBuilder
+
 from contextrouter.core.config import Config, FlowConfig, get_core_config
 from contextrouter.core.interfaces import BaseConnector, BaseProvider, BaseTransformer
 from contextrouter.core.registry import ComponentFactory, Registry
-from contextrouter.core.tokens import AccessManager, ContextToken, TokenBuilder
 
 
 @dataclass(frozen=True)
@@ -34,19 +35,12 @@ class FlowManager:
         provider_registry: Registry[type[BaseProvider]],
         config: Config | None = None,
         token_builder: TokenBuilder | None = None,
-        access_manager: AccessManager | None = None,
     ) -> None:
         self._connectors = connector_registry
         self._transformers = transformer_registry
         self._providers = provider_registry
         self._config = config or get_core_config()
-        self._token_builder = token_builder or TokenBuilder(
-            enabled=self._config.security.enabled,
-            private_key_path=self._config.security.private_key_path,
-        )
-        self._access = access_manager or AccessManager(
-            config=self._config, token_builder=self._token_builder
-        )
+        self._token_builder = token_builder or TokenBuilder()
 
     async def run(self, flow: FlowConfig, *, token: ContextToken) -> FlowResult:
         connector = ComponentFactory.create_connector(flow.source, **(flow.source_params or {}))
@@ -96,8 +90,7 @@ class FlowManager:
             else:
                 if provider is None:
                     raise ValueError("Provider must be initialized for sink operations")
-                # Enforce write permission + unit token_id consistency at external sink boundary.
-                self._access.verify_unit_write(cur, token)
+                # Enforce external sink boundary through gRPC interceptors.
                 results.append(await provider.sink(cur, token=token))
             processed += 1
 

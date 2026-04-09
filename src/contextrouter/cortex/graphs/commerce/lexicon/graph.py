@@ -12,8 +12,7 @@ Also callable standalone via `create_lexicon_subgraph()`.
 
 from __future__ import annotations
 
-import logging
-
+from contextcore import get_context_unit_logger
 from langgraph.graph import END, START, StateGraph
 
 from .nodes import (
@@ -24,7 +23,7 @@ from .nodes import (
 )
 from .state import LexiconState
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def create_lexicon_subgraph():

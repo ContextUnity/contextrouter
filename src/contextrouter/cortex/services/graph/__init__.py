@@ -14,16 +14,17 @@ once at application startup and providing context lookups for LLM prompts.
 
 from __future__ import annotations
 
-import logging
 import threading
 from pathlib import Path
+
+from contextcore import get_context_unit_logger
 
 from contextrouter.core import get_core_config, get_env
 
 from .local import GraphService
 from .postgres import PostgresGraphService
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 # Module-level singleton instance and lock
 _graph_service: "GraphService | None" = None
@@ -87,7 +88,9 @@ def get_graph_service(
         cfg = get_core_config()
         kg_backend = (get_env("RAG_KG_BACKEND") or "").strip().lower()
         if kg_backend == "postgres" and cfg.postgres.dsn:
-            tenant_id = get_env("RAG_TENANT_ID") or "public"
+            from contextcore.sdk.identity import get_tenant_id
+
+            tenant_id = get_tenant_id() or "public"
             _graph_service = PostgresGraphService(
                 dsn=cfg.postgres.dsn,
                 tenant_id=str(tenant_id),

@@ -13,9 +13,9 @@ becomes the new `.content`, causing recursive nesting.
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any, AsyncIterator, Sequence
 
+from contextcore import get_context_unit_logger
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import (
     BaseCheckpointSaver,
@@ -28,7 +28,7 @@ from langgraph.checkpoint.base import (
 from contextrouter.core import get_core_config
 from contextrouter.modules.providers.redis import RedisProvider
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 class RedisCheckpointSaver(BaseCheckpointSaver):

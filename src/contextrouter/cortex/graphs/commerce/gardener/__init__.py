@@ -1,15 +1,14 @@
 """
-Gardener subgraph package.
+Gardener v2 subgraph package.
 
-Gardener: Enriches products with taxonomy, NER, parameters, technologies, KG.
+Gardener: Normalizes products via deterministic + LLM two-pass pipeline.
+Model is injected via graph config at registration time (template-based).
 """
 
-from .graph import create_gardener_subgraph
-from .state import EnrichmentResult, GardenerState, Product
+from .graph import build_gardener_graph
+from .state import GardenerState
 
 __all__ = [
-    "create_gardener_subgraph",
+    "build_gardener_graph",
     "GardenerState",
-    "Product",
-    "EnrichmentResult",
 ]

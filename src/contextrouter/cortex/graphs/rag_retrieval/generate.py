@@ -5,13 +5,13 @@ This keeps the direct-mode graph free of registry registration side effects.
 
 from __future__ import annotations
 
-import logging
 from typing import List, Protocol
 
+from contextcore import get_context_unit_logger
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from contextrouter.core import get_core_config
 from contextrouter.cortex import AgentState
+from contextrouter.cortex.graphs.config_resolution import get_node_manifest_config
 from contextrouter.modules.models import model_registry
 from contextrouter.modules.models.types import ModelRequest, TextPart
 
@@ -19,7 +19,7 @@ from ...llm import build_rag_prompt
 from ...utils.pipeline import pipeline_log
 from .no_results import no_results_response
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def _last_nonempty_assistant_text(messages: list[BaseMessage]) -> str:
@@ -107,6 +107,7 @@ class RAGStrategy(IntentStrategy):
             no_results_msg = await no_results_response(
                 user_query=str(intent_text or user_query or ""),
                 conversation_history=conversation_history,
+                state=state,
                 prompt_override=str(state.get("no_results_prompt") or ""),
             )
             return {
@@ -126,20 +127,12 @@ class RAGStrategy(IntentStrategy):
             graph_facts=state.get("graph_facts", []) or [],
         )
 
-        core_cfg = get_core_config()
-        generation_cfg = core_cfg.models.rag.generation
-        model_key = generation_cfg.model or core_cfg.models.default_llm
+        node_config = get_node_manifest_config(state, "generate")
+        model_key = node_config.get("model") or "vertex/gemini-2.5-pro"
 
-        llm = model_registry.get_llm_with_fallback(
-            key=model_key,
-            fallback_keys=list(generation_cfg.fallback or []),
-            strategy=generation_cfg.strategy or "fallback",
-            config=core_cfg,
-        )
+        llm = model_registry.create_llm(model_key)
 
-        request = _build_model_request(
-            prompt_messages, merge_system=core_cfg.llm.merge_system_prompt
-        )
+        request = _build_model_request(prompt_messages, merge_system=True)
         full_content = await _run_generation(llm, request)
 
         if not full_content.strip():
@@ -173,20 +166,12 @@ class IdentityStrategy(IntentStrategy):
         system_content = IDENTITY_PROMPT.format(style_context=style_context, query=intent_text)
         prompt_messages = [SystemMessage(content=system_content), HumanMessage(content=intent_text)]
 
-        core_cfg = get_core_config()
-        generation_cfg = core_cfg.models.rag.generation
-        model_key = generation_cfg.model or core_cfg.models.default_llm
+        node_config = get_node_manifest_config(state, "generate")
+        model_key = node_config.get("model") or "vertex/gemini-2.5-flash-lite"
 
-        llm = model_registry.get_llm_with_fallback(
-            key=model_key,
-            fallback_keys=list(generation_cfg.fallback or []),
-            strategy=generation_cfg.strategy or "fallback",
-            config=core_cfg,
-        )
+        llm = model_registry.create_llm(model_key)
 
-        request = _build_model_request(
-            prompt_messages, merge_system=core_cfg.llm.merge_system_prompt
-        )
+        request = _build_model_request(prompt_messages, merge_system=True)
         full_content = await _run_generation(llm, request)
 
         # Suggestions for identity are handled by suggest node; keep empty here.
@@ -228,20 +213,12 @@ class TransformStrategy(IntentStrategy):
             ),
         ]
 
-        core_cfg = get_core_config()
-        generation_cfg = core_cfg.models.rag.generation
-        model_key = generation_cfg.model or core_cfg.models.default_llm
+        node_config = get_node_manifest_config(state, "generate")
+        model_key = node_config.get("model") or "vertex/gemini-2.5-flash-lite"
 
-        llm = model_registry.get_llm_with_fallback(
-            key=model_key,
-            fallback_keys=list(generation_cfg.fallback or []),
-            strategy=generation_cfg.strategy or "fallback",
-            config=core_cfg,
-        )
+        llm = model_registry.create_llm(model_key)
 
-        request = _build_model_request(
-            prompt_messages, merge_system=core_cfg.llm.merge_system_prompt
-        )
+        request = _build_model_request(prompt_messages, merge_system=True)
         full_content = await _run_generation(llm, request)
 
         return {

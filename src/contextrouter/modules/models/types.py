@@ -170,10 +170,12 @@ class UsageStats(BaseModel):
             return self  # Already set by provider
 
         # Fuzzy match: try exact, then prefix match
-        prices = self._PRICE_TABLE.get(model_name)
+        bare_model = model_name.split("/")[-1]
+
+        prices = self._PRICE_TABLE.get(model_name) or self._PRICE_TABLE.get(bare_model)
         if not prices:
             for key, val in self._PRICE_TABLE.items():
-                if model_name.startswith(key) or key.startswith(model_name):
+                if bare_model.startswith(key) or key.startswith(bare_model):
                     prices = val
                     break
         if not prices:

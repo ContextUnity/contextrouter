@@ -11,7 +11,6 @@ from contextcore import ContextToken, ContextUnit
 
 from contextrouter.core import get_core_config
 from contextrouter.core.interfaces import BaseProvider, IRead, IWrite
-from contextrouter.core.tokens import AccessManager
 from contextrouter.core.types import coerce_struct_data
 from contextrouter.modules.models import model_registry
 from contextrouter.modules.retrieval.rag.models import RetrievedDoc
@@ -47,7 +46,6 @@ def _flatten_keywords(metadata: dict[str, Any]) -> str | None:
 class PostgresProvider(BaseProvider, IRead, IWrite):
     def __init__(self, *, store: PostgresKnowledgeStore | None = None) -> None:
         cfg = get_core_config()
-        self._access = AccessManager.from_core_config()
         if store is not None:
             self._store = store
         else:
@@ -67,16 +65,13 @@ class PostgresProvider(BaseProvider, IRead, IWrite):
         filters: dict[str, Any] | None = None,
         token: ContextToken,
     ) -> list[ContextUnit]:
-        self._access.verify_read(token)
         cfg = get_core_config()
         rag_cfg = get_rag_retrieval_settings()
 
         tenant_id = (filters or {}).get("tenant_id")
         user_id = (filters or {}).get("user_id")
-        if cfg.security.enabled and not tenant_id:
-            raise PermissionError("tenant_id is required for Postgres retrieval")
         if not tenant_id:
-            tenant_id = "public"
+            raise PermissionError("tenant_id is required for Postgres retrieval")
 
         source_types: list[str] | None = None
         if filters and (st := filters.get("source_type")):
@@ -112,8 +107,6 @@ class PostgresProvider(BaseProvider, IRead, IWrite):
         return units
 
     async def write(self, data: ContextUnit, *, token: ContextToken) -> None:
-        self._access.verify_write(token)
-        cfg = get_core_config()
         payload = data.payload or {}
         content = payload.get("content")
 
@@ -125,10 +118,8 @@ class PostgresProvider(BaseProvider, IRead, IWrite):
             raise ValueError("PostgresProvider.write expects RetrievedDoc content in payload")
 
         tenant_id = payload.get("tenant_id")
-        if cfg.security.enabled and not tenant_id:
-            raise PermissionError("tenant_id is required for Postgres write")
         if not tenant_id:
-            tenant_id = "public"
+            raise PermissionError("tenant_id is required for Postgres write")
         user_id = payload.get("user_id")
 
         node_id = str(payload.get("id", "")).strip()

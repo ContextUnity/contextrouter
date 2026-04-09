@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from contextcore import ContextUnit, extract_token_from_grpc_metadata, get_context_unit_logger
+from contextcore import ContextUnit, get_context_unit_logger
 from contextcore.exceptions import SecurityError
-
-from contextrouter.core import AccessManager, get_core_config
 
 logger = get_context_unit_logger(__name__)
 
@@ -36,51 +34,41 @@ def validate_dispatcher_access(
 ) -> object | None:
     """Validate dispatcher access token, scopes, and unit access.
 
+    Prefers ``VerifiedAuthContext`` from interceptor (already cryptographically
+    verified). Falls back to legacy extract for backward compatibility.
+
     Raises:
         SecurityError: If token is missing, expired, or lacks required permission.
             Maps to gRPC PERMISSION_DENIED via grpc_error_handler.
     """
-    token = extract_token_from_grpc_metadata(context)
-    config = get_core_config()
+    from contextcore.authz.context import get_auth_context
+    from contextcore.authz.engine import authorize
 
-    if not config.security.enabled:
-        env = config.security.environment
-        if env in ("production", "prod", "staging"):
-            logger.critical(
-                "🚨 SECURITY DISABLED IN %s — ALL PERMISSION CHECKS BYPASSED. "
-                "Set SECURITY_ENABLED=true in your environment immediately. "
-                "Env var: CONTEXTROUTER_SECURITY_ENABLED=true",
-                env.upper(),
-            )
-        else:
-            logger.warning(
-                "⚠️ Security disabled (SECURITY_ENABLED=false). "
-                "Acceptable for local development only. "
-                "Set CONTEXTROUTER_SECURITY_ENABLED=true for staging/production.",
-            )
-        return token
+    auth_ctx = get_auth_context()
+    token = auth_ctx.token if auth_ctx else None
 
-    # Fail-closed: SecurityError → gRPC PERMISSION_DENIED (not INTERNAL)
+    # Security is always enforced (fail-closed)
     if token is None:
         raise SecurityError("Missing ContextToken — authentication required")
     if token.is_expired():
         raise SecurityError("ContextToken expired — please obtain a new token")
 
-    access = AccessManager.from_core_config()
-    try:
-        access.verify_read(token, permission="dispatcher:execute")
-    except PermissionError as e:
-        raise SecurityError(str(e)) from e
+    # Use canonical authorize() engine
+    decision = authorize(
+        auth_ctx if auth_ctx is not None else token,
+        permission="router:execute",
+        service="router",
+        rpc_name="ExecuteDispatcher",
+    )
+    if decision.denied:
+        raise SecurityError(decision.reason)
 
     # If caller provided unit scopes, enforce capability checks against unit.
     if unit.security and (unit.security.read or unit.security.write):
         try:
             from contextcore import TokenBuilder
 
-            tb = TokenBuilder(
-                enabled=config.security.enabled,
-                private_key_path=config.security.private_key_path,
-            )
+            tb = TokenBuilder()
             tb.verify_unit_access(token, unit, operation="read")
         except PermissionError as e:
             raise SecurityError(str(e)) from e

@@ -6,15 +6,14 @@ dispatcher agent, similar to the chat runner but for the dispatcher.
 
 from __future__ import annotations
 
-import logging
 from typing import Any, AsyncIterator, Sequence
 
-from contextcore import ContextToken
+from contextcore import ContextToken, get_context_unit_logger
 from langchain_core.messages import BaseMessage, HumanMessage
 
 from contextrouter.cortex.services.dispatcher import get_dispatcher_service
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 async def invoke_dispatcher(

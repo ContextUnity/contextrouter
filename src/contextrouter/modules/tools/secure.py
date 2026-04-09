@@ -17,12 +17,12 @@ Contract:
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
+from contextcore import get_context_unit_logger
 from langchain_core.tools import BaseTool
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 class SecureTool(BaseTool):
@@ -79,7 +79,7 @@ class SecureTool(BaseTool):
 
     # Tenant binding — if set, the tool can only be executed by tokens
     # that include this tenant in their ``allowed_tenants``.
-    # Set during registration (project_id from RegisterTools payload).
+    # Set during registration (project_id from RegisterManifest payload).
     # Empty string = no tenant restriction (internal Router tools).
     bound_tenant: str = ""
 
@@ -128,20 +128,26 @@ class SecureTool(BaseTool):
                 )
 
         # ── Permission check (fail-closed) ────────────────────────────
-        try:
-            from contextcore.permissions import has_tool_access
-        except ImportError:
-            raise PermissionError(
-                f"contextcore.permissions unavailable — tool '{self.name}' "
-                f"blocked (fail-closed). Install contextcore to enable "
-                f"permission verification."
-            ) from None
+        from contextcore.authz import authorize
 
-        if not has_tool_access(token.permissions, self.name):
+        effective_perm = self._effective_permission()
+
+        # If a tool has an explicit permission in a non-tool namespace
+        # (e.g. zero:anonymize for privacy tools), use permission-only check.
+        # tool_name-based check would incorrectly look for tool:{name}.
+        use_tool_name = effective_perm.startswith("tool:")
+
+        decision = authorize(
+            token,
+            tool_name=self.name if use_tool_name else None,
+            permission=effective_perm,
+            service="router",
+        )
+        if decision.denied:
             raise PermissionError(
                 f"Permission denied for tool '{self.name}'. "
-                f"Required: {self._effective_permission()}. "
-                f"Token has: {list(token.permissions)}"
+                f"{decision.reason}. "
+                f"Required: {effective_perm}"
             )
 
     def _inject_authoritative_context(self, kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -196,6 +202,71 @@ class SecureTool(BaseTool):
 
         return secure_kwargs
 
+    def _resolve_provenance_prefix(self) -> str:
+        """Determine if this tool should show as 'federated_tool' in provenance.
+
+        This is purely an observability concern — it does NOT affect permissions.
+        Permissions always use the canonical 'tool:' prefix.
+        """
+        my_tags = getattr(self, "tags", None) or []
+        wrapped_tags = (getattr(self.wrapped_tool, "tags", None) or []) if self.wrapped_tool else []
+        if "federated" in my_tags or "federated" in wrapped_tags:
+            return "federated_tool"
+
+        eff_perm = self._effective_permission()
+        if eff_perm.startswith("zero:"):
+            return "zero_tool"
+        if eff_perm.startswith("shield:"):
+            return "shield_tool"
+
+        return "tool"
+
+    def _prepare_execution(self, kwargs: dict[str, Any]) -> tuple[dict[str, Any], Any]:
+        """Shared provenance + attenuation logic for _run/_arun.
+
+        Returns:
+            (secure_kwargs, token_ref) — token_ref is None if no attenuation occurred.
+        """
+        from contextcore.tokens import TokenBuilder
+
+        from contextrouter.cortex.runtime_context import (
+            append_provenance,
+            get_current_access_token,
+            set_current_access_token,
+        )
+
+        self._enforce_permission()
+        secure_kwargs = self._inject_authoritative_context(kwargs)
+
+        token = get_current_access_token()
+        token_ref = None
+
+        prefix = self._resolve_provenance_prefix()
+
+        # Extract execution mode from token permissions (canonical: tool:name:mode)
+        mode = getattr(self, "required_scope", "execute")
+        if token and not self.skip_auth:
+            if getattr(token, "permissions", None):
+                for perm in token.permissions:
+                    if perm.startswith(f"tool:{self.name}:"):
+                        mode = perm.split(":")[-1]
+                        break
+
+            try:
+                attenuated = TokenBuilder().attenuate(
+                    token,
+                    permissions=None,
+                    agent_id=f"{prefix}:{self.name}:{mode}",
+                )
+                token_ref = set_current_access_token(attenuated)
+            except Exception as e:
+                logger.warning("Failed to attenuate token for tool '%s': %s", self.name, e)
+
+        # Record tool execution step (flat string for accumulator)
+        append_provenance(f"{prefix}:{self.name}:{mode}")
+
+        return secure_kwargs, token_ref
+
     def _run(
         self,
         *args: Any,
@@ -204,25 +275,30 @@ class SecureTool(BaseTool):
         **kwargs: Any,
     ) -> Any:
         """Synchronous execution with permission enforcement."""
-        self._enforce_permission()
-        secure_kwargs = self._inject_authoritative_context(kwargs)
+        from contextrouter.cortex.runtime_context import reset_current_access_token
 
-        if self.wrapped_tool is not None:
-            import inspect
+        secure_kwargs, token_ref = self._prepare_execution(kwargs)
 
-            sig = inspect.signature(self.wrapped_tool._run)
-            if "run_manager" in sig.parameters or any(
-                p.kind == p.VAR_KEYWORD for p in sig.parameters.values()
-            ):
-                secure_kwargs["run_manager"] = run_manager
-            if "config" in sig.parameters or any(
-                p.kind == p.VAR_KEYWORD for p in sig.parameters.values()
-            ):
-                secure_kwargs["config"] = config
-            return self.wrapped_tool._run(*args, **secure_kwargs)
-        raise NotImplementedError(
-            f"SecureTool '{self.name}' has no _run implementation and no wrapped tool."
-        )
+        try:
+            if self.wrapped_tool is not None:
+                import inspect
+
+                sig = inspect.signature(self.wrapped_tool._run)
+                if "run_manager" in sig.parameters or any(
+                    p.kind == p.VAR_KEYWORD for p in sig.parameters.values()
+                ):
+                    secure_kwargs["run_manager"] = run_manager
+                if "config" in sig.parameters or any(
+                    p.kind == p.VAR_KEYWORD for p in sig.parameters.values()
+                ):
+                    secure_kwargs["config"] = config
+                return self.wrapped_tool._run(*args, **secure_kwargs)
+            raise NotImplementedError(
+                f"SecureTool '{self.name}' has no _run implementation and no wrapped tool."
+            )
+        finally:
+            if token_ref:
+                reset_current_access_token(token_ref)
 
     async def _arun(
         self,
@@ -232,25 +308,30 @@ class SecureTool(BaseTool):
         **kwargs: Any,
     ) -> Any:
         """Async execution with permission enforcement."""
-        self._enforce_permission()
-        secure_kwargs = self._inject_authoritative_context(kwargs)
+        from contextrouter.cortex.runtime_context import reset_current_access_token
 
-        if self.wrapped_tool is not None:
-            import inspect
+        secure_kwargs, token_ref = self._prepare_execution(kwargs)
 
-            sig = inspect.signature(self.wrapped_tool._arun)
-            if "run_manager" in sig.parameters or any(
-                p.kind == p.VAR_KEYWORD for p in sig.parameters.values()
-            ):
-                secure_kwargs["run_manager"] = run_manager
-            if "config" in sig.parameters or any(
-                p.kind == p.VAR_KEYWORD for p in sig.parameters.values()
-            ):
-                secure_kwargs["config"] = config
-            return await self.wrapped_tool._arun(*args, **secure_kwargs)
-        raise NotImplementedError(
-            f"SecureTool '{self.name}' has no _arun implementation and no wrapped tool."
-        )
+        try:
+            if self.wrapped_tool is not None:
+                import inspect
+
+                sig = inspect.signature(self.wrapped_tool._arun)
+                if "run_manager" in sig.parameters or any(
+                    p.kind == p.VAR_KEYWORD for p in sig.parameters.values()
+                ):
+                    secure_kwargs["run_manager"] = run_manager
+                if "config" in sig.parameters or any(
+                    p.kind == p.VAR_KEYWORD for p in sig.parameters.values()
+                ):
+                    secure_kwargs["config"] = config
+                return await self.wrapped_tool._arun(*args, **secure_kwargs)
+            raise NotImplementedError(
+                f"SecureTool '{self.name}' has no _arun implementation and no wrapped tool."
+            )
+        finally:
+            if token_ref:
+                reset_current_access_token(token_ref)
 
     @classmethod
     def wrap(

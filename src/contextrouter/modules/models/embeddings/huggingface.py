@@ -10,8 +10,9 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+from contextcore.tokens import ContextToken
+
 from contextrouter.core import Config
-from contextrouter.core.tokens import ContextToken
 
 from ..base import BaseEmbeddings
 from ..registry import model_registry

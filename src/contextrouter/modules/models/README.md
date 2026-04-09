@@ -82,7 +82,6 @@ model = model_registry.get_llm_with_fallback(
 | **Local (vLLM/Ollama)** | `local/*`, `local-vllm/*` | Text + Image | Requires `contextrouter[models-openai]`. Vision models support images. |
 | **HuggingFace Transformers** | `hf/*` | Task-dependent (Text/Image/Audio) | Local inference. Task controls modality: text-gen, ASR, image-classification. |
 | **RLM (Recursive)** | `rlm/*` | Text | Wraps any LLM with recursive REPL. For massive contexts (50k+ items). Requires `pip install rlm`. |
-| **LiteLLM** | `litellm/*` | - | **Stub only** (not implemented). |
 
 ### HuggingFace Transformers ⚠️
 
@@ -160,15 +159,6 @@ Write code to match products efficiently.
 | `docker` | Production | High (isolated container) |
 | `modal` | Cloud scaling | High |
 | `prime` | High-performance cloud | High |
-
-### LiteLLM (stub)
-
-`litellm/*` exists as a **stub provider** (raises `NotImplementedError`).
-
-Reasons:
-- We prefer explicit providers (Vertex/OpenAI/Anthropic/OpenRouter/local) for clearer debugging and control.
-- LiteLLM would add another abstraction layer that can complicate streaming/multimodal/error mapping.
-- Observability/cost tracking is handled via Langfuse + our own normalized `UsageStats`.
 
 ### Running Local Models (vLLM / Ollama)
 

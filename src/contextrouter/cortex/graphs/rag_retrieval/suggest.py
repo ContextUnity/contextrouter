@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-import logging
+
+from contextcore import get_context_unit_logger
 
 from contextrouter.cortex import AgentState
 from contextrouter.modules.observability import retrieval_span
@@ -11,7 +12,7 @@ from contextrouter.modules.observability import retrieval_span
 from ...utils.json import strip_json_fence
 from ...utils.pipeline import pipeline_log
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def _build_suggestions_context(state: AgentState, *, max_docs: int = 12) -> str:
@@ -64,28 +65,14 @@ async def generate_search_suggestions(state: AgentState) -> dict[str, object]:
     if not user_query:
         return {"search_suggestions": []}
 
-    from contextrouter.core import get_core_config
+    from contextrouter.cortex.graphs.config_resolution import get_node_manifest_config
     from contextrouter.modules.models import model_registry
     from contextrouter.modules.models.types import ModelRequest, TextPart
 
-    core_cfg = get_core_config()
+    node_config = get_node_manifest_config(state, "suggest")
+    model_key = node_config.get("model") or "vertex/gemini-2.5-flash-lite"
 
-    # Get suggestions model with fallback support
-    # TODO: Update to use new config structure once breaking changes are applied
-    suggestions_cfg = core_cfg.models.rag.suggestions
-    suggestions_model_key = suggestions_cfg.model or core_cfg.models.default_llm
-    fallback_keys = list(suggestions_cfg.fallback or [])
-    strategy = suggestions_cfg.strategy or "fallback"
-
-    model = model_registry.get_llm_with_fallback(
-        key=suggestions_model_key,
-        fallback_keys=fallback_keys,
-        strategy=strategy,
-        config=core_cfg,
-    )
-
-    # Direct model usage with new multimodal interface
-    llm = model
+    llm = model_registry.create_llm(model_key)
 
     from contextrouter.cortex.prompting import (
         SEARCH_SUGGESTIONS_PROMPT,

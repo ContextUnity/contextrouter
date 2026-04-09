@@ -7,10 +7,11 @@ All DB operations happen in Commerce's process via BiDi stream tools.
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict
 
-logger = logging.getLogger(__name__)
+from contextcore import get_context_unit_logger
+
+logger = get_context_unit_logger(__name__)
 
 
 async def fetch_unmatched_node(state: Dict[str, Any]) -> Dict[str, Any]:

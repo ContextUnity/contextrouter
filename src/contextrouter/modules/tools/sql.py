@@ -21,14 +21,16 @@ Usage in a graph:
 
 from __future__ import annotations
 
-import logging
 import re
 import time
 from typing import Any, Callable
 
+from contextcore import get_context_unit_logger
 from pydantic import BaseModel, ConfigDict, Field
 
-logger = logging.getLogger(__name__)
+from contextrouter.modules.tools.schemas import DataToolResult
+
+logger = get_context_unit_logger(__name__)
 
 
 # ── Configuration ────────────────────────────────────────────────────
@@ -112,7 +114,7 @@ def _split_statements(sql: str) -> list[str]:
     return statements
 
 
-def validate_sql(sql: str, *, config: SQLToolConfig | None = None) -> dict[str, Any]:
+def validate_sql(sql: str, *, config: SQLToolConfig | None = None) -> DataToolResult:
     """Validate and sanitize SQL.  Return ``{"valid": True, "sql": cleaned}``
     or ``{"valid": False, "error": reason}``.
 
@@ -168,7 +170,7 @@ def validate_sql(sql: str, *, config: SQLToolConfig | None = None) -> dict[str, 
     return {"valid": True, "sql": clean}
 
 
-def execute_sql(sql: str, *, config: SQLToolConfig) -> dict[str, Any]:
+def execute_sql(sql: str, *, config: SQLToolConfig) -> DataToolResult:
     """Execute validated SQL via the project-provided ``db_executor``.
 
     Returns dict with ``columns``, ``rows``, ``row_count``, ``elapsed_ms``
@@ -265,7 +267,7 @@ def humanize_columns(
     *,
     labels: dict[str, str] | None = None,
     hidden: set[str] | None = None,
-) -> dict[str, Any]:
+) -> DataToolResult:
     """Translate column keys to human labels and hide service columns.
 
     Args:

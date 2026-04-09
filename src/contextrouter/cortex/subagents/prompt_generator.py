@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict
 
-from contextcore import BrainClient, ContextUnit
+from contextcore import BrainClient, ContextUnit, get_context_unit_logger
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 class SubAgentPromptGenerator:

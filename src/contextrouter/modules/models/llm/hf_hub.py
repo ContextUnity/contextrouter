@@ -7,11 +7,12 @@ or Inference Endpoints.
 from __future__ import annotations
 
 import base64
-import logging
 from typing import AsyncIterator
 
+from contextcore import get_context_unit_logger
+from contextcore.tokens import ContextToken
+
 from contextrouter.core import Config
-from contextrouter.core.tokens import ContextToken
 
 from ..base import BaseModel
 from ..registry import model_registry
@@ -28,7 +29,7 @@ from ..types import (
     TextPart,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 @model_registry.register_llm("hf-hub", "*")
@@ -53,16 +54,20 @@ class HuggingFaceHubLLM(BaseModel):
         self._task = (task or "text-generation").strip() or "text-generation"
 
         api_key = config.hf_hub.api_key or ""
-        base_url = (config.hf_hub.base_url or "").strip()
-        # New huggingface_hub treats base_url as alias for model — cannot pass both.
-        # If a custom endpoint is configured, use it as model; otherwise use model_name.
-        client_kwargs: dict = {"token": api_key or None, **kwargs}
-        if base_url:
-            client_kwargs["model"] = base_url
-        else:
-            client_kwargs["model"] = self._model_name
+        base_url = config.hf_hub.base_url
 
-        self._client = AsyncInferenceClient(**client_kwargs)
+        # huggingface_hub throws ValueError if both model and base_url are provided
+        hf_kwargs = {}
+        if base_url:
+            hf_kwargs["base_url"] = base_url
+        else:
+            hf_kwargs["model"] = self._model_name
+
+        self._client = AsyncInferenceClient(
+            token=(api_key or None),
+            **hf_kwargs,
+            **kwargs,
+        )
 
         # Capabilities depend on task - we only claim what we actually implement
         image_tasks = {"image-to-text", "visual-question-answering", "image-classification"}

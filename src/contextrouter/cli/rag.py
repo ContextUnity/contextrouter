@@ -8,11 +8,12 @@ import logging
 from pathlib import Path
 
 import click
+from contextcore import get_context_unit_logger
 
 from contextrouter.cli.registry import register_command
 from contextrouter.core import get_env
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 def _check_env() -> None:

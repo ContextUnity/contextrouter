@@ -17,9 +17,13 @@ _KEEP_FIELDS = frozenset(
         "ean",
         "manufacturer_sku",
         "category",
-        "normalized_category",
         "price_retail_uah",
         "product_type",
+        "model_name",
+        "normalized_category",
+        "normalized_color",
+        "normalized_size",
+        "gender",
         "structure",
     }
 )

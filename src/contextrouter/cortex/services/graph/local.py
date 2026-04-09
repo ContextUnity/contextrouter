@@ -7,11 +7,11 @@ Thread-safe with graceful degradation.
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 from typing import Any
 
 import joblib
+from contextcore import get_context_unit_logger
 
 try:
     from contextbrain.ingestion.rag.graph.serialization import load_graph_secure
@@ -22,7 +22,7 @@ except ImportError:
         return joblib.load(file_path)
 
 
-logger = logging.getLogger(__name__)
+logger = get_context_unit_logger(__name__)
 
 
 class GraphService:

@@ -97,72 +97,20 @@ class TestSanitizeForStruct:
 
 
 # ---------------------------------------------------------------------------
-# Decorator exports
+# ---------------------------------------------------------------------------
+# DispatcherService Core functionality
 # ---------------------------------------------------------------------------
 
 
-class TestDecoratorExports:
-    """Ensure decorator module exports are correct."""
+class TestDispatcherServiceCore:
+    """Ensure DispatcherService initializes correctly."""
 
-    def test_grpc_error_handler_importable(self):
-        from contextrouter.service.decorators import grpc_error_handler
-
-        assert callable(grpc_error_handler)
-
-    def test_grpc_stream_error_handler_importable(self):
-        from contextrouter.service.decorators import grpc_stream_error_handler
-
-        assert callable(grpc_stream_error_handler)
-
-    def test_decorator_all_exports(self):
-        from contextrouter.service.decorators import __all__
-
-        assert "grpc_error_handler" in __all__
-        assert "grpc_stream_error_handler" in __all__
-
-
-# ---------------------------------------------------------------------------
-# Security module exports
-# ---------------------------------------------------------------------------
-
-
-class TestSecurityExports:
-    """Ensure security module exports are correct."""
-
-    def test_security_all_exports(self):
-        from contextrouter.service.security import __all__
-
-        assert "sanitize_for_struct" in __all__
-        assert "validate_dispatcher_access" in __all__
-
-
-# ---------------------------------------------------------------------------
-# Mixin exports
-# ---------------------------------------------------------------------------
-
-
-class TestMixinExports:
-    """Ensure mixin modules are properly importable."""
-
-    def test_execution_mixin_importable(self):
-        from contextrouter.service.mixins import ExecutionMixin
-
-        assert ExecutionMixin is not None
-
-    def test_registration_mixin_importable(self):
-        from contextrouter.service.mixins import RegistrationMixin
-
-        assert RegistrationMixin is not None
-
-    def test_persistence_mixin_importable(self):
-        from contextrouter.service.mixins import PersistenceMixin
-
-        assert PersistenceMixin is not None
-
-    def test_dispatcher_service_uses_all_mixins(self):
+    def test_dispatcher_service_initialization(self):
         from contextrouter.service.dispatcher_service import DispatcherService
-        from contextrouter.service.mixins import ExecutionMixin, PersistenceMixin, RegistrationMixin
 
-        assert issubclass(DispatcherService, ExecutionMixin)
-        assert issubclass(DispatcherService, RegistrationMixin)
-        assert issubclass(DispatcherService, PersistenceMixin)
+        service = DispatcherService()
+        assert isinstance(service._project_tools, dict)
+        assert isinstance(service._project_configs, dict)
+        assert isinstance(service._stream_secrets, dict)
+        assert not service._project_tools
+        assert not service._project_configs

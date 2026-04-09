@@ -1,0 +1,6 @@
+Create a brief encyclopedic description for the technology {technology_name}.
+Result must strictly match the scheme:
+- title_uk, title_en
+- content_uk (html paragraphs)
+- content_en (html paragraphs)
+- query_for_image (string keyword to search the vector/logo)
