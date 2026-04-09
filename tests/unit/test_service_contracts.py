@@ -187,21 +187,21 @@ class TestContextUnitProtobufRoundtrip:
         from contextcore.sdk import ContextUnit, SecurityScopes
 
         original = ContextUnit(
-            payload={"tenant_id": "nszu", "query": "test", "count": 42},
+            payload={"tenant_id": "tenant_a", "query": "test", "count": 42},
             security=SecurityScopes(read=["sql:select"], write=["product:patch"]),
         )
 
         # To protobuf
         pb = original.to_protobuf(context_unit_pb2)
         assert pb.unit_id == str(original.unit_id)
-        assert pb.payload["tenant_id"] == "nszu"
+        assert pb.payload["tenant_id"] == "tenant_a"
         assert list(pb.security.read) == ["sql:select"]
         assert list(pb.security.write) == ["product:patch"]
 
         # From protobuf
         restored = ContextUnit.from_protobuf(pb)
         assert restored.unit_id == original.unit_id
-        assert restored.payload["tenant_id"] == "nszu"
+        assert restored.payload["tenant_id"] == "tenant_a"
         assert restored.payload["count"] == 42
         assert restored.security.read == original.security.read
         assert restored.security.write == original.security.write
@@ -352,12 +352,12 @@ class TestTokenLifecycle:
             user_ctx={"user_id": "u1"},
             permissions=["catalog:read", "brain:search"],
             ttl_s=3600,
-            allowed_tenants=["nszu"],
+            allowed_tenants=["tenant_a"],
         )
         assert token.token_id
         assert "catalog:read" in token.permissions
         assert "brain:search" in token.permissions
-        assert "nszu" in token.allowed_tenants
+        assert "tenant_a" in token.allowed_tenants
         assert token.exp_unix is not None
         assert token.exp_unix > time.time()
         assert token.revocation_id is not None
@@ -377,7 +377,7 @@ class TestTokenLifecycle:
             user_ctx={},
             permissions=["test:read", "test:write"],
             ttl_s=3600,
-            allowed_tenants=["traverse"],
+            allowed_tenants=["tenant_b"],
         )
 
         wire = serialize_token(original, backend=backend)
@@ -502,8 +502,8 @@ class TestPolicyEngineConditionContracts:
         from contextcore.tokens import ContextToken
         from contextshield.policy import TenantCondition
 
-        cond = TenantCondition("nszu")
-        token = ContextToken(token_id="t1", allowed_tenants=("nszu",))
+        cond = TenantCondition("tenant_a")
+        token = ContextToken(token_id="t1", allowed_tenants=("tenant_a",))
         assert cond.evaluate(token, {})
 
     def test_tenant_condition_context_reference(self):
@@ -512,8 +512,8 @@ class TestPolicyEngineConditionContracts:
         from contextshield.policy import TenantCondition
 
         cond = TenantCondition("context.tenant_id")
-        token = ContextToken(token_id="t1", allowed_tenants=("nszu",))
-        assert cond.evaluate(token, {"tenant_id": "nszu"})
+        token = ContextToken(token_id="t1", allowed_tenants=("tenant_a",))
+        assert cond.evaluate(token, {"tenant_id": "tenant_a"})
         assert not cond.evaluate(token, {"tenant_id": "other"})
 
     def test_operation_condition(self):
@@ -699,7 +699,7 @@ class TestAuditEventContract:
         event = AuditEvent(
             event_type=AuditEventType.TOKEN_MINT,
             actor="admin",
-            tenant="nszu",
+            tenant="tenant_a",
             details={"token_id": "t1"},
         )
         d = event.to_dict()
@@ -722,7 +722,7 @@ class TestAuditEventContract:
             latency_ms=1.5,
             request_id="r1",
             actor="user",
-            tenant="nszu",
+            tenant="tenant_a",
             input_preview="test",
         )
 
@@ -735,7 +735,7 @@ class TestAuditEventContract:
             "mint",
             token_id="tok-123",
             actor="admin",
-            tenant="traverse",
+            tenant="tenant_b",
             request_id="r2",
         )
 
@@ -749,7 +749,7 @@ class TestAuditEventContract:
             policy_name="rate-limit",
             permissions=["write"],
             actor="user",
-            tenant="nszu",
+            tenant="tenant_a",
         )
 
 
@@ -769,29 +769,29 @@ class TestServiceDiscoveryContract:
             service="brain",
             instance="shared",
             endpoint="localhost:50051",
-            tenants=["traverse", "pinkpony"],
+            tenants=["tenant_b", "tenant_c"],
             metadata={"version": "0.10.0"},
         )
         assert info.service == "brain"
         assert info.instance == "shared"
         assert info.endpoint == "localhost:50051"
-        assert "traverse" in info.tenants
+        assert "tenant_b" in info.tenants
 
     def test_serves_tenant_shared(self):
         """Empty tenants list = shared service that serves all tenants."""
         from contextcore.discovery import ServiceInfo
 
         info = ServiceInfo(service="brain", instance="shared", endpoint="x", tenants=[])
-        assert info.serves_tenant("nszu")
+        assert info.serves_tenant("tenant_a")
         assert info.serves_tenant("any-tenant")
 
     def test_serves_tenant_scoped(self):
         """Scoped service only serves listed tenants."""
         from contextcore.discovery import ServiceInfo
 
-        info = ServiceInfo(service="brain", instance="nszu", endpoint="x", tenants=["nszu"])
-        assert info.serves_tenant("nszu")
-        assert not info.serves_tenant("traverse")
+        info = ServiceInfo(service="brain", instance="tenant_a", endpoint="x", tenants=["tenant_a"])
+        assert info.serves_tenant("tenant_a")
+        assert not info.serves_tenant("tenant_b")
 
     def test_discovery_functions_exist(self):
         """All discovery functions must be importable from contextcore."""

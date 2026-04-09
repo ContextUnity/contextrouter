@@ -429,11 +429,11 @@ class TestTenantIsolation:
     """Verify that tools bound to a tenant reject tokens from other tenants."""
 
     def test_cross_tenant_blocked(self, raw_tool):
-        """Token for tenant 'hospital_B' cannot execute tool bound to 'nszu'."""
-        secure = SecureTool.wrap(raw_tool, permission="tool:raw_dummy", tenant="nszu")
+        """Token for tenant 'tenant_y' cannot execute tool bound to 'tenant_a'."""
+        secure = SecureTool.wrap(raw_tool, permission="tool:raw_dummy", tenant="tenant_a")
         token = _make_token(
             permissions=("tool:raw_dummy",),
-            allowed_tenants=("hospital_B",),
+            allowed_tenants=("tenant_y",),
         )
         ref = _set_token(token)
         try:
@@ -443,11 +443,11 @@ class TestTenantIsolation:
             _reset_token(ref)
 
     def test_same_tenant_allowed(self, raw_tool):
-        """Token for tenant 'nszu' CAN execute tool bound to 'nszu'."""
-        secure = SecureTool.wrap(raw_tool, permission="tool:raw_dummy", tenant="nszu")
+        """Token for tenant 'tenant_a' CAN execute tool bound to 'tenant_a'."""
+        secure = SecureTool.wrap(raw_tool, permission="tool:raw_dummy", tenant="tenant_a")
         token = _make_token(
             permissions=("tool:raw_dummy",),
-            allowed_tenants=("nszu",),
+            allowed_tenants=("tenant_a",),
         )
         ref = _set_token(token)
         try:
@@ -457,11 +457,11 @@ class TestTenantIsolation:
             _reset_token(ref)
 
     def test_multi_tenant_token_allowed(self, raw_tool):
-        """Token with multiple tenants including 'nszu' can access 'nszu' tools."""
-        secure = SecureTool.wrap(raw_tool, tenant="nszu")
+        """Token with multiple tenants including 'tenant_a' can access 'tenant_a' tools."""
+        secure = SecureTool.wrap(raw_tool, tenant="tenant_a")
         token = _make_token(
             permissions=("tool:raw_dummy",),
-            allowed_tenants=("hospital_A", "nszu", "hospital_C"),
+            allowed_tenants=("tenant_x", "tenant_a", "tenant_z"),
         )
         ref = _set_token(token)
         try:
@@ -487,21 +487,21 @@ class TestTenantIsolation:
 
     def test_wrap_propagates_tenant(self, raw_tool):
         """wrap() stores tenant in bound_tenant."""
-        secure = SecureTool.wrap(raw_tool, tenant="nszu")
-        assert secure.bound_tenant == "nszu"
+        secure = SecureTool.wrap(raw_tool, tenant="tenant_a")
+        assert secure.bound_tenant == "tenant_a"
 
     def test_wrap_idempotent_sets_tenant(self):
         """Wrapping a SecureTool without tenant sets it if provided."""
         st = SecureTool(name="test", description="test")
         assert st.bound_tenant == ""
-        SecureTool.wrap(st, tenant="nszu")
-        assert st.bound_tenant == "nszu"
+        SecureTool.wrap(st, tenant="tenant_a")
+        assert st.bound_tenant == "tenant_a"
 
     def test_wrap_does_not_override_tenant(self):
         """Wrapping a SecureTool with existing tenant doesn't override."""
-        st = SecureTool(name="test", description="test", bound_tenant="nszu")
+        st = SecureTool(name="test", description="test", bound_tenant="tenant_a")
         SecureTool.wrap(st, tenant="other")
-        assert st.bound_tenant == "nszu"  # preserved
+        assert st.bound_tenant == "tenant_a"  # preserved
 
     def test_register_tool_with_tenant(self, raw_tool):
         """register_tool(tenant=...) binds tenant to the tool."""
@@ -509,24 +509,24 @@ class TestTenantIsolation:
 
         original_registry = _tool_registry.copy()
         try:
-            register_tool(raw_tool, permission="tool:raw_dummy", tenant="nszu")
+            register_tool(raw_tool, permission="tool:raw_dummy", tenant="tenant_a")
             registered = _tool_registry["raw_dummy"]
             assert isinstance(registered, SecureTool)
-            assert registered.bound_tenant == "nszu"
+            assert registered.bound_tenant == "tenant_a"
         finally:
             _tool_registry.clear()
             _tool_registry.update(original_registry)
 
     def test_tenant_in_repr(self, raw_tool):
         """Bound tenant appears in repr."""
-        secure = SecureTool.wrap(raw_tool, tenant="nszu")
+        secure = SecureTool.wrap(raw_tool, tenant="tenant_a")
         r = repr(secure)
-        assert "tenant='nszu'" in r
+        assert "tenant='tenant_a'" in r
 
     @pytest.mark.asyncio
     async def test_async_cross_tenant_blocked(self, raw_tool):
         """Async execution also enforces tenant."""
-        secure = SecureTool.wrap(raw_tool, tenant="nszu")
+        secure = SecureTool.wrap(raw_tool, tenant="tenant_a")
         token = _make_token(
             permissions=("tool:raw_dummy",),
             allowed_tenants=("other_project",),
@@ -540,7 +540,7 @@ class TestTenantIsolation:
 
     def test_infra_tool_skips_tenant_check(self, raw_tool):
         """mark_infra() tools skip tenant check even if bound."""
-        secure = SecureTool.wrap(raw_tool, tenant="nszu")
+        secure = SecureTool.wrap(raw_tool, tenant="tenant_a")
         secure = SecureTool.mark_infra(secure)
         # No token at all — should still execute (infra skips everything)
         ref = _set_token(None)
@@ -552,7 +552,7 @@ class TestTenantIsolation:
 
     def test_admin_all_bypasses_tenant_isolation(self, raw_tool):
         """admin:all permission allows access to any tenant-bound tool."""
-        secure = SecureTool.wrap(raw_tool, tenant="nszu")
+        secure = SecureTool.wrap(raw_tool, tenant="tenant_a")
         token = _make_token(
             permissions=("admin:all",),
             allowed_tenants=(),  # empty — admin sees all
@@ -566,10 +566,10 @@ class TestTenantIsolation:
 
     def test_admin_all_with_specific_tenant_also_works(self, raw_tool):
         """admin:all with explicit tenants still works."""
-        secure = SecureTool.wrap(raw_tool, tenant="nszu")
+        secure = SecureTool.wrap(raw_tool, tenant="tenant_a")
         token = _make_token(
             permissions=("admin:all",),
-            allowed_tenants=("other",),  # doesn't include nszu, but admin:all bypasses
+            allowed_tenants=("other",),  # doesn't include tenant_a, but admin:all bypasses
         )
         ref = _set_token(token)
         try:

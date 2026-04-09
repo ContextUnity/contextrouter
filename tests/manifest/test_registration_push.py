@@ -31,21 +31,21 @@ class DummyService(RegistrationMixin):
 
 
 @pytest.fixture
-def nszu_bundle() -> dict:
+def test_bundle() -> dict:
     """Pre-compiled registration bundle (as output from ArtifactGenerator)."""
     return {
-        "project_id": "nszu",
-        "tenant_id": "nszu",
+        "project_id": "tenant_a",
+        "tenant_id": "tenant_a",
         "graph": {
-            "id": "nszu",
+            "id": "tenant_a",
             "template": "sql_analytics",
             "config": {
-                "planner_prompt": "You are 医療 analyst",
+                "planner_prompt": "You are test analyst",
             },
         },
         "tools": [
             {
-                "name": "execute_medical_sql",
+                "name": "execute_test_sql",
                 "type": "sql",
                 "description": "Execute SQL on medical DB",
                 "config": {"read_only": True},
@@ -53,7 +53,7 @@ def nszu_bundle() -> dict:
             }
         ],
         "policy": {
-            "allowed_tools": ["execute_medical_sql"],
+            "allowed_tools": ["execute_test_sql"],
         },
     }
 
@@ -64,8 +64,8 @@ def _make_mock_token():
 
     return ContextToken(
         token_id="test-register",
-        permissions=("tools:register", "tools:register:nszu"),
-        allowed_tenants=("nszu",),
+        permissions=("tools:register", "tools:register:tenant_a"),
+        allowed_tenants=("tenant_a",),
     )
 
 
@@ -74,7 +74,7 @@ def _make_context(project_secret: str | None = None):
     from contextcore.token_utils import serialize_token
 
     token = _make_mock_token()
-    backend = HmacBackend("nszu", project_secret or "bootstrap-secret")
+    backend = HmacBackend("tenant_a", project_secret or "bootstrap-secret")
     token_str = serialize_token(token, backend=backend)
     context = MagicMock()
     context.invocation_metadata.return_value = [("authorization", f"Bearer {token_str}")]
@@ -82,11 +82,11 @@ def _make_context(project_secret: str | None = None):
 
 
 @pytest.mark.asyncio
-async def test_register_manifest_success(nszu_bundle):
+async def test_register_manifest_success(test_bundle):
     service = DummyService()
 
     mock_unit = MagicMock()
-    mock_unit.payload = {"bundle": nszu_bundle, "hash": "abcd123"}
+    mock_unit.payload = {"bundle": test_bundle, "hash": "abcd123"}
     mock_unit.trace_id = __import__("uuid").uuid4()
     from contextcore import SecurityScopes
 
@@ -109,23 +109,23 @@ async def test_register_manifest_success(nszu_bundle):
 
         assert payload_dict["status"] == "ok"
         assert payload_dict["hash_matched"] is False
-        assert payload_dict["graph"] == "nszu"
-        assert "execute_medical_sql" in payload_dict["registered_tools"]
-        assert "execute_medical_sql" in service._project_tools["nszu"]
+        assert payload_dict["graph"] == "tenant_a"
+        assert "execute_test_sql" in payload_dict["registered_tools"]
+        assert "execute_test_sql" in service._project_tools["tenant_a"]
 
 
 @pytest.mark.asyncio
-async def test_register_manifest_hash_match(nszu_bundle):
+async def test_register_manifest_hash_match(test_bundle):
     service = DummyService()
     service.mock_hash_match = True
 
     # Pre-populate with existing tools so hash-match path has something to return
-    service._project_tools["nszu"] = ["execute_medical_sql"]
-    service._project_graphs["nszu"] = "project:nszu:nszu"
-    service._stream_secrets["nszu"] = "existing-secret"
+    service._project_tools["tenant_a"] = ["execute_test_sql"]
+    service._project_graphs["tenant_a"] = "project:tenant_a:tenant_a"
+    service._stream_secrets["tenant_a"] = "existing-secret"
 
     mock_unit = MagicMock()
-    mock_unit.payload = {"bundle": nszu_bundle, "hash": "abcd123"}
+    mock_unit.payload = {"bundle": test_bundle, "hash": "abcd123"}
     mock_unit.trace_id = __import__("uuid").uuid4()
     from contextcore import SecurityScopes
 
@@ -155,9 +155,9 @@ async def test_register_manifest_rejects_bundle_with_project_secret():
 
     # Bundle with project_secret — should be rejected
     bad_bundle = {
-        "project_id": "nszu",
-        "tenant_id": "nszu",
-        "graph": {"id": "nszu", "template": "sql_analytics", "config": {}},
+        "project_id": "tenant_a",
+        "tenant_id": "tenant_a",
+        "graph": {"id": "tenant_a", "template": "sql_analytics", "config": {}},
         "tools": [],
         "policy": {},
         "project_secret": "leaked-secret",
@@ -182,12 +182,12 @@ async def test_register_manifest_rejects_bundle_with_project_secret():
 
 
 @pytest.mark.asyncio
-async def test_register_manifest_no_token_rejects(nszu_bundle):
+async def test_register_manifest_no_token_rejects(test_bundle):
     """Security always enforced: no token → PermissionError."""
     service = DummyService()
 
     mock_unit = MagicMock()
-    mock_unit.payload = {"bundle": nszu_bundle, "hash": "abcd123"}
+    mock_unit.payload = {"bundle": test_bundle, "hash": "abcd123"}
     mock_unit.trace_id = __import__("uuid").uuid4()
     from contextcore import SecurityScopes
 

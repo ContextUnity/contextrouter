@@ -1,6 +1,6 @@
 [project]
 name = "contextrouter"
-version = "0.17.3"
+version = "0.18.0"
 description = "The Mind of ContextUnity — modular LangGraph agent orchestration, plugin architecture, multi-model routing, and RAG pipeline coordination"
 readme = "README.md"
 requires-python = "==3.13.*"
