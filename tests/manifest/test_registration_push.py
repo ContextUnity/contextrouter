@@ -97,6 +97,9 @@ async def test_register_manifest_success(nszu_bundle):
         patch("contextcore.discovery.verify_project_owner", return_value=True),
         patch("contextcore.discovery.register_project"),
         patch("contextcore.token_utils.verify_token_string", return_value=_make_mock_token()),
+        patch(
+            "contextcore.discovery.get_project_key", return_value={"project_secret": "mock_secret"}
+        ),
     ):
         response = await service.RegisterManifest(request=MagicMock(), context=_make_context())
 
@@ -133,6 +136,9 @@ async def test_register_manifest_hash_match(nszu_bundle):
         patch("contextcore.discovery.verify_project_owner", return_value=True),
         patch("contextcore.discovery.register_project"),
         patch("contextcore.token_utils.verify_token_string", return_value=_make_mock_token()),
+        patch(
+            "contextcore.discovery.get_project_key", return_value={"project_secret": "mock_secret"}
+        ),
     ):
         # Hash matches so it should skip registration
         response = await service.RegisterManifest(request=MagicMock(), context=_make_context())
