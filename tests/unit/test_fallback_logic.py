@@ -2,10 +2,10 @@
 
 import pytest
 
-from contextrouter.core.config import Config
-from contextrouter.modules.models.base import BaseModel
-from contextrouter.modules.models.registry import FallbackModel
-from contextrouter.modules.models.types import (
+from contextunity.router.core.config import Config
+from contextunity.router.modules.models.base import BaseModel
+from contextunity.router.modules.models.registry import FallbackModel
+from contextunity.router.modules.models.types import (
     ImagePart,
     ModelCapabilities,
     ModelRequest,
@@ -40,7 +40,7 @@ class MockModel(BaseModel):
     async def stream(self, request, *, token=None):
         if self._should_fail:
             raise Exception("Mock failure")
-        from contextrouter.modules.models.types import FinalTextEvent, TextDeltaEvent
+        from contextunity.router.modules.models.types import FinalTextEvent, TextDeltaEvent
 
         yield TextDeltaEvent(delta=self._response_text)
         yield FinalTextEvent(text=self._response_text)

@@ -1,10 +1,10 @@
 """Test: no direct os.getenv / os.environ usage outside core/config.
 
-This conformance test scans the contextrouter codebase and **fails** if any
+This conformance test scans the cu.router codebase and **fails** if any
 Python file outside `core/config/` reads `os.environ` or `os.getenv` directly.
 
 All configuration must flow through the Config system:
-  - `from contextrouter.core import get_core_config`
+  - `from contextunity.router.core import get_core_config`
   - `get_core_config().section.field`
 
 The ONLY permitted files are:
@@ -20,11 +20,11 @@ import ast
 import sys
 from pathlib import Path
 
-# Root of the contextrouter package
-# tests/unit/test_no_direct_env.py → ../../src/contextrouter
+# Root of the cu.router package
+# tests/unit/test_no_direct_env.py → ../../src/cu.router
 _TESTS_DIR = Path(__file__).resolve().parent.parent  # tests/
-_PROJECT_ROOT = _TESTS_DIR.parent  # services/contextrouter/
-_PKG_ROOT = _PROJECT_ROOT / "src" / "contextrouter"
+_PROJECT_ROOT = _TESTS_DIR.parent  # services/router/
+_PKG_ROOT = _PROJECT_ROOT / "src" / "contextunity" / "router"
 
 # Files that are allowed to access os.environ / os.getenv
 _ALLOWED_FILES = {
@@ -125,7 +125,7 @@ def test_no_direct_os_environ_usage():
             "All configuration must go through get_core_config().\n"
             "Only core/config/base.py is allowed to access os.environ.\n\n"
             "Violations:\n" + "\n".join(all_violations) + "\n\n"
-            "Fix: Replace with `from contextrouter.core import get_core_config`\n"
+            "Fix: Replace with `from contextunity.router.core import get_core_config`\n"
             "     then use `get_core_config().section.field`\n"
         )
         raise AssertionError(msg)

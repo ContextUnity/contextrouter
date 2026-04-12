@@ -1,0 +1,37 @@
+"""Runner entrypoints.
+
+Runners are thin, host-facing adapters around graphs:
+- Provide stable Python APIs (invoke/stream).
+- Normalize LangGraph event streams into higher-level progress events where needed.
+"""
+
+from __future__ import annotations
+
+import importlib
+from typing import Any
+
+__all__ = [
+    # Chat / RAG retrieval runner
+    "create_input_from_query",
+    "invoke_agent",
+    "invoke_agent_sync",
+    "stream_agent",
+]
+
+
+_EXPORTS: dict[str, str] = {
+    # Chat
+    "create_input_from_query": "contextunity.router.cortex.runners.chat.create_input_from_query",
+    "invoke_agent": "contextunity.router.cortex.runners.chat.invoke_agent",
+    "invoke_agent_sync": "contextunity.router.cortex.runners.chat.invoke_agent_sync",
+    "stream_agent": "contextunity.router.cortex.runners.chat.stream_agent",
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name not in _EXPORTS:
+        raise AttributeError(name)
+    path = _EXPORTS[name]
+    mod_name, attr = path.rsplit(".", 1)
+    mod = importlib.import_module(mod_name)
+    return getattr(mod, attr)

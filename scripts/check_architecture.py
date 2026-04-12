@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Architecture enforcement checks for ContextRouter.
+"""Architecture enforcement checks for cu.router.
 
 This script runs as part of CI/pre-commit to catch architectural violations.
 Exit code 0 = all checks passed, non-zero = violations found.
@@ -14,14 +14,14 @@ import sys
 from pathlib import Path
 
 # Where to check
-CORTEX_GRAPHS = "src/contextrouter/cortex/graphs"
+CORTEX_GRAPHS = "src/cu.router/cortex/graphs"
 
 # Patterns that violate architecture
 VIOLATIONS = [
     {
         "name": "Direct LLM provider import",
-        "pattern": r"from contextrouter\.modules\.models\.llm\.(openai|anthropic|vertex|groq|runpod|local_openai)",
-        "message": "Use `from contextrouter.modules.models import model_registry` instead",
+        "pattern": r"from contextunity.router\.modules\.models\.llm\.(openai|anthropic|vertex|groq|runpod|local_openai)",
+        "message": "Use `from contextunity.router.modules.models import model_registry` instead",
         "exclude": [],
     },
     {
@@ -44,8 +44,8 @@ VIOLATIONS = [
     },
     {
         "name": "Deprecated SerperSearch import (moved to connectors)",
-        "pattern": r"from contextrouter\.modules\.models\.llm\.serper",
-        "message": "Serper moved to connectors: `from contextrouter.modules.connectors.serper import SerperSearchConnector`",
+        "pattern": r"from contextunity.router\.modules\.models\.llm\.serper",
+        "message": "Serper moved to connectors: `from contextunity.router.modules.connectors.serper import SerperSearchConnector`",
         "exclude": [],
     },
     {

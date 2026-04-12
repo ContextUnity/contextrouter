@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
-from contextrouter import get_dispatcher_service, invoke_dispatcher, stream_dispatcher
+from contextunity.router import get_dispatcher_service, invoke_dispatcher, stream_dispatcher
 
 
 async def example_invoke() -> None:

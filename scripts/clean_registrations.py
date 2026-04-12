@@ -3,11 +3,11 @@ import asyncio
 import sys
 
 import redis.asyncio as aioredis
-from contextcore import get_context_unit_logger
+from contextunity.core import get_contextunit_logger
 
-from contextrouter.core import get_core_config
+from contextunity.router.core import get_core_config
 
-logger = get_context_unit_logger("clean_registrations")
+logger = get_contextunit_logger("clean_registrations")
 
 _REDIS_PREFIX = "router:registrations"
 

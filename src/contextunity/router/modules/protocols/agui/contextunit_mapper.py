@@ -1,0 +1,34 @@
+"""ContextUnit -> AG-UI mapping helpers.
+
+Transforms ContextUnit payloads into frontend-friendly AG-UI event dicts.
+This is intentionally minimal and additive (does not change existing SSE shapes).
+"""
+
+from __future__ import annotations
+
+from contextunity.core import ContextUnit
+
+from contextunity.router.modules.retrieval.rag.formatting.citations import format_citations_to_ui
+
+from .events import AguiEventDict
+
+
+def contextunit_to_agui_event(unit: ContextUnit) -> AguiEventDict:
+    """Convert ContextUnit into a generic AG-UI event payload."""
+
+    payload = unit.payload or {}
+    token_id = payload.get("token_id") if isinstance(payload, dict) else None
+
+    return {
+        "type": "ContextUnit",
+        "tokenId": token_id,
+        "provenance": list(unit.provenance or []),
+        "citations": format_citations_to_ui(
+            payload.get("citations", []) if isinstance(payload, dict) else []
+        ),
+        "metadata": payload.get("metadata", {}) if isinstance(payload, dict) else {},
+        "data": payload.get("data") or payload.get("content"),
+    }
+
+
+__all__ = ["contextunit_to_agui_event"]

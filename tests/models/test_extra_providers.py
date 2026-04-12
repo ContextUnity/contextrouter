@@ -5,11 +5,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # Mock modules as needed via tests, do not mock globally.
-from contextrouter.modules.models.llm.groq import GroqLLM  # noqa: E402
-from contextrouter.modules.models.llm.hf_hub import HuggingFaceHubLLM  # noqa: E402
-from contextrouter.modules.models.llm.inception import InceptionLLM  # noqa: E402
-from contextrouter.modules.models.llm.runpod import RunPodLLM  # noqa: E402
-from contextrouter.modules.models.types import (  # noqa: E402
+from contextunity.router.modules.models.llm.groq import GroqLLM  # noqa: E402
+from contextunity.router.modules.models.llm.hf_hub import HuggingFaceHubLLM  # noqa: E402
+from contextunity.router.modules.models.llm.inception import InceptionLLM  # noqa: E402
+from contextunity.router.modules.models.llm.runpod import RunPodLLM  # noqa: E402
+from contextunity.router.modules.models.types import (  # noqa: E402
     ModelCapabilities,
     ModelRequest,
     TextPart,

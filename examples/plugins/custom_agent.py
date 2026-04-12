@@ -1,4 +1,4 @@
-"""Example custom agent plugin for ContextRouter.
+"""Example custom agent plugin for cu.router.
 
 This demonstrates how to add custom agents without modifying the core codebase.
 Place this file in a directory listed in your settings.toml [plugins].paths
@@ -6,7 +6,7 @@ Place this file in a directory listed in your settings.toml [plugins].paths
 
 from __future__ import annotations
 
-from contextrouter.core.registry import register_agent, register_transformer
+from contextunity.router.core.registry import register_agent, register_transformer
 
 
 @register_agent("custom_research_agent")

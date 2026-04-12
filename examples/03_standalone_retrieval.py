@@ -1,12 +1,12 @@
 """Example of using the RetrievalPipeline standalone.
 
-ContextRouter allows using individual modules without running the full LangGraph agent.
+cu.router allows using individual modules without running the full LangGraph agent.
 """
 
 import asyncio
 
-from contextrouter.core.config import get_core_config
-from contextrouter.modules.retrieval import RetrievalPipeline
+from contextunity.router.core.config import get_core_config
+from contextunity.router.modules.retrieval import RetrievalPipeline
 
 
 async def main():

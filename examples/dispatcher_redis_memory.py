@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import asyncio
 
-from contextrouter import invoke_dispatcher
-from contextrouter.modules.tools.redis_memory import (
+from contextunity.router import invoke_dispatcher
+from contextunity.router.modules.tools.redis_memory import (
     cache_query_result,
     clear_memory,
     get_cached_query,

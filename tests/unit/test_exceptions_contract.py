@@ -1,25 +1,25 @@
-"""Contract tests for contextrouter exception hierarchy.
+"""Contract tests for cu.router exception hierarchy.
 
 Verifies that:
 1. ContextrouterError inherits from ContextUnityError (centralized hierarchy)
 2. All error subclasses have stable error codes
 3. ErrorRegistry contains expected base codes
-4. gRPC error handlers are importable from contextcore
+4. gRPC error handlers are importable from contextunity.core
 """
 
 from __future__ import annotations
 
-from contextcore.exceptions import ContextUnityError, error_registry
+from contextunity.core.exceptions import ContextUnityError, error_registry
 
-from contextrouter.core.exceptions import ContextrouterError
+from contextunity.router.core.exceptions import ContextrouterError
 
 
-def test_contextrouter_error_inherits_from_core() -> None:
+def test_cu_router_error_inherits_from_core() -> None:
     """ContextrouterError must be a subclass of ContextUnityError."""
     assert issubclass(ContextrouterError, ContextUnityError)
 
 
-def test_contextrouter_error_has_code() -> None:
+def test_cu_router_error_has_code() -> None:
     """ContextrouterError must have a valid code from parent."""
     code = getattr(ContextrouterError, "code", None)
     assert isinstance(code, str) and code.strip()
@@ -42,8 +42,8 @@ def test_error_registry_contains_base_codes() -> None:
 
 
 def test_grpc_handlers_importable() -> None:
-    """gRPC error handlers must be importable from contextcore."""
-    from contextcore.exceptions import grpc_error_handler, grpc_stream_error_handler
+    """gRPC error handlers must be importable from contextunity.core."""
+    from contextunity.core.exceptions import grpc_error_handler, grpc_stream_error_handler
 
     assert callable(grpc_error_handler)
     assert callable(grpc_stream_error_handler)

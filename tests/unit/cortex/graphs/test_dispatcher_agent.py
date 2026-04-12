@@ -17,7 +17,7 @@ class TestDispatcherState:
     """Verify DispatcherState TypedDict has all required keys."""
 
     def test_state_has_required_keys(self):
-        from contextrouter.cortex.graphs.dispatcher_agent.state import DispatcherState
+        from contextunity.router.cortex.graphs.dispatcher_agent.state import DispatcherState
 
         annotations = DispatcherState.__annotations__
         required = {
@@ -46,7 +46,7 @@ class TestDispatcherState:
         """Ensure messages field uses langgraph add_messages annotation."""
         from typing import get_type_hints
 
-        from contextrouter.cortex.graphs.dispatcher_agent.state import DispatcherState
+        from contextunity.router.cortex.graphs.dispatcher_agent.state import DispatcherState
 
         hints = get_type_hints(DispatcherState, include_extras=True)
         messages_hint = hints["messages"]
@@ -66,7 +66,7 @@ class TestShouldExecuteTools:
         return {"messages": [last_message], "iteration": 1}
 
     def test_returns_execute_when_tool_calls_present(self):
-        from contextrouter.cortex.graphs.dispatcher_agent.routing import should_execute_tools
+        from contextunity.router.cortex.graphs.dispatcher_agent.routing import should_execute_tools
 
         msg = MagicMock()
         msg.tool_calls = [{"name": "search", "id": "1"}]
@@ -76,7 +76,7 @@ class TestShouldExecuteTools:
         assert should_execute_tools(state) == "execute"
 
     def test_returns_blocked_on_security_violation(self):
-        from contextrouter.cortex.graphs.dispatcher_agent.routing import should_execute_tools
+        from contextunity.router.cortex.graphs.dispatcher_agent.routing import should_execute_tools
 
         msg = MagicMock()
         msg.tool_calls = []
@@ -86,7 +86,7 @@ class TestShouldExecuteTools:
         assert should_execute_tools(state) == "blocked"
 
     def test_returns_blocked_on_tool_error(self):
-        from contextrouter.cortex.graphs.dispatcher_agent.routing import should_execute_tools
+        from contextunity.router.cortex.graphs.dispatcher_agent.routing import should_execute_tools
 
         msg = MagicMock()
         msg.tool_calls = []
@@ -96,7 +96,7 @@ class TestShouldExecuteTools:
         assert should_execute_tools(state) == "blocked"
 
     def test_returns_end_when_no_tool_calls(self):
-        from contextrouter.cortex.graphs.dispatcher_agent.routing import should_execute_tools
+        from contextunity.router.cortex.graphs.dispatcher_agent.routing import should_execute_tools
 
         msg = MagicMock()
         msg.tool_calls = []
@@ -106,7 +106,7 @@ class TestShouldExecuteTools:
         assert should_execute_tools(state) == "end"
 
     def test_returns_end_for_plain_message(self):
-        from contextrouter.cortex.graphs.dispatcher_agent.routing import should_execute_tools
+        from contextunity.router.cortex.graphs.dispatcher_agent.routing import should_execute_tools
 
         msg = MagicMock(spec=[])  # no tool_calls attr
         msg.content = "Plain text response"
@@ -126,7 +126,7 @@ class TestShouldContinue:
         }
 
     def test_returns_tools_when_tool_calls(self):
-        from contextrouter.cortex.graphs.dispatcher_agent.routing import should_continue
+        from contextunity.router.cortex.graphs.dispatcher_agent.routing import should_continue
 
         msg = MagicMock()
         msg.tool_calls = [{"name": "brain_search", "id": "1"}]
@@ -136,7 +136,7 @@ class TestShouldContinue:
         assert should_continue(state) == "tools"
 
     def test_returns_end_when_max_iterations_reached(self):
-        from contextrouter.cortex.graphs.dispatcher_agent.routing import should_continue
+        from contextunity.router.cortex.graphs.dispatcher_agent.routing import should_continue
 
         msg = MagicMock()
         msg.tool_calls = [{"name": "search", "id": "1"}]
@@ -145,7 +145,7 @@ class TestShouldContinue:
         assert should_continue(state) == "end"
 
     def test_returns_end_when_no_tool_calls(self):
-        from contextrouter.cortex.graphs.dispatcher_agent.routing import should_continue
+        from contextunity.router.cortex.graphs.dispatcher_agent.routing import should_continue
 
         msg = MagicMock()
         msg.tool_calls = []
@@ -164,17 +164,17 @@ class TestPrompts:
     """Verify system prompt is well-formed."""
 
     def test_system_prompt_not_empty(self):
-        from contextrouter.cortex.graphs.dispatcher_agent.prompts import SYSTEM_PROMPT
+        from contextunity.router.cortex.graphs.dispatcher_agent.prompts import SYSTEM_PROMPT
 
         assert len(SYSTEM_PROMPT) > 100, "System prompt should be substantial"
 
     def test_system_prompt_has_tool_section(self):
-        from contextrouter.cortex.graphs.dispatcher_agent.prompts import SYSTEM_PROMPT
+        from contextunity.router.cortex.graphs.dispatcher_agent.prompts import SYSTEM_PROMPT
 
         assert "Available Tools" in SYSTEM_PROMPT
 
     def test_system_prompt_has_security_section(self):
-        from contextrouter.cortex.graphs.dispatcher_agent.prompts import SYSTEM_PROMPT
+        from contextunity.router.cortex.graphs.dispatcher_agent.prompts import SYSTEM_PROMPT
 
         assert "Security" in SYSTEM_PROMPT or "Governance" in SYSTEM_PROMPT
 
@@ -187,19 +187,23 @@ class TestPrompts:
 class TestBuilderStructure:
     """Test that build_dispatcher_graph returns a valid StateGraph."""
 
-    @patch("contextrouter.cortex.graphs.dispatcher_agent.builder.discover_all_tools")
+    @patch("contextunity.router.cortex.graphs.dispatcher_agent.builder.discover_all_tools")
     def test_build_returns_state_graph(self, mock_tools):
         from langgraph.graph import StateGraph
 
-        from contextrouter.cortex.graphs.dispatcher_agent.builder import build_dispatcher_graph
+        from contextunity.router.cortex.graphs.dispatcher_agent.builder import (
+            build_dispatcher_graph,
+        )
 
         mock_tools.return_value = []
         graph = build_dispatcher_graph()
         assert isinstance(graph, StateGraph)
 
-    @patch("contextrouter.cortex.graphs.dispatcher_agent.builder.discover_all_tools")
+    @patch("contextunity.router.cortex.graphs.dispatcher_agent.builder.discover_all_tools")
     def test_build_graph_has_required_nodes(self, mock_tools):
-        from contextrouter.cortex.graphs.dispatcher_agent.builder import build_dispatcher_graph
+        from contextunity.router.cortex.graphs.dispatcher_agent.builder import (
+            build_dispatcher_graph,
+        )
 
         mock_tools.return_value = []
         graph = build_dispatcher_graph()
@@ -208,11 +212,13 @@ class TestBuilderStructure:
         assert "security" in node_names
         assert "reflect" in node_names
 
-    @patch("contextrouter.cortex.graphs.dispatcher_agent.builder.discover_all_tools")
+    @patch("contextunity.router.cortex.graphs.dispatcher_agent.builder.discover_all_tools")
     def test_build_graph_with_tools_has_tools_node(self, mock_tools):
         from langchain_core.tools import StructuredTool
 
-        from contextrouter.cortex.graphs.dispatcher_agent.builder import build_dispatcher_graph
+        from contextunity.router.cortex.graphs.dispatcher_agent.builder import (
+            build_dispatcher_graph,
+        )
 
         tool = StructuredTool.from_function(
             func=lambda x: x,
@@ -224,9 +230,9 @@ class TestBuilderStructure:
         graph = build_dispatcher_graph()
         assert "tools" in graph.nodes
 
-    @patch("contextrouter.cortex.graphs.dispatcher_agent.builder.discover_all_tools")
+    @patch("contextunity.router.cortex.graphs.dispatcher_agent.builder.discover_all_tools")
     def test_compile_returns_runnable(self, mock_tools):
-        from contextrouter.cortex.graphs.dispatcher_agent.builder import (
+        from contextunity.router.cortex.graphs.dispatcher_agent.builder import (
             compile_dispatcher_graph,
         )
 
@@ -244,30 +250,30 @@ class TestExports:
     """Ensure all __all__ exports are properly defined."""
 
     def test_nodes_init_exports(self):
-        from contextrouter.cortex.graphs.dispatcher_agent import nodes
+        from contextunity.router.cortex.graphs.dispatcher_agent import nodes
 
         assert hasattr(nodes, "agent_node")
         assert hasattr(nodes, "security_guard_node")
         assert hasattr(nodes, "reflect_dispatcher")
 
     def test_state_exports(self):
-        from contextrouter.cortex.graphs.dispatcher_agent.state import __all__
+        from contextunity.router.cortex.graphs.dispatcher_agent.state import __all__
 
         assert "DispatcherState" in __all__
 
     def test_routing_exports(self):
-        from contextrouter.cortex.graphs.dispatcher_agent.routing import __all__
+        from contextunity.router.cortex.graphs.dispatcher_agent.routing import __all__
 
         assert "should_execute_tools" in __all__
         assert "should_continue" in __all__
 
     def test_prompts_exports(self):
-        from contextrouter.cortex.graphs.dispatcher_agent.prompts import __all__
+        from contextunity.router.cortex.graphs.dispatcher_agent.prompts import __all__
 
         assert "SYSTEM_PROMPT" in __all__
 
     def test_builder_exports(self):
-        from contextrouter.cortex.graphs.dispatcher_agent.builder import __all__
+        from contextunity.router.cortex.graphs.dispatcher_agent.builder import __all__
 
         assert "build_dispatcher_graph" in __all__
         assert "compile_dispatcher_graph" in __all__

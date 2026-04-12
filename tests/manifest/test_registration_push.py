@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 import grpc
 import pytest
 
-from contextrouter.service.mixins.registration import RegistrationMixin
+from contextunity.router.service.mixins.registration import RegistrationMixin
 
 
 class DummyService(RegistrationMixin):
@@ -60,7 +60,7 @@ def test_bundle() -> dict:
 
 def _make_mock_token():
     """Create a valid ContextToken for test security."""
-    from contextcore.tokens import ContextToken
+    from contextunity.core.tokens import ContextToken
 
     return ContextToken(
         token_id="test-register",
@@ -70,8 +70,8 @@ def _make_mock_token():
 
 
 def _make_context(project_secret: str | None = None):
-    from contextcore.signing import HmacBackend
-    from contextcore.token_utils import serialize_token
+    from contextunity.core.signing import HmacBackend
+    from contextunity.core.token_utils import serialize_token
 
     token = _make_mock_token()
     backend = HmacBackend("tenant_a", project_secret or "bootstrap-secret")
@@ -88,17 +88,18 @@ async def test_register_manifest_success(test_bundle):
     mock_unit = MagicMock()
     mock_unit.payload = {"bundle": test_bundle, "hash": "abcd123"}
     mock_unit.trace_id = __import__("uuid").uuid4()
-    from contextcore import SecurityScopes
+    from contextunity.core import SecurityScopes
 
     mock_unit.security = SecurityScopes(write=["tools:register"])
 
     with (
-        patch("contextrouter.service.mixins.registration.parse_unit", return_value=mock_unit),
-        patch("contextcore.discovery.verify_project_owner", return_value=True),
-        patch("contextcore.discovery.register_project"),
-        patch("contextcore.token_utils.verify_token_string", return_value=_make_mock_token()),
+        patch("contextunity.router.service.mixins.registration.parse_unit", return_value=mock_unit),
+        patch("contextunity.core.discovery.verify_project_owner", return_value=True),
+        patch("contextunity.core.discovery.register_project"),
+        patch("contextunity.core.token_utils.verify_token_string", return_value=_make_mock_token()),
         patch(
-            "contextcore.discovery.get_project_key", return_value={"project_secret": "mock_secret"}
+            "contextunity.core.discovery.get_project_key",
+            return_value={"project_secret": "mock_secret"},
         ),
     ):
         response = await service.RegisterManifest(request=MagicMock(), context=_make_context())
@@ -127,17 +128,18 @@ async def test_register_manifest_hash_match(test_bundle):
     mock_unit = MagicMock()
     mock_unit.payload = {"bundle": test_bundle, "hash": "abcd123"}
     mock_unit.trace_id = __import__("uuid").uuid4()
-    from contextcore import SecurityScopes
+    from contextunity.core import SecurityScopes
 
     mock_unit.security = SecurityScopes(write=["tools:register"])
 
     with (
-        patch("contextrouter.service.mixins.registration.parse_unit", return_value=mock_unit),
-        patch("contextcore.discovery.verify_project_owner", return_value=True),
-        patch("contextcore.discovery.register_project"),
-        patch("contextcore.token_utils.verify_token_string", return_value=_make_mock_token()),
+        patch("contextunity.router.service.mixins.registration.parse_unit", return_value=mock_unit),
+        patch("contextunity.core.discovery.verify_project_owner", return_value=True),
+        patch("contextunity.core.discovery.register_project"),
+        patch("contextunity.core.token_utils.verify_token_string", return_value=_make_mock_token()),
         patch(
-            "contextcore.discovery.get_project_key", return_value={"project_secret": "mock_secret"}
+            "contextunity.core.discovery.get_project_key",
+            return_value={"project_secret": "mock_secret"},
         ),
     ):
         # Hash matches so it should skip registration
@@ -166,13 +168,13 @@ async def test_register_manifest_rejects_bundle_with_project_secret():
     mock_unit = MagicMock()
     mock_unit.payload = {"bundle": bad_bundle, "hash": "abcd123"}
     mock_unit.trace_id = __import__("uuid").uuid4()
-    from contextcore import SecurityScopes
+    from contextunity.core import SecurityScopes
 
     mock_unit.security = SecurityScopes(write=["tools:register"])
 
     with (
-        patch("contextrouter.service.mixins.registration.parse_unit", return_value=mock_unit),
-        patch("contextcore.token_utils.verify_token_string", return_value=_make_mock_token()),
+        patch("contextunity.router.service.mixins.registration.parse_unit", return_value=mock_unit),
+        patch("contextunity.core.token_utils.verify_token_string", return_value=_make_mock_token()),
     ):
         mock_context = _make_context()
         await service.RegisterManifest(request=MagicMock(), context=mock_context)
@@ -189,13 +191,13 @@ async def test_register_manifest_no_token_rejects(test_bundle):
     mock_unit = MagicMock()
     mock_unit.payload = {"bundle": test_bundle, "hash": "abcd123"}
     mock_unit.trace_id = __import__("uuid").uuid4()
-    from contextcore import SecurityScopes
+    from contextunity.core import SecurityScopes
 
     mock_unit.security = SecurityScopes(write=["tools:register"])
 
     with (
-        patch("contextrouter.service.mixins.registration.parse_unit", return_value=mock_unit),
-        patch("contextrouter.service.helpers.parse_unit", return_value=mock_unit),
+        patch("contextunity.router.service.mixins.registration.parse_unit", return_value=mock_unit),
+        patch("contextunity.router.service.helpers.parse_unit", return_value=mock_unit),
     ):
         mock_context = MagicMock()
         mock_context.invocation_metadata.return_value = []

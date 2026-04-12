@@ -4,11 +4,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from contextrouter.modules.tools.brain_trace_tools import (
+from contextunity.router.modules.tools.brain_trace_tools import (
     _get_auth_token_string,
     log_execution_trace,
 )
-from contextrouter.service.mixins.execution.helpers import BrainAutoTracer
+from contextunity.router.service.mixins.execution.helpers import BrainAutoTracer
 
 
 @pytest.fixture
@@ -29,21 +29,21 @@ def dummy_auto_tracer():
 class TestBrainTraceToolsTokenExtraction:
     def test_get_auth_token_string_success(self):
         """Should resolve the token string correctly from the runtime context."""
-        with patch("contextcore.authz.context.get_auth_context") as mock_ctx:
+        with patch("contextunity.core.authz.context.get_auth_context") as mock_ctx:
             mock_ctx.return_value = MagicMock(token_string="mock_token_123")
             token = _get_auth_token_string()
             assert token == "mock_token_123"
 
     def test_get_auth_token_string_none(self):
         """Should return None if get_auth_context returns None."""
-        with patch("contextcore.authz.context.get_auth_context") as mock_ctx:
+        with patch("contextunity.core.authz.context.get_auth_context") as mock_ctx:
             mock_ctx.return_value = None
             token = _get_auth_token_string()
             assert token is None
 
     def test_get_auth_token_string_exception(self):
         """Exception during resolution should gracefully return None."""
-        with patch("contextcore.authz.context.get_auth_context") as mock_ctx:
+        with patch("contextunity.core.authz.context.get_auth_context") as mock_ctx:
             mock_ctx.side_effect = RuntimeError("Context failure")
             token = _get_auth_token_string()
             assert token is None
@@ -51,7 +51,7 @@ class TestBrainTraceToolsTokenExtraction:
 
 @pytest.mark.asyncio
 class TestLogExecutionTrace:
-    @patch("contextrouter.modules.tools.brain_trace_tools._get_brain_client")
+    @patch("contextunity.router.modules.tools.brain_trace_tools._get_brain_client")
     async def test_trace_success(self, mock_get_client, dummy_auto_tracer):
         """Ensure log_execution_trace succeeds and returns trace_id."""
         mock_client = AsyncMock()
@@ -91,12 +91,12 @@ class TestLogExecutionTrace:
         assert result["trace_id"] == "tr-123"
         assert result["tenant_id"] == "default"
 
-    @patch("contextrouter.modules.tools.brain_trace_tools._get_brain_client")
+    @patch("contextunity.router.modules.tools.brain_trace_tools._get_brain_client")
     async def test_trace_graceful_failure(self, mock_get_client):
         """Trace fails gracefully (e.g., PERMISSION_DENIED) returning success: False."""
         from unittest.mock import AsyncMock
 
-        from contextcore.exceptions import ContextUnityError
+        from contextunity.core.exceptions import ContextUnityError
 
         mock_client = AsyncMock()
 

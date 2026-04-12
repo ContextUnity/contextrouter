@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from contextrouter.service.stream_executors import StreamExecutorManager
+from contextunity.router.service.stream_executors import StreamExecutorManager
 
 
 @pytest.fixture
@@ -70,7 +70,9 @@ class TestStreamExecutorExecution:
     def mock_auth_token(self):
         from unittest.mock import patch
 
-        with patch("contextrouter.cortex.runtime_context.get_current_access_token") as mock_get:
+        with patch(
+            "contextunity.router.cortex.runtime_context.get_current_access_token"
+        ) as mock_get:
             mock_token = MagicMock()
             mock_token.allowed_tenants = ["test_tenant"]
             mock_token.user_id = "test_user"

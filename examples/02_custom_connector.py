@@ -6,10 +6,10 @@ Connectors are responsible for fetching raw data from external sources.
 import asyncio
 from typing import AsyncIterator
 
-from contextcore import ContextUnit
+from contextunity.core import ContextUnit
 
-from contextrouter.core.interfaces import BaseConnector
-from contextrouter.core.registry import register_connector
+from contextunity.router.core.interfaces import BaseConnector
+from contextunity.router.core.registry import register_connector
 
 
 @register_connector("my_custom_api")
@@ -37,7 +37,7 @@ class MyCustomConnector(BaseConnector):
 
 
 async def main():
-    from contextrouter.core.registry import create_connector
+    from contextunity.router.core.registry import create_connector
 
     # Instantiate via registry (how the framework does it)
     connector = create_connector("my_custom_api", params={"api_url": "https://api.martinell.ai"})

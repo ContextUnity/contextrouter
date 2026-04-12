@@ -1,5 +1,5 @@
 [project]
-name = "contextrouter"
+name = "contextunity-router"
 version = "0.18.0"
 description = "The Mind of ContextUnity — modular LangGraph agent orchestration, plugin architecture, multi-model routing, and RAG pipeline coordination"
 readme = "README.md"
@@ -34,7 +34,7 @@ dependencies = [
     "httpx>=0.27.0",
     "psycopg[binary]>=3.1.0",
     "psycopg-pool>=3.2.0",
-    "contextcore>=0.5.1",
+    "contextunity-core>=0.5.1",
     "googlesearch-python>=1.3.0",
     "duckduckgo-search==7.2.1",
     "google-search-results>=2.4.2",
@@ -46,7 +46,7 @@ dependencies = [
 Homepage = "https://contextrouter.dev"
 Documentation = "https://contextrouter.dev"
 Repository = "https://github.com/ContextUnity/contextrouter"
-Issues = "https://github.com/ContextUnity/contextrouter/issues"
+Issues = "https://github.com/ContextUnity/cu/router/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -82,7 +82,7 @@ integrations = [
     "google-auth>=2.25.0,<3.0.0",
     "google-auth-oauthlib>=1.2.0,<2.0.0",
 ]
-# Ingestion capabilities moved to ContextBrain
+# Ingestion capabilities moved to cu.brain
 # Observability
 observability = [
     "langfuse>=2.0.0",
@@ -94,7 +94,7 @@ models-hf-hub = [
     "huggingface-hub>=0.20.0",
 ]
 models = [
-    "contextrouter[models-hf-hub]",
+    "contextunity-router[models-hf-hub]",
 ]
 # CPU-only local inference (heavy dependencies, development only)
 hf-transformers = [
@@ -105,22 +105,22 @@ hf-transformers = [
 hf-embeddings = [
     "sentence-transformers>=3.0.0",
 ]
-# Privacy proxy (ContextZero)
+# Privacy proxy (cu.zero)
 privacy = [
-    "contextzero>=0.2.2",
+    "contextunity-zero>=0.2.2",
 ]
-# Security framework (ContextShield)
+# Security framework (cu.shield)
 security = [
-    "contextshield>=0.4.2",
+    "contextunity-shield>=0.4.2",
 ]
 # Everything (for development/testing)
 all = [
-    "contextrouter[vertex,integrations,observability,privacy,security]"
+    "contextunity-router[vertex,integrations,observability,privacy,security]"
 ]
 
 # Experimental / optional bundle (may be unsatisfiable depending on resolver + platform)
 all_experimental = [
-    "contextrouter[all]"
+    "contextunity-router[all]"
 ]
 # Recursive Language Models for massive context processing (50k+ items)
 # Used for deep product matching, bulk taxonomy classification
@@ -130,7 +130,7 @@ rlm = [
 ]
 
 [project.scripts]
-contextrouter = "contextrouter.cli.app:main"
+contextrouter = "contextunity.router.cli.app:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -140,7 +140,7 @@ build-backend = "hatchling.build"
 # rlms is on PyPI — no git overrides needed
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/contextrouter"]
+packages = ["src/contextunity"]
 
 [tool.ruff]
 target-version = "py313"
@@ -165,7 +165,7 @@ dev = [
     "joblib>=1.4.0",
     "psycopg[binary]>=3.1.0",
     "psycopg-pool>=3.2.0",
-    "contextcore",
+    "contextunity-core",
 ]
 
 [tool.pytest.ini_options]

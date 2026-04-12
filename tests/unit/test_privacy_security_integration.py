@@ -36,17 +36,17 @@ class FakeGrpcContext:
 
 
 def _make_unit(payload: dict):
-    from contextcore import ContextUnit, context_unit_pb2
+    from contextunity.core import ContextUnit, contextunit_pb2
 
     unit = ContextUnit(
         payload=payload,
         provenance=["test:privacy_security"],
     )
-    return unit.to_protobuf(context_unit_pb2)
+    return unit.to_protobuf(contextunit_pb2)
 
 
 def _read_payload(unit_pb) -> dict:
-    from contextcore import ContextUnit
+    from contextunity.core import ContextUnit
 
     unit = ContextUnit.from_protobuf(unit_pb)
     return unit.payload or {}
@@ -54,9 +54,9 @@ def _read_payload(unit_pb) -> dict:
 
 @pytest.fixture
 def zero_servicer():
-    from contextzero.masking import MaskingConfig
-    from contextzero.proxy import ProxyService
-    from contextzero.service import ZeroServicer
+    from contextunity.zero.masking import MaskingConfig
+    from contextunity.zero.proxy import ProxyService
+    from contextunity.zero.service import ZeroServicer
 
     proxy = ProxyService.create(masking_config=MaskingConfig())
     return ZeroServicer(proxy=proxy)
@@ -133,13 +133,13 @@ class TestToolDiscovery:
     """Verify tool registration system works correctly."""
 
     def test_register_tool_is_callable(self):
-        from contextrouter.modules.tools import register_tool
+        from contextunity.router.modules.tools import register_tool
 
         assert callable(register_tool)
 
     def test_privacy_tools_module_defines_all_tools(self):
         """Privacy tools module should define 5 tools in __all__."""
-        from contextrouter.modules.tools import privacy_tools
+        from contextunity.router.modules.tools import privacy_tools
 
         assert len(privacy_tools.__all__) == 5
         expected = {
@@ -153,7 +153,7 @@ class TestToolDiscovery:
 
     def test_security_tools_module_defines_all_tools(self):
         """Security tools module should define 4 tools in __all__."""
-        from contextrouter.modules.tools import security_tools
+        from contextunity.router.modules.tools import security_tools
 
         assert len(security_tools.__all__) == 4
         expected = {"shield_scan", "check_policy", "check_compliance", "audit_event"}
@@ -163,7 +163,7 @@ class TestToolDiscovery:
         """Each privacy tool should be a LangChain StructuredTool."""
         from langchain_core.tools import BaseTool
 
-        from contextrouter.modules.tools.privacy_tools import (
+        from contextunity.router.modules.tools.privacy_tools import (
             anonymize_text,
             apply_persona,
             check_pii,
@@ -184,7 +184,7 @@ class TestToolDiscovery:
         """Each security tool should be a LangChain StructuredTool."""
         from langchain_core.tools import BaseTool
 
-        from contextrouter.modules.tools.security_tools import (
+        from contextunity.router.modules.tools.security_tools import (
             audit_event,
             check_compliance,
             check_policy,
@@ -196,8 +196,8 @@ class TestToolDiscovery:
 
     def test_tools_have_descriptions(self):
         """All tools must have non-empty docstrings for the LLM."""
-        from contextrouter.modules.tools.privacy_tools import _PRIVACY_TOOLS
-        from contextrouter.modules.tools.security_tools import _SECURITY_TOOLS
+        from contextunity.router.modules.tools.privacy_tools import _PRIVACY_TOOLS
+        from contextunity.router.modules.tools.security_tools import _SECURITY_TOOLS
 
         for t in _PRIVACY_TOOLS + _SECURITY_TOOLS:
             assert t.description, f"Tool '{t.name}' has no description"
@@ -205,7 +205,7 @@ class TestToolDiscovery:
 
     def test_privacy_tools_dual_mode_functions_exist(self):
         """Privacy tools should have _use_rpc() and _grpc_call() for dual-mode."""
-        from contextrouter.modules.tools import privacy_tools
+        from contextunity.router.modules.tools import privacy_tools
 
         assert hasattr(privacy_tools, "_use_rpc")
         assert hasattr(privacy_tools, "_grpc_call")
@@ -213,7 +213,7 @@ class TestToolDiscovery:
 
     def test_security_tools_dual_mode_functions_exist(self):
         """Security tools should have _use_rpc() and _grpc_call() for dual-mode."""
-        from contextrouter.modules.tools import security_tools
+        from contextunity.router.modules.tools import security_tools
 
         assert hasattr(security_tools, "_use_rpc")
         assert hasattr(security_tools, "_grpc_call")
@@ -225,16 +225,16 @@ class TestToolDiscovery:
 
         with (
             patch(
-                "contextrouter.modules.tools.privacy_tools._get_grpc_stub",
+                "contextunity.router.modules.tools.privacy_tools._get_grpc_stub",
                 return_value=None,
             ),
             patch(
-                "contextrouter.modules.tools.security_tools._get_grpc_stub",
+                "contextunity.router.modules.tools.security_tools._get_grpc_stub",
                 return_value=None,
             ),
         ):
-            from contextrouter.modules.tools.privacy_tools import _use_rpc as z_rpc
-            from contextrouter.modules.tools.security_tools import _use_rpc as s_rpc
+            from contextunity.router.modules.tools.privacy_tools import _use_rpc as z_rpc
+            from contextunity.router.modules.tools.security_tools import _use_rpc as s_rpc
 
             assert not z_rpc()
             assert not s_rpc()
@@ -249,7 +249,7 @@ class TestComplianceIntegration:
     """Test ComplianceChecker produces structured reports."""
 
     def test_check_returns_report(self):
-        from contextshield import ComplianceChecker
+        from contextunity.shield import ComplianceChecker
 
         checker = ComplianceChecker()
         report = checker.check()
@@ -259,7 +259,7 @@ class TestComplianceIntegration:
         assert 0 <= report.overall_score <= 100
 
     def test_compliance_summary_is_string(self):
-        from contextshield import ComplianceChecker
+        from contextunity.shield import ComplianceChecker
 
         checker = ComplianceChecker()
         report = checker.check()

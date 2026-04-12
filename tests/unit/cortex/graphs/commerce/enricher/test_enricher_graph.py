@@ -1,6 +1,6 @@
 import pytest
 
-from contextrouter.cortex.graphs.commerce.enricher import build_enricher_graph
+from contextunity.router.cortex.graphs.commerce.enricher import build_enricher_graph
 
 
 @pytest.fixture
@@ -44,7 +44,7 @@ async def test_enricher_graph_execution_mocked(graph):
     mock_llm = AsyncMock()
 
     async def mock_generate(req):
-        from contextrouter.modules.models.types import ModelResponse, ProviderInfo
+        from contextunity.router.modules.models.types import ModelResponse, ProviderInfo
 
         sys_text = req.system.lower()
 
@@ -71,11 +71,12 @@ async def test_enricher_graph_execution_mocked(graph):
 
     with (
         patch(
-            "contextrouter.service.stream_executors.get_stream_executor_manager",
+            "contextunity.router.service.stream_executors.get_stream_executor_manager",
             return_value=mock_manager,
         ),
         patch(
-            "contextrouter.modules.models.registry.model_registry.create_llm", return_value=mock_llm
+            "contextunity.router.modules.models.registry.model_registry.create_llm",
+            return_value=mock_llm,
         ),
     ):
         initial_state = {

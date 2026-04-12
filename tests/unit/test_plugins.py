@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from contextrouter.core.plugins import (
+from contextunity.router.core.plugins import (
     PluginCapability,
     PluginContext,
     PluginManifest,
@@ -112,9 +112,9 @@ class TestPluginManifest:
         m = PluginManifest(
             name="x",
             version="1.0.0",
-            requires={"contextrouter": ">=0.9.0"},
+            requires={"contextunity.router": ">=0.9.0"},
         )
-        assert m.requires["contextrouter"] == ">=0.9.0"
+        assert m.requires["contextunity.router"] == ">=0.9.0"
 
     def test_disabled(self):
         m = PluginManifest(name="x", version="1.0.0", enabled=False)
@@ -300,7 +300,7 @@ class TestScan:
     """Test scan() with manifest plugins."""
 
     def test_scan_manifest_plugin(self, tmp_path: Path):
-        from contextrouter.core.registry import scan
+        from contextunity.router.core.registry import scan
 
         plugin_dir = tmp_path / "my-plugin"
         plugin_dir.mkdir()
@@ -315,13 +315,13 @@ class TestScan:
         assert loaded[0].name == "scanned-plugin"
 
     def test_scan_nonexistent_dir(self, tmp_path: Path):
-        from contextrouter.core.registry import scan
+        from contextunity.router.core.registry import scan
 
         loaded = scan(tmp_path / "nonexistent")
         assert loaded == []
 
     def test_scan_skips_non_plugin_dirs(self, tmp_path: Path):
-        from contextrouter.core.registry import scan
+        from contextunity.router.core.registry import scan
 
         # Directory without plugin.yaml — should be ignored
         (tmp_path / "random-dir").mkdir()
@@ -331,7 +331,7 @@ class TestScan:
         assert loaded == []
 
     def test_scan_multiple_plugins(self, tmp_path: Path):
-        from contextrouter.core.registry import scan
+        from contextunity.router.core.registry import scan
 
         for name in ["alpha-plugin", "beta-plugin"]:
             d = tmp_path / name

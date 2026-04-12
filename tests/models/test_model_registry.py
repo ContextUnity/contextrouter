@@ -4,10 +4,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from contextrouter.core.config import Config
-from contextrouter.modules.models.base import BaseModel
-from contextrouter.modules.models.registry import ModelRegistry
-from contextrouter.modules.models.types import (
+from contextunity.router.core.config import Config
+from contextunity.router.modules.models.base import BaseModel
+from contextunity.router.modules.models.registry import ModelRegistry
+from contextunity.router.modules.models.types import (
     FinalTextEvent,
     ModelCapabilities,
     ModelRequest,

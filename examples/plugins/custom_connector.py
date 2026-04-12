@@ -1,4 +1,4 @@
-"""Example custom connector plugin for ContextRouter.
+"""Example custom connector plugin for cu.router.
 
 This shows how to add custom data connectors.
 """
@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from contextrouter.core.registry import register_connector
+from contextunity.router.core.registry import register_connector
 
 
 @register_connector("custom_api")

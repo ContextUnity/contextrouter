@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 
 import grpc
-from contextcore import ContextUnit, create_channel, router_pb2_grpc
+from contextunity.core import ContextUnit, create_channel, router_pb2_grpc
 
 
 async def example_execute_dispatcher() -> None:
@@ -111,7 +111,7 @@ async def main() -> None:
     except grpc.RpcError as e:
         print(f"gRPC Error: {e.code()} - {e.details()}")
         print("\nMake sure the gRPC server is running:")
-        print("  python -m contextrouter.service")
+        print("  contextrouter serve")
 
 
 if __name__ == "__main__":

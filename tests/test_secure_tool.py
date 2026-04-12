@@ -1,10 +1,10 @@
 import time
 
 import pytest
-from contextcore.tokens import ContextToken
+from contextunity.core.tokens import ContextToken
 from langchain_core.tools import BaseTool, tool
 
-from contextrouter.modules.tools.secure import SecureTool
+from contextunity.router.modules.tools.secure import SecureTool
 
 # ─── Fixtures ───
 
@@ -64,14 +64,14 @@ def secure_wrapped(raw_tool):
 
 def _set_token(token):
     """Helper: set access token in runtime context."""
-    from contextrouter.cortex.runtime_context import set_current_access_token
+    from contextunity.router.cortex.runtime_context import set_current_access_token
 
     return set_current_access_token(token)
 
 
 def _reset_token(ref):
     """Helper: reset access token."""
-    from contextrouter.cortex.runtime_context import reset_current_access_token
+    from contextunity.router.cortex.runtime_context import reset_current_access_token
 
     reset_current_access_token(ref)
 
@@ -181,7 +181,7 @@ class TestPermissionEnforcement:
 
     def test_tool_execution_logs_provenance(self, secure_wrapped):
         """Execution appends flat provenance trail (prefix:name:mode) via runtime_context."""
-        from contextrouter.cortex.runtime_context import (
+        from contextunity.router.cortex.runtime_context import (
             get_accumulated_provenance,
             init_provenance_accumulator,
             reset_provenance_accumulator,
@@ -208,7 +208,7 @@ class TestPermissionEnforcement:
 
     def test_tool_execution_logs_federated_provenance(self, raw_tool):
         """Execution appends federated provenance if federated tag is present."""
-        from contextrouter.cortex.runtime_context import (
+        from contextunity.router.cortex.runtime_context import (
             get_accumulated_provenance,
             init_provenance_accumulator,
             reset_provenance_accumulator,
@@ -323,7 +323,7 @@ class TestDirectSubclass:
 class TestRegisterToolGate:
     def test_register_raw_tool_wraps(self, raw_tool):
         """register_tool() auto-wraps raw BaseTool → SecureTool."""
-        from contextrouter.modules.tools import _tool_registry, register_tool
+        from contextunity.router.modules.tools import _tool_registry, register_tool
 
         original_registry = _tool_registry.copy()
         try:
@@ -338,7 +338,7 @@ class TestRegisterToolGate:
 
     def test_register_secure_tool_keeps(self, secure_wrapped):
         """register_tool() keeps SecureTool as-is."""
-        from contextrouter.modules.tools import _tool_registry, register_tool
+        from contextunity.router.modules.tools import _tool_registry, register_tool
 
         original_registry = _tool_registry.copy()
         try:
@@ -352,7 +352,7 @@ class TestRegisterToolGate:
 
     def test_register_with_decorator(self):
         """@tool decorated function gets wrapped."""
-        from contextrouter.modules.tools import _tool_registry, register_tool
+        from contextunity.router.modules.tools import _tool_registry, register_tool
 
         @tool
         def my_test_tool(query: str) -> str:
@@ -372,7 +372,7 @@ class TestRegisterToolGate:
 
     def test_register_never_grants_infra(self):
         """register_tool() never sets skip_auth even for infra-named tools."""
-        from contextrouter.modules.tools import _tool_registry, register_tool
+        from contextunity.router.modules.tools import _tool_registry, register_tool
 
         fake = RawDummyTool(name="log_execution_trace", description="malicious")
         original_registry = _tool_registry.copy()
@@ -505,7 +505,7 @@ class TestTenantIsolation:
 
     def test_register_tool_with_tenant(self, raw_tool):
         """register_tool(tenant=...) binds tenant to the tool."""
-        from contextrouter.modules.tools import _tool_registry, register_tool
+        from contextunity.router.modules.tools import _tool_registry, register_tool
 
         original_registry = _tool_registry.copy()
         try:
@@ -579,7 +579,7 @@ class TestTenantIsolation:
             _reset_token(ref)
 
     def test_import_error_fails_closed(self, raw_tool):
-        """If contextcore.authz can't be imported, tool is BLOCKED."""
+        """If cu.core.authz can't be imported, tool is BLOCKED."""
         secure = SecureTool.wrap(raw_tool, permission="tool:raw_dummy")
         token = _make_token(
             permissions=("tool:raw_dummy",),
@@ -589,16 +589,16 @@ class TestTenantIsolation:
         try:
             import sys
 
-            # Temporarily hide contextcore.authz
-            original = sys.modules.get("contextcore.authz")
-            sys.modules["contextcore.authz"] = None  # type: ignore
+            # Temporarily hide cu.core.authz
+            original = sys.modules.get("contextunity.core.authz")
+            sys.modules["contextunity.core.authz"] = None  # type: ignore
             try:
                 with pytest.raises((PermissionError, ImportError, TypeError)):
                     secure._run(query="should-fail")
             finally:
                 if original is not None:
-                    sys.modules["contextcore.authz"] = original
+                    sys.modules["contextunity.core.authz"] = original
                 else:
-                    sys.modules.pop("contextcore.authz", None)
+                    sys.modules.pop("contextunity.core.authz", None)
         finally:
             _reset_token(ref)

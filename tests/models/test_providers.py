@@ -16,9 +16,9 @@ sys.modules["langchain_openai"] = MagicMock()
 sys.modules["transformers"] = MagicMock()
 sys.modules["torch"] = MagicMock()
 
-from contextrouter.modules.models.llm.huggingface import HuggingFaceLLM  # noqa: E402
-from contextrouter.modules.models.llm.openai import OpenAILLM  # noqa: E402
-from contextrouter.modules.models.types import (  # noqa: E402
+from contextunity.router.modules.models.llm.huggingface import HuggingFaceLLM  # noqa: E402
+from contextunity.router.modules.models.llm.openai import OpenAILLM  # noqa: E402
+from contextunity.router.modules.models.types import (  # noqa: E402
     ModelCapabilities,
     ModelRequest,
     ModelResponse,
@@ -60,7 +60,7 @@ class TestVertexLLM:
 
     def test_initialization(self, mock_config):
         """Test VertexLLM initialization."""
-        from contextrouter.modules.models.llm.vertex import VertexLLM
+        from contextunity.router.modules.models.llm.vertex import VertexLLM
 
         with (
             patch("google.auth.default", return_value=(MagicMock(), "test-project")),
@@ -79,7 +79,7 @@ class TestVertexLLM:
     @pytest.mark.anyio
     async def test_generate_text_only(self, mock_config):
         """Test text-only generation."""
-        from contextrouter.modules.models.llm.vertex import VertexLLM
+        from contextunity.router.modules.models.llm.vertex import VertexLLM
 
         with (
             patch("google.auth.default", return_value=(MagicMock(), "test-project")),
@@ -109,7 +109,7 @@ class TestVertexLLM:
     @pytest.mark.anyio
     async def test_stream_text_only(self, mock_config):
         """Test text-only streaming."""
-        from contextrouter.modules.models.llm.vertex import VertexLLM
+        from contextunity.router.modules.models.llm.vertex import VertexLLM
 
         with (
             patch("google.auth.default", return_value=(MagicMock(), "test-project")),
@@ -138,7 +138,7 @@ class TestVertexLLM:
 
     def test_token_count(self, mock_config):
         """Test token counting."""
-        from contextrouter.modules.models.llm.vertex import VertexLLM
+        from contextunity.router.modules.models.llm.vertex import VertexLLM
 
         with (
             patch("google.auth.default", return_value=(MagicMock(), "test-project")),
@@ -156,7 +156,7 @@ class TestVertexLLM:
 
     def test_missing_project_id(self):
         """Test error when project_id is missing."""
-        from contextrouter.modules.models.llm.vertex import VertexLLM
+        from contextunity.router.modules.models.llm.vertex import VertexLLM
 
         config = MagicMock()
         config.vertex.project_id = None
@@ -270,7 +270,7 @@ class TestProviderCapabilities:
 
     def test_vertex_capabilities_by_model(self):
         """Test that Vertex capabilities vary by model."""
-        from contextrouter.modules.models.llm.vertex import VertexLLM
+        from contextunity.router.modules.models.llm.vertex import VertexLLM
 
         config = MagicMock()
         config.vertex.project_id = "test"

@@ -4,8 +4,8 @@ import json
 
 from langchain_core.messages import HumanMessage
 
-from contextrouter.cortex.graphs.rag_retrieval.intent import detect_intent
-from contextrouter.modules.models.types import (
+from contextunity.router.cortex.graphs.rag_retrieval.intent import detect_intent
+from contextunity.router.modules.models.types import (
     ModelCapabilities,
     ModelRequest,
     ModelResponse,
@@ -47,11 +47,11 @@ def test_detect_intent_parses_llm_payload(monkeypatch) -> None:
     }
 
     monkeypatch.setattr(
-        "contextrouter.modules.models.registry.model_registry.create_llm",
+        "contextunity.router.modules.models.registry.model_registry.create_llm",
         lambda *_a, **_kw: _StubLLM(payload),
     )
 
-    from contextrouter.cortex.state import AgentState
+    from contextunity.router.cortex.state import AgentState
 
     state: AgentState = {
         "messages": [HumanMessage(content="What is the mastermind principle?")],
@@ -93,11 +93,11 @@ def test_detect_intent_handles_json_fenced_output(monkeypatch) -> None:
             return max(1, len(text) // 4)
 
     monkeypatch.setattr(
-        "contextrouter.modules.models.registry.model_registry.create_llm",
+        "contextunity.router.modules.models.registry.model_registry.create_llm",
         lambda *_a, **_kw: _FencedLLM(),
     )
 
-    from contextrouter.cortex.state import AgentState
+    from contextunity.router.cortex.state import AgentState
 
     state: AgentState = {"messages": [HumanMessage(content="Who are you?")]}
     import asyncio

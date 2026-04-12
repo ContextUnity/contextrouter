@@ -2,8 +2,8 @@
 
 import asyncio
 
-from contextrouter.modules.models.base import BaseModel
-from contextrouter.modules.models.types import (
+from contextunity.router.modules.models.base import BaseModel
+from contextunity.router.modules.models.types import (
     AudioPart,
     FinalTextEvent,
     ImagePart,
@@ -216,7 +216,7 @@ class TestModelResponse:
 
     def test_response_with_usage(self):
         """Test response with usage statistics."""
-        from contextrouter.modules.models.types import UsageStats
+        from contextunity.router.modules.models.types import UsageStats
 
         response = ModelResponse(
             text="Response with usage",
@@ -286,7 +286,7 @@ class TestModelParts:
 
     def test_video_part(self):
         """Test VideoPart creation."""
-        from contextrouter.modules.models.types import VideoPart
+        from contextunity.router.modules.models.types import VideoPart
 
         part = VideoPart(mime="video/mp4", uri="gs://bucket/video.mp4")
         assert part.kind == "video"

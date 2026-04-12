@@ -9,7 +9,7 @@ ContextRouter automatically scans directories listed in your `settings.toml` con
 ```toml
 [plugins]
 paths = [
-    "~/my-contextrouter-plugins",
+    "~/my-ContextRouter-plugins",
     "./examples/plugins"
 ]
 ```
@@ -22,7 +22,7 @@ When ContextRouter starts, it imports all `.py` files from these directories, al
 Use `@register_agent()` to add new agent types:
 
 ```python
-from contextrouter.core.registry import register_agent
+from contextunity.router.core.registry import register_agent
 
 @register_agent("my_agent")
 class MyAgent:
@@ -35,7 +35,7 @@ class MyAgent:
 Use `@register_connector()` to add new data sources:
 
 ```python
-from contextrouter.core.registry import register_connector
+from contextunity.router.core.registry import register_connector
 
 @register_connector("my_api")
 class MyAPIConnector:
@@ -48,7 +48,7 @@ class MyAPIConnector:
 Use `@register_transformer()` for data processing:
 
 ```python
-from contextrouter.core.registry import register_transformer
+from contextunity.router.core.registry import register_transformer
 
 @register_transformer("my_cleaner")
 def my_text_cleaner(text: str) -> str:
@@ -60,7 +60,7 @@ def my_text_cleaner(text: str) -> str:
 Use `@register_provider()` for storage backends:
 
 ```python
-from contextrouter.core.registry import register_provider
+from contextunity.router.core.registry import register_provider
 
 @register_provider("my_storage")
 class MyStorageProvider:

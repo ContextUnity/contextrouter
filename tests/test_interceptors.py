@@ -10,10 +10,10 @@ Key tests:
 
 from __future__ import annotations
 
-import contextcore.router_pb2 as router_pb2
-from contextcore.permissions import Permissions
+import contextunity.core.router_pb2 as router_pb2
+from contextunity.core.permissions import Permissions
 
-from contextrouter.service.interceptors import (
+from contextunity.router.service.interceptors import (
     RPC_PERMISSION_MAP,
     RouterPermissionInterceptor,
 )

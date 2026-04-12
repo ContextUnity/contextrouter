@@ -1,0 +1,460 @@
+"""Main configuration class that combines all config modules."""
+
+import tomllib
+from pathlib import Path
+from typing import Any
+
+from contextunity.core import get_contextunit_logger
+from dotenv import load_dotenv
+from pydantic import BaseModel, ConfigDict, Field
+
+from .base import get_bool_env, get_env, set_env_default
+
+# RAGConfig removed - ingestion moved to cu.brain
+# from .ingestion import RAGConfig
+from .models import LLMConfig, ModelsConfig, NewsEngineConfig, RouterConfig
+from .paths import ConfigPaths
+from .providers import (
+    AnthropicConfig,
+    BrainConfig,
+    GoogleCSEConfig,
+    GroqConfig,
+    HuggingFaceHubConfig,
+    InceptionConfig,
+    LangfuseConfig,
+    LocalOpenAIConfig,
+    OpenAIConfig,
+    OpenRouterConfig,
+    PerplexityConfig,
+    PluginsConfig,
+    PostgresConfig,
+    RedisConfig,
+    RunPodConfig,
+    SerperConfig,
+    VertexConfig,
+)
+from .security import SecurityConfig
+
+
+class FlowConfig(BaseModel):
+    """Configuration for a specific data processing flow.
+
+    This is used by the flow manager to execute custom processing pipelines.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    # Flow identification
+    name: str = ""
+    description: str = ""
+
+    # Source configuration
+    source: str = ""  # e.g., "web", "file", "api"
+    source_params: dict[str, Any] = Field(default_factory=dict)
+
+    # Processing pipeline
+    logic: list[str] = Field(default_factory=list)  # Transformer names
+    logic_params: dict[str, Any] = Field(default_factory=dict)
+
+    # Sink configuration
+    sink: str = ""  # e.g., "vertex", "postgres"
+    sink_params: dict[str, Any] = Field(default_factory=dict)
+
+    # Execution controls
+    overwrite: bool = True
+    workers: int = 1
+
+
+class Config(BaseModel):
+    """Main configuration class for cu.router.
+
+    This combines all configuration modules into a single, hierarchical structure.
+    Configuration is loaded from multiple sources in priority order:
+    1. Environment variables
+    2. TOML configuration files
+    3. Default values
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    # Core settings
+    debug: bool = False
+    debug_graph_messages: bool = False
+    debug_tools_messages: bool = False
+    log_level: str = "INFO"
+
+    # Sub-configurations
+    models: ModelsConfig = Field(default_factory=ModelsConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)
+    router: RouterConfig = Field(default_factory=RouterConfig)
+    news_engine: NewsEngineConfig = Field(default_factory=NewsEngineConfig)
+    # rag and ingestion removed - moved to cu.brain
+    # rag: RAGConfig = Field(default_factory=RAGConfig)
+    plugins: PluginsConfig = Field(default_factory=PluginsConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
+    # ingestion: RAGConfig = Field(default_factory=RAGConfig)
+
+    # Provider configurations
+    vertex: VertexConfig = Field(default_factory=VertexConfig)
+    postgres: PostgresConfig = Field(default_factory=PostgresConfig)
+    openai: OpenAIConfig = Field(default_factory=OpenAIConfig)
+    anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
+    openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)
+    groq: GroqConfig = Field(default_factory=GroqConfig)
+    inception: InceptionConfig = Field(default_factory=InceptionConfig)
+    runpod: RunPodConfig = Field(default_factory=RunPodConfig)
+    hf_hub: HuggingFaceHubConfig = Field(default_factory=HuggingFaceHubConfig)
+    local: LocalOpenAIConfig = Field(default_factory=LocalOpenAIConfig)
+    google_cse: GoogleCSEConfig = Field(default_factory=GoogleCSEConfig)
+    langfuse: LangfuseConfig = Field(default_factory=LangfuseConfig)
+    redis: RedisConfig = Field(default_factory=RedisConfig)
+    brain: BrainConfig = Field(default_factory=BrainConfig)
+    perplexity: PerplexityConfig = Field(default_factory=PerplexityConfig)
+    serper: SerperConfig = Field(default_factory=SerperConfig)
+
+    # Internal state
+    paths_cache: ConfigPaths | None = None
+    loaded_from: list[Path] = Field(default_factory=list)
+
+    @property
+    def paths(self) -> ConfigPaths:
+        """Get configuration paths."""
+        if self.paths_cache is None:
+            # Try to find project root
+            from pathlib import Path
+
+            # Look for pyproject.toml or go up from current file
+            current = Path(__file__).resolve()
+            for parent in [current.parent] + list(current.parents):
+                if (parent / "pyproject.toml").exists():
+                    self.paths_cache = ConfigPaths.from_root(parent)
+                    break
+            else:
+                # Fallback to current directory
+                self.paths_cache = ConfigPaths.from_root(Path.cwd())
+
+        return self.paths_cache
+
+    @classmethod
+    def load(cls, config_path: Path | str | None = None) -> "Config":
+        """Load configuration from files and environment."""
+        # Force Vertex AI mode for langchain-google-genai / google-genai SDK.
+        # Without this, the SDK may try API-key auth and fail with:
+        # "Could not resolve API token from the environment".
+        # Must be set before any ChatGoogleGenerativeAI instance is created.
+        set_env_default("GOOGLE_GENAI_USE_VERTEXAI", "true")
+
+        config = cls()
+        paths = config.paths
+
+        # Deterministic `.env` loading: only load from the detected project root
+        # (e.g. `<repo>/cu.router/.env`). This avoids accidental cross-repo leakage.
+        if paths.env_file.exists():
+            load_dotenv(paths.env_file, override=False)
+
+        # Optional explicit override for core config path.
+        # This is intentionally separate from ingestion's CU_ROUTER_CONFIG_PATH.
+        core_config_path = get_env("CU_ROUTER_CORE_CONFIG_PATH")
+
+        # Load from TOML if available
+        toml_path = (
+            Path(config_path)
+            if config_path
+            else (Path(core_config_path).resolve() if core_config_path else paths.toml_config)
+        )
+        if toml_path.exists():
+            try:
+                with open(toml_path, "rb") as f:
+                    toml_data = tomllib.load(f)
+
+                # Remove read-only properties (like 'paths')
+                toml_data.pop("paths", None)
+
+                # Merge TOML data with defaults using Pydantic
+                config_dict = config.model_dump()
+                config_dict.update(toml_data)
+                config = cls.model_validate(config_dict)
+
+                # Restore paths_cache to avoid recomputation
+                config.paths_cache = paths
+                config.loaded_from.append(toml_path)
+            except Exception as e:
+                logger = get_contextunit_logger(__name__)
+                logger.warning("Failed to load TOML config from %s: %s", toml_path, e)
+
+        # Override with environment variables
+        config._apply_env_overrides()
+
+        # Resolve all service endpoints once (env → Redis → defaults)
+        config._resolve_service_endpoints()
+
+        return config
+
+    def _resolve_service_endpoints(self) -> None:
+        """Resolve all external service endpoints once at startup.
+
+        Strategy per service (env var → Redis auto-discovery → default):
+          - brain:  CU_BRAIN_GRPC_URL / BRAIN_GRPC_ENDPOINT → Redis "brain" → localhost:50051
+          - worker: CU_WORKER_GRPC_URL → Redis "worker" → localhost:50052
+          - zero:   CU_ZERO_GRPC_URL → Redis "zero" → "" (optional)
+          - shield: CU_SHIELD_GRPC_URL → Redis "shield" → "" (optional)
+        """
+        from contextunity.core.discovery import resolve_service_endpoint
+
+        logger = get_contextunit_logger(__name__)
+
+        self.brain.grpc_endpoint = resolve_service_endpoint(
+            "brain",
+            configured_host=self.brain.grpc_endpoint,
+            default_host="localhost:50051",
+        )
+
+        self.router.worker_grpc_endpoint = resolve_service_endpoint(
+            "worker",
+            configured_host=self.router.worker_grpc_endpoint,
+            default_host="localhost:50052",
+        )
+
+        self.router.zero_grpc_host = resolve_service_endpoint(
+            "zero",
+            configured_host=self.router.zero_grpc_host,
+        )
+
+        self.router.shield_grpc_host = resolve_service_endpoint(
+            "shield",
+            configured_host=self.router.shield_grpc_host,
+        )
+
+        logger.info(
+            "Service endpoints resolved: brain=%s, worker=%s, zero=%s, shield=%s",
+            self.brain.grpc_endpoint or "(none)",
+            self.router.worker_grpc_endpoint or "(none)",
+            self.router.zero_grpc_host or "(disabled)",
+            self.router.shield_grpc_host or "(disabled)",
+        )
+
+    def _apply_env_overrides(self) -> None:
+        """Apply environment variable overrides to config."""
+        # Debug flags
+        if dbg_graph := get_env("DEBUG_GRAPH_MESSAGES"):
+            self.debug_graph_messages = dbg_graph.lower() in ("1", "true", "yes")
+        if dbg_tools := get_env("DEBUG_TOOLS_MESSAGES"):
+            self.debug_tools_messages = dbg_tools.lower() in ("1", "true", "yes")
+
+        # Model configuration
+        if llm_val := get_env("CU_ROUTER_DEFAULT_LLM"):
+            self.models.default_llm = llm_val
+        # Fallback LLM chain - comma-separated list of model keys
+        if fallback_val := get_env("CU_ROUTER_FALLBACK_LLMS"):
+            self.models.fallback_llms = [m.strip() for m in fallback_val.split(",") if m.strip()]
+        if global_fallback_val := get_env("CU_ROUTER_ALLOW_GLOBAL_FALLBACK"):
+            self.models.allow_global_fallback = global_fallback_val.lower() in ("1", "true", "yes")
+
+        # Vertex configuration
+        # Primary (in-repo) env names:
+        # - VERTEX_PROJECT_ID
+        # - VERTEX_LOCATION
+        #
+        # Optional host/embedding alias (e.g. when cu.router is used as a library):
+        # - CU_ROUTER_VERTEX_PROJECT_ID
+        # - CU_ROUTER_VERTEX_LOCATION
+        if project_id := (get_env("VERTEX_PROJECT_ID") or get_env("CU_ROUTER_VERTEX_PROJECT_ID")):
+            self.vertex.project_id = project_id
+        if location := (get_env("VERTEX_LOCATION") or get_env("CU_ROUTER_VERTEX_LOCATION")):
+            self.vertex.location = location
+        # Vertex AI Search / Discovery Engine location (separate from Vertex LLM region).
+        if v := (
+            get_env("VERTEX_DISCOVERY_ENGINE_LOCATION")
+            or get_env("CU_ROUTER_VERTEX_DISCOVERY_ENGINE_LOCATION")
+        ):
+            self.vertex.discovery_engine_location = v
+        if v := (
+            get_env("VERTEX_DATA_STORE_LOCATION") or get_env("CU_ROUTER_VERTEX_DATA_STORE_LOCATION")
+        ):
+            self.vertex.data_store_location = v
+        if credentials_path := (
+            get_env("VERTEX_CREDENTIALS_PATH")
+            or get_env("CU_ROUTER_VERTEX_CREDENTIALS_PATH")
+            or get_env("GOOGLE_APPLICATION_CREDENTIALS")
+        ):
+            self.vertex.credentials_path = credentials_path
+
+        # Postgres configuration
+        if dsn := get_env("POSTGRES_DSN"):
+            self.postgres.dsn = dsn
+        if v := get_env("POSTGRES_POOL_MIN_SIZE"):
+            try:
+                self.postgres.pool_min_size = max(1, int(v))
+            except ValueError:
+                pass
+        if v := get_env("POSTGRES_POOL_MAX_SIZE"):
+            try:
+                self.postgres.pool_max_size = max(1, int(v))
+            except ValueError:
+                pass
+        if v := get_env("POSTGRES_RLS_ENABLED"):
+            self.postgres.rls_enabled = v.lower() in {"1", "true", "yes", "on"}
+        if v := get_env("PGVECTOR_DIM"):
+            try:
+                self.postgres.vector_dim = max(1, int(v))
+            except ValueError:
+                pass
+
+        # Brain configuration
+        if v := get_env("BRAIN_MODE"):
+            self.brain.mode = v.lower()
+        if v := (get_env("CU_BRAIN_GRPC_URL") or get_env("BRAIN_GRPC_ENDPOINT")):
+            self.brain.grpc_endpoint = v
+
+        # Router server & external services
+        if v := get_env("ROUTER_PORT"):
+            self.router.port = v
+        if v := get_env("ROUTER_INSTANCE_NAME"):
+            self.router.instance_name = v
+        if v := get_env("ROUTER_TENANTS"):
+            self.router.tenants = [t.strip() for t in v.split(",") if t.strip()]
+        if v := get_env("CU_WORKER_GRPC_URL"):
+            self.router.worker_grpc_endpoint = v
+        if v := (get_env("CU_ZERO_GRPC_URL") or get_env("CU_ZERO_GRPC_HOST")):
+            self.router.zero_grpc_host = v
+        if v := (get_env("CU_SHIELD_GRPC_URL") or get_env("CU_SHIELD_GRPC_HOST")):
+            self.router.shield_grpc_host = v
+        if v := get_env("GCS_DEFAULT_BUCKET"):
+            self.router.gcs_default_bucket = v
+        if brain_idx := get_bool_env("CU_BRAIN_INDEX_TOOLS"):
+            self.router.brain_index_tools = brain_idx
+
+        # OpenAI configuration
+        if openai_key := get_env("OPENAI_API_KEY"):
+            self.openai.api_key = openai_key
+        if openai_org := get_env("OPENAI_ORGANIZATION"):
+            self.openai.organization = openai_org
+        if reasoning_effort := get_env("OPENAI_REASONING_EFFORT"):
+            # Options: minimal, low, medium, high
+            self.openai.reasoning_effort = reasoning_effort
+
+        # Anthropic configuration
+        if anthropic_key := get_env("ANTHROPIC_API_KEY"):
+            self.anthropic.api_key = anthropic_key
+
+        # Perplexity configuration
+        if perplexity_key := get_env("PERPLEXITY_API_KEY"):
+            self.perplexity.api_key = perplexity_key
+
+        # Serper configuration
+        if serper_key := get_env("SERPER_API_KEY"):
+            self.serper.api_key = serper_key
+
+        # OpenRouter configuration
+        if openrouter_key := get_env("OPENROUTER_API_KEY"):
+            self.openrouter.api_key = openrouter_key
+        if openrouter_base_url := get_env("OPENROUTER_BASE_URL"):
+            self.openrouter.base_url = openrouter_base_url
+
+        # Groq configuration
+        if groq_key := get_env("GROQ_API_KEY"):
+            self.groq.api_key = groq_key
+        if groq_base_url := get_env("GROQ_BASE_URL"):
+            self.groq.base_url = groq_base_url
+
+        # RunPod configuration
+        if runpod_key := get_env("RUNPOD_API_KEY"):
+            self.runpod.api_key = runpod_key
+        if runpod_base_url := get_env("RUNPOD_BASE_URL"):
+            self.runpod.base_url = runpod_base_url
+
+        # HuggingFace Hub configuration
+        if hf_key := get_env("HF_TOKEN"):
+            self.hf_hub.api_key = hf_key
+        if hf_base_url := get_env("HF_BASE_URL"):
+            self.hf_hub.base_url = hf_base_url
+
+        # Inception Labs configuration (Mercury-2)
+        if inception_key := get_env("INCEPTION_API_KEY"):
+            self.inception.api_key = inception_key
+        if inception_base_url := get_env("INCEPTION_BASE_URL"):
+            self.inception.base_url = inception_base_url
+        if inception_effort := get_env("INCEPTION_REASONING_EFFORT"):
+            self.inception.reasoning_effort = inception_effort
+
+        # Local OpenAI-compatible servers (vLLM/Ollama)
+        if v := get_env("LOCAL_OLLAMA_BASE_URL"):
+            self.local.ollama_base_url = v
+        if v := get_env("LOCAL_VLLM_BASE_URL"):
+            self.local.vllm_base_url = v
+
+        # Google CSE configuration
+        if cse_enabled := get_bool_env("GOOGLE_CSE_ENABLED"):
+            self.google_cse.enabled = cse_enabled
+        if cse_key := get_env("GOOGLE_CSE_API_KEY"):
+            self.google_cse.api_key = cse_key
+        if cse_cx := get_env("GOOGLE_CSE_CX"):
+            self.google_cse.search_engine_id = cse_cx
+
+        # Langfuse configuration
+        if langfuse_secret := get_env("LANGFUSE_SECRET_KEY"):
+            self.langfuse.secret_key = langfuse_secret
+        if langfuse_public := get_env("LANGFUSE_PUBLIC_KEY"):
+            self.langfuse.public_key = langfuse_public
+        if langfuse_host := get_env("LANGFUSE_HOST"):
+            self.langfuse.host = langfuse_host
+        if langfuse_project := get_env("LANGFUSE_PROJECT_ID"):
+            self.langfuse.project_id = langfuse_project
+        if langfuse_env := get_env("LANGFUSE_ENVIRONMENT"):
+            self.langfuse.environment = langfuse_env
+        if langfuse_service := get_env("LANGFUSE_SERVICE_NAME"):
+            self.langfuse.service_name = langfuse_service
+
+        # Use shared configuration from contextunity.core where applicable
+        from contextunity.core.config import get_core_config as get_shared_core_config
+
+        shared_config = get_shared_core_config()
+
+        # Security: private_key_path and environment removed — signing is
+        # handled by cu.core.signing backends (auto-detected).
+
+        # Redis configuration (from shared core)
+        if shared_config.redis_url:
+            self.redis.url = shared_config.redis_url
+
+        # Debug/Logging
+        if debug_val := get_bool_env("CU_ROUTER_DEBUG"):
+            self.debug = debug_val
+
+        # cu.router specific log level overrides shared core log level
+        if log_level := get_env("CU_ROUTER_LOG_LEVEL"):
+            self.log_level = log_level
+        else:
+            self.log_level = shared_config.log_level
+
+        # News Engine configuration
+        if v := get_bool_env("NEWS_ENGINE_LANGUAGE_TOOL_ENABLED"):
+            self.news_engine.language_tool_enabled = v
+        if v := get_env("NEWS_ENGINE_LANGUAGE_TOOL_LANG"):
+            self.news_engine.language_tool_lang = v
+        if v := get_bool_env("NEWS_ENGINE_LANGUAGE_TOOL_AUTO_CORRECT"):
+            self.news_engine.language_tool_auto_correct = v
+        if v := get_env("NEWS_ENGINE_DEDUPE_THRESHOLD"):
+            try:
+                self.news_engine.dedupe_similarity_threshold = float(v)
+            except ValueError:
+                pass
+
+
+# ---- Global config management ----
+
+_GLOBAL_CONFIG: Config | None = None
+
+
+def get_core_config() -> Config:
+    """Return process-global core config (for framework modules)."""
+    global _GLOBAL_CONFIG
+    if _GLOBAL_CONFIG is None:
+        _GLOBAL_CONFIG = Config.load()
+    return _GLOBAL_CONFIG
+
+
+def set_core_config(config: Config) -> None:
+    """Set the global core config."""
+    global _GLOBAL_CONFIG
+    _GLOBAL_CONFIG = config

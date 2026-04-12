@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from contextrouter.modules.models.types import (
+from contextunity.router.modules.models.types import (
     AudioPart,
     ImagePart,
     ModelCapabilities,

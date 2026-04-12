@@ -1,12 +1,12 @@
 import pytest
-from contextcore import ContextToken
+from contextunity.core import ContextToken
 
-from contextrouter.cortex.runtime_context import (
+from contextunity.router.cortex.runtime_context import (
     reset_current_access_token,
     set_current_access_token,
 )
-from contextrouter.modules.tools.secure import SecureTool
-from contextrouter.modules.tools.security_tools import check_policy
+from contextunity.router.modules.tools.secure import SecureTool
+from contextunity.router.modules.tools.security_tools import check_policy
 
 
 @pytest.mark.asyncio
@@ -46,7 +46,7 @@ async def test_tool_tenant_isolation_overrides_llm():
         secure_check_policy = SecureTool.wrap(check_policy)
         # Force local mode — test checks policy logic, not Shield gRPC
         with patch(
-            "contextrouter.modules.tools.security_tools._use_rpc",
+            "contextunity.router.modules.tools.security_tools._use_rpc",
             return_value=False,
         ):
             # LLM maliciously tries to check policy for "target_tenant"

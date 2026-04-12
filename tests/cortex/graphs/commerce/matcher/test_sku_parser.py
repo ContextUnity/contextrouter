@@ -1,6 +1,6 @@
 """Tests for SKU parser utilities."""
 
-from contextrouter.cortex.graphs.commerce.matcher.sku_parser import (
+from contextunity.router.cortex.graphs.commerce.matcher.sku_parser import (
     SkuAttributes,
     SkuParser,
     normalize_sku,

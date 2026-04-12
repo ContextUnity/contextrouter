@@ -1,10 +1,10 @@
 """Example: Custom graph tracing (Langfuse optional).
 
 This example demonstrates how to add observability to a custom LangGraph graph
-using ContextRouter's Langfuse integration.
+using cu.router's Langfuse integration.
 
 Important:
-- Langfuse is an optional dependency. Install with: `pip install contextrouter[observability]`
+- Langfuse is an optional dependency. Install with: `pip install cu.router[observability]`
 - Tracing is enabled only when both keys are set (via `settings.toml` or env vars):
   - LANGFUSE_PUBLIC_KEY
   - LANGFUSE_SECRET_KEY
@@ -18,8 +18,8 @@ import asyncio
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 
-from contextrouter.cortex.state import AgentState, InputState, OutputState
-from contextrouter.modules.observability import get_langfuse_callbacks, retrieval_span
+from contextunity.router.cortex.state import AgentState, InputState, OutputState
+from contextunity.router.modules.observability import get_langfuse_callbacks, retrieval_span
 
 
 def build_example_custom_graph():
@@ -32,7 +32,7 @@ def build_example_custom_graph():
             # Simulate analysis
             analysis = {
                 "intent": "question" if "?" in query else "statement",
-                "topic": "ContextRouter" if "ContextRouter" in query else "general",
+                "topic": "contextunity.router" if "contextunity.router" in query else "general",
                 "complexity": "high" if len(query) > 50 else "low",
             }
 
@@ -55,10 +55,10 @@ def build_example_custom_graph():
             analysis = state.get("query_analysis", {})
 
             docs = []
-            if analysis.get("topic") == "ContextRouter":
+            if analysis.get("topic") == "contextunity.router":
                 docs = [
                     {
-                        "content": "ContextRouter is a modular LangGraph-powered agent framework for RAG applications.",
+                        "content": "contextunity.router is a modular LangGraph-powered agent framework for RAG applications.",
                         "source": "documentation",
                         "relevance": 0.95,
                     },
@@ -155,7 +155,7 @@ async def run_traced_custom_graph():
 
     # Prepare input
     input_state = {
-        "messages": [HumanMessage(content="What is ContextRouter and how does it work?")],
+        "messages": [HumanMessage(content="What is cu.router and how does it work?")],
         "session_id": "custom_tracing_example",
         "platform": "custom_graph_example",
         "citations_output": "raw",
@@ -209,7 +209,7 @@ async def run_streaming_example():
 
 
 if __name__ == "__main__":
-    print("ContextRouter Custom Graph Tracing Example")
+    print("contextunity.router Custom Graph Tracing Example")
     print("=" * 50)
 
     # Run the main example
