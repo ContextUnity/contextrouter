@@ -47,7 +47,7 @@ def make_response(
 def router_error_response_factory(request: Any, context: Any, error: Exception) -> bytes:
     """Factory to create standardized ContextUnit error responses for Router.
 
-    Used with cu.core.exceptions.grpc_error_handler to prevent gRPC aborts
+    Used with contextunity.core.exceptions.grpc_error_handler to prevent gRPC aborts
     and instead return standard ContextUnity protocol payloads to clients.
     """
     if isinstance(error, ValueError):

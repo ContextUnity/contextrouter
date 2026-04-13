@@ -579,7 +579,7 @@ class TestTenantIsolation:
             _reset_token(ref)
 
     def test_import_error_fails_closed(self, raw_tool):
-        """If cu.core.authz can't be imported, tool is BLOCKED."""
+        """If contextunity.core.authz can't be imported, tool is BLOCKED."""
         secure = SecureTool.wrap(raw_tool, permission="tool:raw_dummy")
         token = _make_token(
             permissions=("tool:raw_dummy",),
@@ -589,7 +589,7 @@ class TestTenantIsolation:
         try:
             import sys
 
-            # Temporarily hide cu.core.authz
+            # Temporarily hide contextunity.core.authz
             original = sys.modules.get("contextunity.core.authz")
             sys.modules["contextunity.core.authz"] = None  # type: ignore
             try:

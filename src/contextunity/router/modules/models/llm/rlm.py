@@ -72,7 +72,7 @@ class RLMLLM(BaseModel):
         """Initialize RLM wrapper.
 
         Args:
-            config: cu.router configuration
+            config: contextunity.router configuration
             model_name: Base model to use (e.g., "gpt-5-mini", "claude-sonnet")
             environment: REPL environment type:
                 - "local": Uses Python exec (default, same process)

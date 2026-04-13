@@ -1,4 +1,4 @@
-"""Typer-enhanced CLI entrypoint for cu.router with beautiful error output."""
+"""Typer-enhanced CLI entrypoint for contextunity.router with beautiful error output."""
 
 from contextunity.router.cli.app import main
 

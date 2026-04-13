@@ -1,4 +1,4 @@
-"""Shared, vendor-neutral types used across cu.router.
+"""Shared, vendor-neutral types used across contextunity.router.
 
 Keep these types *generic* and reusable across:
 - brain (LangGraph agent)
@@ -52,7 +52,7 @@ class TextQuery(TypedDict):
 class SqlQuery(TypedDict, total=False):
     """A structured SQL query.
 
-    This is *transported* through cu.router but executed only by providers that
+    This is *transported* through contextunity.router but executed only by providers that
     understand it (e.g., a Postgres analytics provider).
     """
 

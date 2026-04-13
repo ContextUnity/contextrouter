@@ -1,7 +1,7 @@
-"""Exception hierarchy for cu.router.
+"""Exception hierarchy for contextunity.router.
 
 Service-specific base class. All shared exceptions, ErrorRegistry, and gRPC
-error handlers live in cu.core.exceptions — import them directly from there.
+error handlers live in contextunity.core.exceptions — import them directly from there.
 
 Usage:
     from contextunity.router.core.exceptions import ContextrouterError
@@ -14,10 +14,10 @@ from contextunity.core.exceptions import ContextUnityError
 
 
 class ContextrouterError(ContextUnityError):
-    """Base exception for cu.router.
+    """Base exception for contextunity.router.
 
     Inherits from ContextUnityError so that centralized gRPC error handlers
-    in cu.core catch router-specific exceptions automatically.
+    in contextunity.core catch router-specific exceptions automatically.
     """
 
     pass

@@ -1,4 +1,4 @@
-"""Contract tests for cu.router exception hierarchy.
+"""Contract tests for contextunity.router exception hierarchy.
 
 Verifies that:
 1. ContextrouterError inherits from ContextUnityError (centralized hierarchy)

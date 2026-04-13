@@ -1,13 +1,13 @@
 """contextunity.zero privacy tools for Dispatcher Agent.
 
-These tools expose cu.zero's privacy proxy functionality
+These tools expose contextunity.zero's privacy proxy functionality
 as LangChain tools that the dispatcher agent can use autonomously.
 
 Dual-mode operation:
-  1. **Local** — when cu.zero package is installed, call directly
+  1. **Local** — when contextunity.zero package is installed, call directly
   2. **RPC** — when CU_ZERO_GRPC_HOST is set, use gRPC stub
 
-When cu.zero is installed, tools are auto-registered on import.
+When contextunity.zero is installed, tools are auto-registered on import.
 If not installed, the module is silently skipped (see discover_all_tools).
 
 Tools:
@@ -54,7 +54,7 @@ def _get_grpc_stub():
 
     channel = create_channel(host)
     _grpc_stub = zero_pb2_grpc.ZeroServiceStub(channel)
-    logger.info("Connected to cu.zero async gRPC at %s", host)
+    logger.info("Connected to contextunity.zero async gRPC at %s", host)
     return _grpc_stub
 
 
@@ -136,7 +136,7 @@ def _get_proxy_service() -> Any:
         masking_config=MaskingConfig(),
         config=config,
     )
-    logger.info("Initialized cu.zero ProxyService for Router tools")
+    logger.info("Initialized contextunity.zero ProxyService for Router tools")
     return _proxy_service
 
 
@@ -369,7 +369,7 @@ _PRIVACY_TOOLS = [t for t, _ in _PRIVACY_TOOL_PERMISSIONS]
 for _t, _perm in _PRIVACY_TOOL_PERMISSIONS:
     register_tool(_t, permission=_perm, scope="execute")
 
-logger.info("Registered %d cu.zero privacy tools", len(_PRIVACY_TOOLS))
+logger.info("Registered %d contextunity.zero privacy tools", len(_PRIVACY_TOOLS))
 
 __all__ = [
     "anonymize_text",

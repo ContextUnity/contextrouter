@@ -1,13 +1,13 @@
 """contextunity.shield security tools for Dispatcher Agent.
 
-These tools expose cu.shield's AI Firewall, Policy Engine, and
+These tools expose contextunity.shield's AI Firewall, Policy Engine, and
 compliance checking as LangChain tools for the dispatcher agent.
 
 Dual-mode operation:
-  1. **Local** — when cu.shield package is installed, call directly
+  1. **Local** — when contextunity.shield package is installed, call directly
   2. **RPC** — when CU_SHIELD_GRPC_HOST is set, use gRPC stub
 
-When cu.shield is installed, tools are auto-registered on import.
+When contextunity.shield is installed, tools are auto-registered on import.
 If not installed, the module is silently skipped.
 
 Tools:
@@ -52,7 +52,7 @@ def _get_grpc_stub():
 
     channel = create_channel_sync(host)
     _grpc_stub = shield_pb2_grpc.ShieldServiceStub(channel)
-    logger.info("Connected to cu.shield gRPC at %s", host)
+    logger.info("Connected to contextunity.shield gRPC at %s", host)
     return _grpc_stub
 
 
@@ -176,7 +176,7 @@ async def check_policy(
     permissions: list[str] | None = None,
     token_id: str | None = None,
 ) -> DataToolResult:
-    """Check if an action is allowed by the cu.shield policy engine.
+    """Check if an action is allowed by the contextunity.shield policy engine.
 
     Use this to verify authorization before performing sensitive operations.
     The policy engine evaluates declarative rules including:
@@ -326,7 +326,7 @@ async def audit_event(
     actor: str = "",
     metadata: dict[str, str] | None = None,
 ) -> str:
-    """Log a security audit event to the cu.shield audit trail.
+    """Log a security audit event to the contextunity.shield audit trail.
 
     Use to record security-relevant events such as:
     - Access control decisions
@@ -398,7 +398,7 @@ _SECURITY_TOOLS = [
 for _t in _SECURITY_TOOLS:
     register_tool(_t)
 
-logger.info("Registered %d cu.shield security tools", len(_SECURITY_TOOLS))
+logger.info("Registered %d contextunity.shield security tools", len(_SECURITY_TOOLS))
 
 __all__ = [
     "shield_scan",

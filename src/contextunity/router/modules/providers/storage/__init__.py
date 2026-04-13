@@ -1,7 +1,7 @@
 """Storage providers.
 
 Active providers:
-- BrainProvider: delegates to cu.brain gRPC (primary)
+- BrainProvider: delegates to contextunity.brain gRPC (primary)
 - GCSProvider: Google Cloud Storage read/write
 - VertexProvider: Vertex AI Search retrieval
 - PostgresProvider: local pgvector hybrid search

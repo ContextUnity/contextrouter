@@ -1,9 +1,9 @@
-"""gRPC interceptor for cu.router permission enforcement.
+"""gRPC interceptor for contextunity.router permission enforcement.
 
 Maps each Router RPC method to the exact permission required
 and validates the ContextToken carries that permission.
 
-Delegates to ``cu.core.security.ServicePermissionInterceptor``
+Delegates to ``contextunity.core.security.ServicePermissionInterceptor``
 for unified enforcement logic. Router only owns the RPC_PERMISSION_MAP.
 """
 

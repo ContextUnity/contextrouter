@@ -113,7 +113,7 @@ class KnowledgeGraphData:
 class RLMDataLoader:
     """Loader for taxonomy and KG data for RLM matching.
 
-    Connects to cu.brain to fetch:
+    Connects to contextunity.brain to fetch:
     - Taxonomy domains (category, color, size, gender)
     - Knowledge Graph edges (MADE_BY, HAS_COLOR, FOR_GENDER, USES)
     """
@@ -126,7 +126,7 @@ class RLMDataLoader:
         """Initialize data loader.
 
         Args:
-            brain_url: cu.brain gRPC URL. Uses default if not specified.
+            brain_url: contextunity.brain gRPC URL. Uses default if not specified.
             tenant_id: Tenant ID for filtering data. Must be provided by caller — no default.
         """
         if not tenant_id:
@@ -335,7 +335,7 @@ async def load_taxonomy_for_rlm(
     """Load taxonomy data formatted for RLM variable injection.
 
     Args:
-        brain_url: cu.brain gRPC URL.
+        brain_url: contextunity.brain gRPC URL.
         tenant_id: Tenant ID for filtering (required — project-specific, no default).
 
     Returns:
@@ -353,7 +353,7 @@ async def load_knowledge_graph_for_rlm(
     """Load KG data formatted for RLM variable injection.
 
     Args:
-        brain_url: cu.brain gRPC URL.
+        brain_url: contextunity.brain gRPC URL.
         tenant_id: Tenant ID for filtering (required — project-specific, no default).
 
     Returns:

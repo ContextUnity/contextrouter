@@ -173,7 +173,7 @@ class RegistrationMixin:
         if not bundle:
             raise ValueError(
                 "RegisterManifest requires 'bundle' — a pre-compiled registration bundle "
-                "from ArtifactGenerator (cu.core.manifest.generators)"
+                "from ArtifactGenerator (contextunity.core.manifest.generators)"
             )
 
         project_id = bundle.get("project_id", "")
@@ -183,7 +183,7 @@ class RegistrationMixin:
             raise ValueError(
                 "RegisterManifest payload must NOT contain 'project_secret'. "
                 "HMAC secrets are resolved from CU_PROJECT_SECRET env var. "
-                "Update your cu.core SDK."
+                "Update your contextunity.core SDK."
             )
 
         from contextunity.core.authz import authorize

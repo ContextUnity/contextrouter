@@ -1,4 +1,4 @@
-"""Core framework primitives for cu.router.
+"""Core framework primitives for contextunity.router.
 
 This package is the long-term home for:
 - configuration (Pydantic settings, layered sources)
@@ -6,7 +6,7 @@ This package is the long-term home for:
 - shared interfaces and state models
 
 During migration this module must remain non-breaking: existing production entry
-points continue to live in `cu.router.cortex.*` until the final cleanup phase.
+points continue to live in `contextunity.router.cortex.*` until the final cleanup phase.
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ __all__ = [
     # Registry
     "agent_registry",  # Direct access for compatibility
     "graph_registry",  # Direct access for compatibility
-    "registry",  # Access via cu.router.core.registry
+    "registry",  # Access via contextunity.router.core.registry
     # Plugins
     "plugins",  # Plugin manifest and context system
     # Security

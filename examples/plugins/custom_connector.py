@@ -1,4 +1,4 @@
-"""Example custom connector plugin for cu.router.
+"""Example custom connector plugin for contextunity.router.
 
 This shows how to add custom data connectors.
 """

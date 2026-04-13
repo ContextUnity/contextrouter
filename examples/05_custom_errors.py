@@ -32,7 +32,7 @@ def main():
     try:
         fetch_from_legacy_system()
     except ContextrouterError as e:
-        print("\nCaught cu.router error!")
+        print("\nCaught contextunity.router error!")
         print(f"Code: {e.code}")
         print(f"Message: {e.message}")
         print(f"Details: {e.details}")

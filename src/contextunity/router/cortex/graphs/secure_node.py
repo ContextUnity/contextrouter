@@ -5,6 +5,7 @@ import inspect
 from typing import Any, Callable, TypeVar
 
 from contextunity.core import get_contextunit_logger
+from contextunity.core.exceptions import SecurityError
 from contextunity.core.tokens import TokenBuilder
 
 from contextunity.router.cortex.runtime_context import (
@@ -49,8 +50,14 @@ def make_secure_node(
     def execute_with_token(state: StateT, required_scopes: list[str]) -> tuple[Any, Any]:
         token = get_current_access_token()
         if not token:
-            logger.warning("Node '%s' executed without an active ContextToken", node_name)
-            return None, None
+            raise SecurityError(
+                message=(
+                    f"Node '{node_name}' cannot execute without an active ContextToken. "
+                    "This indicates broken security context propagation — "
+                    "the gRPC entry point must set the token before graph execution."
+                ),
+                node_name=node_name,
+            )
 
         logger.debug("Node '%s' capability stripping: permissions=%s", node_name, required_scopes)
 
@@ -214,9 +221,6 @@ def make_secure_node(
             # Prompt integrity: verify signature before execution
             _check_prompt_integrity(state)
 
-            if token_ref is None:
-                return await node_func(state, *args, **kwargs)
-
             try:
                 return await node_func(state, *args, **kwargs)
             finally:
@@ -244,9 +248,6 @@ def make_secure_node(
 
         # Prompt integrity: verify signature before execution
         _check_prompt_integrity(state)
-
-        if token_ref is None:
-            return node_func(state, *args, **kwargs)
 
         try:
             return node_func(state, *args, **kwargs)

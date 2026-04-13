@@ -10,7 +10,7 @@ Use cases:
 - Small specialized models
 - Offline environments
 
-Requires: `uv add cu.router[hf-transformers]`
+Requires: `uv add contextunity.router[hf-transformers]`
 """
 
 from __future__ import annotations
@@ -109,7 +109,7 @@ class HuggingFaceLLM(BaseModel):
         except ImportError as e:
             raise ImportError(
                 "HuggingFace transformers not installed. "
-                "HuggingFaceLLM requires `cu.router[hf-transformers]`."
+                "HuggingFaceLLM requires `contextunity.router[hf-transformers]`."
             ) from e
 
         try:

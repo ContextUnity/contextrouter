@@ -1,7 +1,7 @@
 """
 Enricher BiDi tools client.
 
-Provides type-safe tools for cu.commerce manipulation during enrichment.
+Provides type-safe tools for contextunity.commerce manipulation during enrichment.
 """
 
 from __future__ import annotations

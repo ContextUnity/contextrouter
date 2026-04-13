@@ -1,11 +1,11 @@
 """Prompt templates owned by the brain, split by concern.
 
 Preferred imports:
-- `cu.router.cortex.prompting.intent`
-- `cu.router.cortex.prompting.rag`
-- `cu.router.cortex.prompting.no_results`
-- `cu.router.cortex.prompting.identity`
-- `cu.router.cortex.prompting.suggest`
+- `contextunity.router.cortex.prompting.intent`
+- `contextunity.router.cortex.prompting.rag`
+- `contextunity.router.cortex.prompting.no_results`
+- `contextunity.router.cortex.prompting.identity`
+- `contextunity.router.cortex.prompting.suggest`
 """
 
 from __future__ import annotations

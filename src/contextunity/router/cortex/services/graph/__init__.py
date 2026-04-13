@@ -75,7 +75,9 @@ def get_graph_service(
                 if ontology_path is None:
                     ontology_path = paths.get("ontology")
             except ImportError:
-                logger.warning("Could not load config for default paths (cu.brain not available)")
+                logger.warning(
+                    "Could not load config for default paths (contextunity.brain not available)"
+                )
 
         # Back-compat: some repos store graph as knowledge_graph.gpickle
         if graph_path is not None and not graph_path.exists():

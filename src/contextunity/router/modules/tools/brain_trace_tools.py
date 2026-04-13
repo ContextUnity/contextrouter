@@ -1,13 +1,13 @@
 """Brain Trace Tools for Router graphs.
 
-Provides **universal** execution trace logging backed by cu.brain via SDK.
+Provides **universal** execution trace logging backed by contextunity.brain via SDK.
 Any graph (dispatcher, sql_analytics, custom) can call ``log_execution_trace``
-in its final node to persist a rich trace visible in cu.view dashboard.
+in its final node to persist a rich trace visible in contextunity.view dashboard.
 
 Key contract:
     * ``tool_calls`` — lightweight summary list (tool name + status).
     * ``steps`` — **detailed** step-by-step timeline with per-step timing,
-      request/result data, and token usage.  cu.view renders this as the
+      request/result data, and token usage.  contextunity.view renders this as the
       "Graph Journey" section and the "Conversation Flow" tab.
     * The tool also records an **episodic memory** entry so the execution
       appears in the Memory Discovery section.
@@ -82,7 +82,7 @@ async def log_execution_trace(
     tool_calls: list[ToolCallSummary],
     token_usage: TotalTokenUsage,
     timing_ms: int,
-    # ── Rich trace fields (used by cu.view dashboard) ──
+    # ── Rich trace fields (used by contextunity.view dashboard) ──
     steps: list[dict[str, Any]] | None = None,
     platform: str = "",
     model_key: str = "",
@@ -96,10 +96,10 @@ async def log_execution_trace(
     security_flags: dict[str, Any] | None = None,
     record_episode: bool = True,
 ) -> TraceResult:
-    """Log a full execution trace to cu.brain for observability.
+    """Log a full execution trace to contextunity.brain for observability.
 
     Call this at the end of any graph execution to persist the trace.
-    The trace will be visible in cu.view dashboard with full
+    The trace will be visible in contextunity.view dashboard with full
     Graph Journey, Conversation Flow, per-tool timing, and Memory Discovery.
 
     Args:
@@ -138,7 +138,7 @@ async def log_execution_trace(
         full_metadata.setdefault("iterations", iterations)
         full_metadata.setdefault("message_count", message_count)
 
-        # Steps are the key field for cu.view's Graph Journey
+        # Steps are the key field for contextunity.view's Graph Journey
         if steps:
             full_metadata["steps"] = steps
 
@@ -247,7 +247,7 @@ async def record_execution_episode(
     """Record an execution episode in Brain's episodic memory.
 
     Creates a rich episodic memory entry summarizing the agent's execution.
-    This feeds into cu.view dashboard and can be recalled later.
+    This feeds into contextunity.view dashboard and can be recalled later.
 
     Note: ``log_execution_trace`` already records an episode automatically
     when ``record_episode=True`` (the default).  Use this tool only when

@@ -351,7 +351,7 @@ async def generate_with_grounding(
     except ImportError as e:
         logger.error("Google Gen AI SDK not available: %s", e)
         raise ProviderError(
-            "Google Gen AI SDK not installed. Install with: pip install 'google-genai' or install cu.router with vertex extras: pip install 'contextunity.router[vertex]'",
+            "Google Gen AI SDK not installed. Install with: pip install 'google-genai' or install contextunity.router with vertex extras: pip install 'contextunity.router[vertex]'",
             code="VERTEX_GROUNDING_IMPORT_ERROR",
         ) from e
     except Exception as e:

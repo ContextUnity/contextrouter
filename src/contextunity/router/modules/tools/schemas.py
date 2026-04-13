@@ -1,4 +1,4 @@
-"""Centralized type definitions and models for cu.router tools.
+"""Centralized type definitions and models for contextunity.router.tools.
 
 This module stores all Pydantic models and TypedDicts used as schemas or
 return types for the various LLM tools. Keeping them here avoids circular
@@ -49,7 +49,7 @@ class TotalTokenUsage(TypedDict, total=False):
 
 
 class TraceStep(TypedDict):
-    """A detailed step in the execution graph (rendered in cu.view)."""
+    """A detailed step in the execution graph (rendered in contextunity.view)."""
 
     step: int
     iteration: int

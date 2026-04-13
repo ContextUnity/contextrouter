@@ -1,6 +1,6 @@
 """SecureTool — BaseTool subclass with mandatory permission enforcement.
 
-Every tool in cu.router MUST be (or be wrapped by) a SecureTool.
+Every tool in contextunity.router MUST be (or be wrapped by) a SecureTool.
 Raw BaseTool instances are auto-wrapped by ``register_tool()``.
 
 Security model:
@@ -11,7 +11,7 @@ Security model:
     internal Router code, never by external registration or wrap())
 
 Contract:
-  - cu.core defines WHAT to check: ``has_tool_access()``, ``ToolScope``
+  - contextunity.router and contextunity.core define WHAT to check: ``has_tool_access()``, ``ToolScope``
   - SecureTool defines HOW to enforce at runtime (LangChain integration)
 """
 

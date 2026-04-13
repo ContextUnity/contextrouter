@@ -5,7 +5,7 @@ This module owns *RAG-specific* defaults and env/runtime overrides:
 - citation limits
 - blue/green datastore selection and resolution
 
-Core (`cu.router.core`) should not contain these settings.
+Core (`contextunity.router.core`) should not contain these settings.
 """
 
 from __future__ import annotations

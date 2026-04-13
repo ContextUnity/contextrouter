@@ -1,4 +1,4 @@
-"""Vertex AI-backed LLM provider (ported from `cu.router.cortex.llm`)."""
+"""Vertex AI-backed LLM provider (ported from `contextunity.router.cortex.llm`)."""
 
 from __future__ import annotations
 
@@ -97,7 +97,7 @@ class VertexLLM(BaseModel):
                 "Set them in core settings.toml under [vertex], or via env vars "
                 "VERTEX_PROJECT_ID and VERTEX_LOCATION "
                 "(you can put them in `.env`). "
-                "When cu.router is embedded as a library, the host may also set "
+                "When contextunity.router is embedded as a library, the host may also set "
                 "CU_ROUTER_VERTEX_PROJECT_ID / CU_ROUTER_VERTEX_LOCATION."
             )
         if self._credentials is None:

@@ -286,7 +286,7 @@ def scan(plugin_dir: Path) -> list[Any]:
     """Scan a directory for manifest-based plugins.
 
     Each plugin is a subdirectory containing a ``plugin.yaml`` manifest.
-    Plugins are loaded via :func:`cu.router.core.plugins.load_plugin`
+    Plugins are loaded via :func:`contextunity.router.core.plugins.load_plugin`
     and receive a capability-gated :class:`PluginContext`.
 
     Args:

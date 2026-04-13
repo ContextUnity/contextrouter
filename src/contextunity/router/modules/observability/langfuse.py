@@ -104,7 +104,7 @@ def _langfuse_available() -> bool:
             _warned_missing_langfuse = True
             logger.warning(
                 "Langfuse keys are set but the `langfuse` package is not installed. "
-                "Install with `pip install cu.router[observability]` to enable tracing."
+                "Install with `pip install contextunity.router[observability]` to enable tracing."
             )
         return False
     return True

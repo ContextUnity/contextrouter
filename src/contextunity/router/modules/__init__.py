@@ -1,4 +1,4 @@
-"""Pluggable capabilities for cu.router.
+"""Pluggable capabilities for contextunity.router.
 
 - connectors/: sources
 - transformers/: pure-ish logic pipes

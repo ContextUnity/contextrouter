@@ -1,6 +1,6 @@
 """Core (vendor-agnostic) agent state models.
 
-During migration, `cu.router.cortex.state` continues to define the LangGraph
+During migration, `contextunity.router.cortex.state` continues to define the LangGraph
 TypedDict state used in production. This module introduces Pydantic-based state
 models to support stronger validation and deterministic normalization in the new
 framework layout.

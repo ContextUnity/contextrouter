@@ -1,7 +1,7 @@
-"""Universal automatic LangGraph tracer for cu.brain.
+"""Universal automatic LangGraph tracer for contextunity.brain.
 
 This AsyncCallbackHandler builds a hierarchical ''steps'' tree compatible
-with the cu.view ``nested_steps`` dashboard architecture.
+with the contextunity.view ``nested_steps`` dashboard architecture.
 
 Tracing sources (provider-agnostic):
   • **Tools** — captured via LangChain on_tool_start/end (tools ARE BaseTool).
@@ -25,7 +25,7 @@ from contextunity.router.modules.tools.schemas import ToolCallSummary, TraceStep
 
 class BrainAutoTracer(AsyncCallbackHandler):
     """Automatically records all Langchain/LangGraph execution steps into a hierarchical
-    tree structure that maps perfectly to cu.view's Graph Journey."""
+    tree structure that maps perfectly to contextunity.view's Graph Journey."""
 
     def __init__(self):
         super().__init__()
@@ -224,7 +224,7 @@ class BrainAutoTracer(AsyncCallbackHandler):
     ) -> None:
         name = serialized.get("name", "llm") if serialized else "llm"
 
-        # Format full messages (including system) for cu.view observability
+        # Format full messages (including system) for contextunity.view observability
         msgs_fmt = []
         if messages:
             for msg_list in messages:

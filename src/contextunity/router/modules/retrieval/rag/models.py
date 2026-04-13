@@ -1,7 +1,7 @@
 """RAG-specific runtime models.
 
 These models exist to support the "RAG with citations" capability.
-They MUST NOT leak into `cu.router.core` (knowledge-agnostic kernel).
+They MUST NOT leak into `contextunity.router.core` (knowledge-agnostic kernel).
 """
 
 from __future__ import annotations

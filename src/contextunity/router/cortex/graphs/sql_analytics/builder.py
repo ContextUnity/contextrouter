@@ -99,7 +99,7 @@ def build_sql_analytics_graph(config: dict) -> Any:
             if _get_grpc_stub() is not None:
                 logger.info("PII masking enabled (gRPC mode)")
             else:
-                # Fallback: local mode — check if cu.zero package is importable
+                # Fallback: local mode — check if contextunity.zero package is importable
                 try:
                     import contextunity.zero  # noqa: F401
 
@@ -107,8 +107,8 @@ def build_sql_analytics_graph(config: dict) -> Any:
                 except ImportError:
                     # Both gRPC and Local modes are unavailable
                     raise RuntimeError(
-                        "pii_masking=True but cu.zero is unreachable "
-                        "(no gRPC endpoint resolved and local cu.zero package not installed). "
+                        "pii_masking=True but contextunity.zero is unreachable "
+                        "(no gRPC endpoint resolved and local contextunity.zero package not installed). "
                         "Strict PII isolation cannot be guaranteed."
                     )
 

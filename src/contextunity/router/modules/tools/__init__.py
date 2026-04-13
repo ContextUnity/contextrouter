@@ -320,7 +320,7 @@ def discover_all_tools() -> list[SecureTool]:
     except ImportError as e:
         logger.debug("Could not import SQL tools: %s", e)
 
-    # Discover cu.zero privacy tools (optional — requires cu.zero package)
+    # Discover contextunity.zero privacy tools (optional — requires contextunity.zero package)
     try:
         from contextunity.router.modules.tools import privacy_tools  # noqa: F401
 
@@ -329,7 +329,7 @@ def discover_all_tools() -> list[SecureTool]:
     except ImportError:
         logger.debug("contextunity.zero not installed — privacy tools unavailable")
 
-    # Discover cu.shield security tools (optional — requires cu.shield package)
+    # Discover contextunity.shield security tools (optional — requires contextunity.shield package)
     try:
         from contextunity.router.modules.tools import security_tools  # noqa: F401
 

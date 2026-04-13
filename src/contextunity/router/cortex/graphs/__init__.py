@@ -1,5 +1,5 @@
 """
-cu.router graphs package.
+contextunity.router graphs package.
 
 Structure:
     graphs/

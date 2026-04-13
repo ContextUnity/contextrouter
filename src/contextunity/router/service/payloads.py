@@ -141,7 +141,7 @@ class GraphConfig(BaseModel):
 class RegisterManifestPayload(BaseModel):
     """Payload for RegisterManifest RPC.
 
-    Expects a pre-compiled bundle from ArtifactGenerator (cu.core.manifest).
+    Expects a pre-compiled bundle from ArtifactGenerator (contextunity.core.manifest).
     Bundle is compiled project-side with secrets resolved from project's os.environ.
 
     {

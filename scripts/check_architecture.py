@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Architecture enforcement checks for cu.router.
+"""Architecture enforcement checks for contextunity.router.
 
 This script runs as part of CI/pre-commit to catch architectural violations.
 Exit code 0 = all checks passed, non-zero = violations found.
@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 # Where to check
-CORTEX_GRAPHS = "src/cu.router/cortex/graphs"
+CORTEX_GRAPHS = "src/contextunity.router/cortex/graphs"
 
 # Patterns that violate architecture
 VIOLATIONS = [

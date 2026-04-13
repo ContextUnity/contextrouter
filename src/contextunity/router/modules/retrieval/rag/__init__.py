@@ -1,6 +1,6 @@
 """RAG retrieval module (orchestration + ranking + formatting).
 
-This package is intentionally *lazy-imported* to avoid cycles with `cu.router.cortex`.
+This package is intentionally *lazy-imported* to avoid cycles with `contextunity.router.cortex`.
 Import from here for DX; heavy modules are loaded on first attribute access.
 """
 

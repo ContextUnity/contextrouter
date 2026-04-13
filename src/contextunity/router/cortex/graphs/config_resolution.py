@@ -48,5 +48,5 @@ def get_node_manifest_config(state: dict, node_name: str) -> dict[str, Any]:
 
 
 def make_shield_path(node_name: str) -> str:
-    """Compute the cu.shield lookup path for a node's primary model key."""
+    """Compute the contextunity.shield lookup path for a node's primary model key."""
     return f"{node_name}/model_secret_ref"

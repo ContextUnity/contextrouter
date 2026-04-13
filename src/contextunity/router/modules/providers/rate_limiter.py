@@ -1,9 +1,9 @@
-"""Rate limiter for cu.router.
+"""Rate limiter for contextunity.router.
 
 Redis-based sliding window rate limiter for API and agent request throttling.
 Supports per-token, per-tenant, and per-IP limiting.
 
-Exception handling uses cu.core.exceptions hierarchy.
+Exception handling uses contextunity.core.exceptions hierarchy.
 
 Usage:
     from contextunity.router.modules.providers.rate_limiter import RateLimiter
@@ -29,7 +29,7 @@ logger = get_contextunit_logger(__name__)
 class RateLimitExceeded(ProviderError):
     """Raised when a rate limit is exceeded.
 
-    Inherits from ProviderError (cu.core.exceptions) since
+    Inherits from ProviderError (contextunity.core.exceptions) since
     rate limiting is a provider-level concern.
     """
 
@@ -52,7 +52,7 @@ class RateLimitExceeded(ProviderError):
 
 
 class RateLimiter:
-    """Redis-based sliding window rate limiter for cu.router.
+    """Redis-based sliding window rate limiter for contextunity.router.
 
     Features:
         - Per-identifier limits (token_id, tenant_id, IP)

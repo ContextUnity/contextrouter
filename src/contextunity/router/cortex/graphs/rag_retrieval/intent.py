@@ -201,7 +201,7 @@ async def detect_intent(state: AgentState) -> dict[str, object]:
                 concepts.append(c.strip())
     concepts = list(dict.fromkeys(concepts))[:10]
 
-    # Back-compat with pre-split `packages/cu.router`:
+    # Back-compat with pre-split `packages/contextunity.router`:
     # strengthen retrieval queries with deterministic taxonomy concepts.
     # This ensures we don't rely purely on the LLM for domain-term retrieval and
     # helps when the cleaned query is broad but taxonomy concepts are specific.

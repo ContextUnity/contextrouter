@@ -1,4 +1,4 @@
-"""gRPC error handling decorators for cu.router dispatcher service."""
+"""gRPC error handling decorators for contextunity.router dispatcher service."""
 
 from __future__ import annotations
 

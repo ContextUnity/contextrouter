@@ -2,7 +2,7 @@
 
 This module must be side-effect free (no env loading, no model initialization).
 Model selection + instantiation lives in `modules/models/*` and is driven by
-`cu.router.core.config.Config`.
+`contextunity.router.core.config.Config`.
 """
 
 from __future__ import annotations

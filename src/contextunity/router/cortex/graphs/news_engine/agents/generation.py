@@ -255,8 +255,8 @@ async def store_posts_node(state: NewsEngineState) -> Dict[str, Any]:
         from contextunity.core.sdk.clients.router import RouterClient
 
         # We instantiate a stateless router client
-        # In the context of a graph execution on cu.router,
-        # we can still make an outgoing gRPC call to cu.router's self,
+        # In the context of a graph execution on contextunity.router,
+        # we can still make an outgoing gRPC call to contextunity.router's self,
         # which will proxy it to the connected bi-di client.
         client = RouterClient()
         await client.execute_tool(

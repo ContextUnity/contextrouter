@@ -1,6 +1,6 @@
 """Brain Memory Tools for Dispatcher Agent.
 
-Provides persistent memory operations backed by cu.brain via SDK.
+Provides persistent memory operations backed by contextunity.brain via SDK.
 These tools expose episodic memory and entity (fact) storage to LLM agents.
 """
 

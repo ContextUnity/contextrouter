@@ -4,7 +4,7 @@ Lexicon node implementations.
 Each node is a pure async function that takes LexiconState and returns state updates.
 Follows the same patterns as Gardener nodes: LLM calls, JSON parsing, error handling.
 
-Exception handling uses cu.core.exceptions hierarchy.
+Exception handling uses contextunity.core.exceptions hierarchy.
 """
 
 from __future__ import annotations

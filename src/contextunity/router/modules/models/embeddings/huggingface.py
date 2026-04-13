@@ -60,7 +60,9 @@ class HuggingFaceEmbeddings(BaseEmbeddings):
         try:
             from sentence_transformers import SentenceTransformer
         except ImportError as e:
-            raise ImportError("SentenceTransformers requires `cu.router[hf-embeddings]`.") from e
+            raise ImportError(
+                "SentenceTransformers requires `contextunity.router[hf-embeddings]`."
+            ) from e
         self._model = SentenceTransformer(self._model_name)
         return self._model
 

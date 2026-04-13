@@ -104,7 +104,7 @@ def create_rlm_bulk_matcher_subgraph():
     - 85%+ match rate with multi-factor comparison
     - Handles context degradation via REPL recursion
 
-    Requires: pip install rlm (or uv add cu.router[rlm])
+    Requires: pip install rlm (or uv add contextunity.router[rlm])
 
     Usage:
         graph = create_rlm_bulk_matcher_subgraph()

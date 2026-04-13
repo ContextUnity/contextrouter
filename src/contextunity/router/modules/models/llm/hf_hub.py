@@ -47,7 +47,9 @@ class HuggingFaceHubLLM(BaseModel):
         try:
             from huggingface_hub import AsyncInferenceClient
         except ImportError as e:  # pragma: no cover
-            raise ImportError("HuggingFaceHubLLM requires `cu.router[models-hf-hub]`.") from e
+            raise ImportError(
+                "HuggingFaceHubLLM requires `contextunity.router[models-hf-hub]`."
+            ) from e
 
         self._cfg = config
         self._model_name = (model_name or "").strip() or "mistralai/Mistral-7B-Instruct-v0.2"

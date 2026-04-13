@@ -1,6 +1,6 @@
 """Router → Brain service token factory.
 
-Thin wrapper over cu.core.tokens.get_brain_service_token().
+Thin wrapper over contextunity.core.tokens.get_brain_service_token().
 Kept for backward-compatible imports across the Router codebase.
 
 Usage::

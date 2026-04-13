@@ -39,7 +39,7 @@ except Exception:  # noqa: BLE001
 def __getattr__(name: str) -> Any:
     """Lazy exports to keep `import contextunity.router` lightweight.
 
-    This is important for CLI usage (`python -m cu.router.cli`) where we want
+    This is important for CLI usage (`python -m contextunity.router.cli`) where we want
     `--help` to work without importing the entire brain and its optional deps.
     """
     if name in {"invoke_agent", "stream_agent", "invoke_dispatcher", "stream_dispatcher"}:

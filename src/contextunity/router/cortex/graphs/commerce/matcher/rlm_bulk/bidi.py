@@ -1,4 +1,4 @@
-"""BiDi Client for RLM bulk matcher communication with cu.commerce."""
+"""BiDi Client for RLM bulk matcher communication with contextunity.commerce."""
 
 from __future__ import annotations
 

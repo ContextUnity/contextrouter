@@ -1,4 +1,4 @@
-"""Example custom agent plugin for cu.router.
+"""Example custom agent plugin for contextunity.router.
 
 This demonstrates how to add custom agents without modifying the core codebase.
 Place this file in a directory listed in your settings.toml [plugins].paths

@@ -191,7 +191,7 @@ class PluginsConfig(BaseModel):
 
 
 class BrainConfig(BaseModel):
-    """Configuration for cu.brain delegation."""
+    """Configuration for contextunity.brain delegation."""
 
     model_config = ConfigDict(extra="ignore")
 

@@ -1,4 +1,4 @@
-"""Basic example of using the cu.router agent.
+"""Basic example of using the contextunity.router.agent.
 
 This script demonstrates how to initialize the agent and stream events from it.
 """
@@ -12,7 +12,7 @@ async def main():
     # Example messages
     messages = [{"role": "user", "content": "What is the best way to implement RAG?"}]
 
-    print("Starting cu.router agent...")
+    print("Starting contextunity.router agent...")
 
     # stream_agent is the main entry point for the "shared brain"
     async for event in stream_agent(

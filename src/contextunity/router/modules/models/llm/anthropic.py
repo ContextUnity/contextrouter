@@ -2,7 +2,7 @@
 
 This provider is the same class of integration as OpenAI/Vertex: remote HTTP API.
 
-Requires: `uv add cu.router[models-anthropic]`
+Requires: `uv add contextunity.router[models-anthropic]`
 Config: `ANTHROPIC_API_KEY` env var or `config.anthropic.api_key`
 """
 
@@ -112,7 +112,7 @@ class AnthropicLLM(BaseModel):
             from langchain_anthropic import ChatAnthropic  # type: ignore[import-not-found]
         except ModuleNotFoundError as e:  # pragma: no cover
             raise ModuleNotFoundError(
-                "Anthropic provider requires `cu.router[models-anthropic]`."
+                "Anthropic provider requires `contextunity.router[models-anthropic]`."
             ) from e
 
         kwargs_init: dict[str, object] = {

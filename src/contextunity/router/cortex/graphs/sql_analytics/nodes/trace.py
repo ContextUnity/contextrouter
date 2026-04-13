@@ -1,7 +1,7 @@
 """Trace node — logs rich execution trace to Brain.
 
 Uses the universal ``log_execution_trace`` tool which handles:
-  • Detailed step timeline (Graph Journey in cu.view)
+  • Detailed step timeline (Graph Journey in contextunity.view)
   • Per-tool timing, request/result data
   • Token usage and cost estimation
   • Episodic memory recording
@@ -85,7 +85,7 @@ def make_reflect_node():
                     "tool_calls": tool_calls_summary,
                     "token_usage": token_usage,
                     "timing_ms": timing_ms,
-                    # ── Rich fields for cu.view ──
+                    # ── Rich fields for contextunity.view ──
                     "steps": steps,
                     "platform": metadata.get("platform", ""),
                     "model_key": metadata.get("model_key", ""),

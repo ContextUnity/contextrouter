@@ -1,10 +1,10 @@
 """Example: Custom graph tracing (Langfuse optional).
 
 This example demonstrates how to add observability to a custom LangGraph graph
-using cu.router's Langfuse integration.
+using contextunity.router's Langfuse integration.
 
 Important:
-- Langfuse is an optional dependency. Install with: `pip install cu.router[observability]`
+- Langfuse is an optional dependency. Install with: `pip install contextunity.router[observability]`
 - Tracing is enabled only when both keys are set (via `settings.toml` or env vars):
   - LANGFUSE_PUBLIC_KEY
   - LANGFUSE_SECRET_KEY
@@ -155,7 +155,7 @@ async def run_traced_custom_graph():
 
     # Prepare input
     input_state = {
-        "messages": [HumanMessage(content="What is cu.router and how does it work?")],
+        "messages": [HumanMessage(content="What is contextunity.router and how does it work?")],
         "session_id": "custom_tracing_example",
         "platform": "custom_graph_example",
         "citations_output": "raw",

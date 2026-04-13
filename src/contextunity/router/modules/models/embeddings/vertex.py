@@ -51,7 +51,7 @@ class VertexEmbeddings(BaseEmbeddings):
             from vertexai.preview.language_models import TextEmbeddingModel  # type: ignore
         except Exception as exc:
             raise RuntimeError(
-                "vertexai SDK is required for Vertex embeddings. Install extras: cu.router[vertex]"
+                "vertexai SDK is required for Vertex embeddings. Install extras: contextunity.router[vertex]"
             ) from exc
         vertexai.init(project=self._cfg.vertex.project_id, location=self._cfg.vertex.location)
         self._model = TextEmbeddingModel.from_pretrained(self._model_name)

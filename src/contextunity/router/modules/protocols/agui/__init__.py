@@ -1,4 +1,4 @@
-"""AG-UI protocol adapter (migrated from `cu.router.integrations.agui`)."""
+"""AG-UI protocol adapter (migrated from `contextunity.router.integrations.agui`)."""
 
 from __future__ import annotations
 

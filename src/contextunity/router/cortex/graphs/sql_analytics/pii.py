@@ -1,6 +1,6 @@
 """PII helpers — anonymize/deanonymize text around LLM calls.
 
-These are thin wrappers around cu.zero tools that ensure:
+These are thin wrappers around contextunity.zero tools that ensure:
 - Graceful degradation (original text returned on failure)
 - Consistent logging for debugging PII flow
 - Proper handling of both dict and str responses from tools

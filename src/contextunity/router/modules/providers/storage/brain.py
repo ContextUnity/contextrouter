@@ -1,6 +1,6 @@
-"""Brain provider (calls cu.brain service).
+"""Brain provider (calls contextunity.brain service).
 
-This provider delegates retrieval to the centralized cu.brain service.
+This provider delegates retrieval to the centralized contextunity.brain service.
 Supports both "local" (direct library call) and "grpc" (network call) modes.
 
 Uses ContextUnit as the universal data contract for all operations.
@@ -26,7 +26,7 @@ logger = get_contextunit_logger(__name__)
 
 
 class BrainProvider(BaseProvider, IRead):
-    """Provider that delegates to cu.brain service using ContextUnit protocol."""
+    """Provider that delegates to contextunity.brain service using ContextUnit protocol."""
 
     def __init__(self, **kwargs: Any) -> None:
         cfg = get_core_config()

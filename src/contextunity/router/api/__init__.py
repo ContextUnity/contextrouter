@@ -1,4 +1,4 @@
-"""API module for cu.router."""
+"""API module for contextunity.router."""
 
 from __future__ import annotations
 

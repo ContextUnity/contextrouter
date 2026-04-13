@@ -90,7 +90,7 @@ def build_graph(graph_name: str | None = None):
         "matcher_incremental": create_matcher_subgraph,
     }
 
-    # Optional: cu.zero privacy proxy graph
+    # Optional: contextunity.zero privacy proxy graph
     try:
         from contextunity.zero.graph import build_zero_graph
 

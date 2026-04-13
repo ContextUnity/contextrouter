@@ -18,7 +18,7 @@ try:
 except ImportError:
 
     def load_graph_secure(file_path: Path, hash_file_path: Path | None = None) -> Any:
-        """Fallback implementation if cu.brain is not available."""
+        """Fallback implementation if contextunity.brain is not available."""
         return joblib.load(file_path)
 
 

@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .base import get_bool_env, get_env, set_env_default
 
-# RAGConfig removed - ingestion moved to cu.brain
+# RAGConfig removed - ingestion moved to contextunity.brain
 # from .ingestion import RAGConfig
 from .models import LLMConfig, ModelsConfig, NewsEngineConfig, RouterConfig
 from .paths import ConfigPaths
@@ -66,7 +66,7 @@ class FlowConfig(BaseModel):
 
 
 class Config(BaseModel):
-    """Main configuration class for cu.router.
+    """Main configuration class for contextunity.router.
 
     This combines all configuration modules into a single, hierarchical structure.
     Configuration is loaded from multiple sources in priority order:
@@ -88,7 +88,7 @@ class Config(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)
     news_engine: NewsEngineConfig = Field(default_factory=NewsEngineConfig)
-    # rag and ingestion removed - moved to cu.brain
+    # rag and ingestion removed - moved to contextunity.brain
     # rag: RAGConfig = Field(default_factory=RAGConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
@@ -148,7 +148,7 @@ class Config(BaseModel):
         paths = config.paths
 
         # Deterministic `.env` loading: only load from the detected project root
-        # (e.g. `<repo>/cu.router/.env`). This avoids accidental cross-repo leakage.
+        # (e.g. `<repo>/contextunity.router/.env`). This avoids accidental cross-repo leakage.
         if paths.env_file.exists():
             load_dotenv(paths.env_file, override=False)
 
@@ -255,7 +255,7 @@ class Config(BaseModel):
         # - VERTEX_PROJECT_ID
         # - VERTEX_LOCATION
         #
-        # Optional host/embedding alias (e.g. when cu.router is used as a library):
+        # Optional host/embedding alias (e.g. when contextunity.router is used as a library):
         # - CU_ROUTER_VERTEX_PROJECT_ID
         # - CU_ROUTER_VERTEX_LOCATION
         if project_id := (get_env("VERTEX_PROJECT_ID") or get_env("CU_ROUTER_VERTEX_PROJECT_ID")):
@@ -411,7 +411,7 @@ class Config(BaseModel):
         shared_config = get_shared_core_config()
 
         # Security: private_key_path and environment removed — signing is
-        # handled by cu.core.signing backends (auto-detected).
+        # handled by contextunity.core.signing backends (auto-detected).
 
         # Redis configuration (from shared core)
         if shared_config.redis_url:
@@ -421,7 +421,7 @@ class Config(BaseModel):
         if debug_val := get_bool_env("CU_ROUTER_DEBUG"):
             self.debug = debug_val
 
-        # cu.router specific log level overrides shared core log level
+        # contextunity.router specific log level overrides shared core log level
         if log_level := get_env("CU_ROUTER_LOG_LEVEL"):
             self.log_level = log_level
         else:

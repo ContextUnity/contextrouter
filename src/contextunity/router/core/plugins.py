@@ -1,4 +1,4 @@
-"""Plugin manifest and context for cu.router plugin system.
+"""Plugin manifest and context for contextunity.router plugin system.
 
 Plugins are directories containing:
 - plugin.yaml — manifest with metadata, capabilities, and requirements
@@ -44,7 +44,7 @@ class PluginManifest(BaseModel):
         description: Custom enrichment tools for product data
         author: Acme Corp
         requires:
-          cu.router: ">=0.9.0"
+          contextunity.router: ">=0.9.0"
         capabilities:
           - tools
           - graphs
@@ -77,7 +77,7 @@ class PluginManifest(BaseModel):
 
 
 class PluginContext:
-    """Mediated access to cu.router services.
+    """Mediated access to contextunity.router.services.
 
     Plugins receive a PluginContext that restricts access to only the
     capabilities declared in their manifest.
@@ -237,7 +237,7 @@ def load_manifest(plugin_dir: Path) -> PluginManifest | None:
 
 
 def _check_version_compatibility(manifest: PluginManifest) -> None:
-    """Check if cu.router version satisfies plugin requirements."""
+    """Check if contextunity.router version satisfies plugin requirements."""
     required = manifest.requires.get("contextunity.router")
     if not required:
         return
@@ -250,7 +250,7 @@ def _check_version_compatibility(manifest: PluginManifest) -> None:
         current = Version(get_version("contextunity.router"))
     except Exception:
         # If we can't determine version, skip check
-        logger.debug("Could not determine cu.router version for plugin %s", manifest.name)
+        logger.debug("Could not determine contextunity.router version for plugin %s", manifest.name)
         return
 
     # Parse requirement like ">=0.9.0"
@@ -258,14 +258,14 @@ def _check_version_compatibility(manifest: PluginManifest) -> None:
         min_version = Version(required[2:])
         if current < min_version:
             raise ValueError(
-                f"Plugin '{manifest.name}' requires cu.router>={min_version}, "
+                f"Plugin '{manifest.name}' requires contextunity.router>={min_version}, "
                 f"but {current} is installed"
             )
     elif required.startswith("=="):
         exact = Version(required[2:])
         if current != exact:
             raise ValueError(
-                f"Plugin '{manifest.name}' requires cu.router=={exact}, but {current} is installed"
+                f"Plugin '{manifest.name}' requires contextunity.router=={exact}, but {current} is installed"
             )
 
 

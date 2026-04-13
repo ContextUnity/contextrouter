@@ -153,9 +153,9 @@ def _redact_sensitive_keys(data: Any) -> Any:
     """Recursively redact large or sensitive values for observability persistence.
 
     Domain considerations:
-    - cu.brain (Storage/UI): Redact bulky texts (`_prompt`, `_prompts`, `schema_description`)
-      to prevent DB bloat and ensure fast rendering in cu.view traces.
-    - cu.shield (Security): Redact cryptographic artifacts (`_signature`) from
+    - contextunity.brain (Storage/UI): Redact bulky texts (`_prompt`, `_prompts`, `schema_description`)
+      to prevent DB bloat and ensure fast rendering in contextunity.view traces.
+    - contextunity.shield (Security): Redact cryptographic artifacts (`_signature`) from
       telemetry to minimize exposure of verification hashes outside the execution boundary.
     """
     if isinstance(data, dict):
@@ -182,8 +182,8 @@ _LANGFUSE_KEYS = (
 def _clean_for_trace(metadata: dict) -> dict:
     """Prepare execution metadata for Brain trace persistence.
 
-    Domain boundary: cu.router (Execution) -> cu.brain (Observability).
-    The `project_config` contains heavy manifest definitions needed by cu.router
+    Domain boundary: contextunity.router (Execution) -> contextunity.brain (Observability).
+    The `project_config` contains heavy manifest definitions needed by contextunity.router
     at runtime (e.g., SecureNode verification, tool resolution).
     Before sending this payload over gRPC to Brain, we redact payload-heavy and
     security-sensitive properties, preserving only the structural telemetry data.
@@ -218,7 +218,7 @@ def _clean_for_trace(metadata: dict) -> dict:
             for k in _LANGFUSE_KEYS:
                 target.pop(k, None)
 
-        # 2. Swap keys to the end so they stack neatly in the cu.view UI
+        # 2. Swap keys to the end so they stack neatly in the contextunity.view UI
         for k in ui_bottom_keys:
             if k in target:
                 target[k] = target.pop(k)
@@ -268,7 +268,7 @@ def prepare_execution(
     )
 
     # Ensure the actual enabled state is stored back in metadata
-    # so cu.view can display the 'Langfuse (Disabled)' badge
+    # so contextunity.view can display the 'Langfuse (Disabled)' badge
     metadata["langfuse_enabled"] = langfuse_ctx.enabled
 
     auto_tracer = BrainAutoTracer()

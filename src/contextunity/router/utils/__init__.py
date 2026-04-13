@@ -1,4 +1,4 @@
-"""Small internal utilities for cu.router."""
+"""Small internal utilities for contextunity.router."""
 
 from __future__ import annotations
 

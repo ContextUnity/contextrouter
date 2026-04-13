@@ -1,7 +1,7 @@
 """Citation formatter for UI schemas.
 
 Converts Citation Pydantic models (snake_case) to canonical UI citation schema (camelCase).
-Logic is intentionally preserved 1:1 from `cu.router.integrations.citations.formatter`.
+Logic is intentionally preserved 1:1 from `contextunity.router.integrations.citations.formatter`.
 """
 
 from __future__ import annotations

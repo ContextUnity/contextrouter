@@ -1,4 +1,4 @@
-"""Security configuration for cu.router."""
+"""Security configuration for contextunity.router."""
 
 from contextunity.core.permissions import Permissions
 from pydantic import BaseModel, ConfigDict, Field
@@ -29,10 +29,10 @@ class SecurityPoliciesConfig(BaseModel):
 
 
 class SecurityConfig(BaseModel):
-    """Security settings for cu.router.
+    """Security settings for contextunity.router.
 
     Security is always enforced — there is no toggle.
-    Token signing/verification is handled by cu.core.signing backends
+    Token signing/verification is handled by contextunity.core.signing backends
     (auto-detected: HmacBackend or SessionTokenBackend).
     """
 

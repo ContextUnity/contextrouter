@@ -1,6 +1,6 @@
 """Example of using the RetrievalPipeline standalone.
 
-cu.router allows using individual modules without running the full LangGraph agent.
+contextunity.router allows using individual modules without running the full LangGraph agent.
 """
 
 import asyncio

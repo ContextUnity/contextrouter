@@ -30,7 +30,7 @@ import pytest
 
 
 class TestProtoCompilationAll:
-    """Every proto in cu.core/protos/ must compile and expose correct stubs."""
+    """Every proto in contextunity.core/protos/ must compile and expose correct stubs."""
 
     def test_contextunit_proto(self):
         """contextunit.proto: ContextUnit message with all fields."""
@@ -323,7 +323,7 @@ class TestShieldAPIContract:
 
 
 class TestTokenLifecycle:
-    """End-to-end token lifecycle across cu.core modules."""
+    """End-to-end token lifecycle across contextunity.core modules."""
 
     def test_mint_token_has_all_fields(self):
         """Minted token must have token_id, permissions, allowed_tenants, exp_unix, revocation_id."""
@@ -574,7 +574,7 @@ class TestPolicyEngineConditionContracts:
 
 
 # ============================================================================
-# 8. cu.zero ProxyService Contract
+# 8. contextunity.zero ProxyService Contract
 # ============================================================================
 
 
@@ -867,36 +867,30 @@ class TestRouterPayloadContract:
 class TestExportConsistency:
     """Verify that all __all__ exports are actually importable."""
 
-    def test_cu_core_exports(self):
-        """Every item in cu.core.__all__ must be importable."""
+    def test_contextunity_core_exports(self):
+        """Every item in contextunity.core.__all__ must be importable."""
         import contextunity.core
 
-        import contextunity as cu
-
-        for name in cu.core.__all__:
-            assert hasattr(cu.core, name), (
+        for name in contextunity.core.__all__:
+            assert hasattr(contextunity.core, name), (
                 f"contextunity.core.__all__ lists '{name}' but it's not importable"
             )
 
-    def test_cu_shield_exports(self):
-        """Every item in cu.shield.__all__ must be importable."""
+    def test_contextunity_shield_exports(self):
+        """Every item in contextunity.shield.__all__ must be importable."""
         import contextunity.shield
 
-        import contextunity as cu
-
-        for name in cu.shield.__all__:
-            assert hasattr(cu.shield, name), (
+        for name in contextunity.shield.__all__:
+            assert hasattr(contextunity.shield, name), (
                 f"contextunity.shield.__all__ lists '{name}' but it's not importable"
             )
 
-    def test_cu_zero_exports(self):
-        """Every item in cu.zero.__all__ must be importable."""
+    def test_contextunity_zero_exports(self):
+        """Every item in contextunity.zero.__all__ must be importable."""
         import contextunity.zero
 
-        import contextunity as cu
-
-        for name in cu.zero.__all__:
-            assert hasattr(cu.zero, name), (
+        for name in contextunity.zero.__all__:
+            assert hasattr(contextunity.zero, name), (
                 f"contextunity.zero.__all__ lists '{name}' but it's not importable"
             )
 
@@ -907,13 +901,12 @@ class TestExportConsistency:
         which may not exist in all environments. We verify the __all__ list is defined
         and that non-lazy exports are accessible.
         """
-        import contextunity as cu
         import contextunity.router
 
-        assert hasattr(cu.router, "__all__")
-        assert "__version__" in cu.router.__all__
+        assert hasattr(contextunity.router, "__all__")
+        assert "__version__" in contextunity.router.__all__
         # __version__ is always available (not lazy)
-        assert cu.router.__version__
+        assert contextunity.router.__version__
 
         # Verify lazy exports are defined but may fail in test env
         lazy_exports = {
@@ -927,10 +920,12 @@ class TestExportConsistency:
             "langfuse_flush",
         }
         for name in lazy_exports:
-            assert name in cu.router.__all__, f"'{name}' should be in cu.router.__all__"
+            assert name in contextunity.router.__all__, (
+                f"'{name}' should be in contextunity.router.__all__"
+            )
 
     def test_router_tools_exports(self):
-        """Every item in cu.router.modules.tools.__all__ must be importable."""
+        """Every item in contextunity.router.modules.tools.__all__ must be importable."""
         from contextunity.router.modules import tools
 
         for name in tools.__all__:
@@ -986,7 +981,7 @@ class TestCrossServiceTypeConsistency:
 
 
 """
-    __import__("contextunity.shield.policy").policy.PermissionCondition uses cu.core.tokens.ContextToken
+    __import__("contextunity.shield.policy").policy.PermissionCondition uses contextunity.core.tokens.ContextToken
     This test verifies the cross-service contract is intact.
 """
 

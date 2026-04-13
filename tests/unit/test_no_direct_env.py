@@ -1,6 +1,6 @@
 """Test: no direct os.getenv / os.environ usage outside core/config.
 
-This conformance test scans the cu.router codebase and **fails** if any
+This conformance test scans the contextunity.router codebase and **fails** if any
 Python file outside `core/config/` reads `os.environ` or `os.getenv` directly.
 
 All configuration must flow through the Config system:
@@ -20,8 +20,8 @@ import ast
 import sys
 from pathlib import Path
 
-# Root of the cu.router package
-# tests/unit/test_no_direct_env.py → ../../src/cu.router
+# Root of the contextunity.router package
+# tests/unit/test_no_direct_env.py → ../../src/contextunity.router
 _TESTS_DIR = Path(__file__).resolve().parent.parent  # tests/
 _PROJECT_ROOT = _TESTS_DIR.parent  # services/router/
 _PKG_ROOT = _PROJECT_ROOT / "src" / "contextunity" / "router"

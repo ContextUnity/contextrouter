@@ -1,4 +1,4 @@
-"""Modular configuration system for cu.router."""
+"""Modular configuration system for contextunity.router."""
 
 from .base import (
     DEFAULT_READ_PERMISSION,
@@ -69,7 +69,7 @@ __all__ = [
     "LangfuseConfig",
     "PluginsConfig",
     "PostgresConfig",
-    # Ingestion configs removed - moved to cu.brain
+    # Ingestion configs removed - moved to contextunity.brain
     # "RAGConfig",
     # Security configs
     "SecurityConfig",

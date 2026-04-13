@@ -170,7 +170,7 @@ async def store_node(state: NewsEngineState) -> Dict[str, Any]:
             }
 
             try:
-                # Upsert into generic knowledge graph (cu.brain)
+                # Upsert into generic knowledge graph (contextunity.brain)
                 content_text = f"{fact['headline']}\\n\\n{fact['summary']}"
                 await client.upsert(
                     tenant_id=tenant_id,
