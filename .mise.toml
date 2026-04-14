@@ -1,0 +1,141 @@
+# cu.router — The Mind of ContextUnity
+# Modular LangGraph agent orchestration, plugin architecture,
+# multi-model routing, and RAG pipeline coordination
+
+[tools]
+python = "3.13"
+uv = "latest"
+gcloud = "latest"
+
+[settings]
+env_shell_expand = true
+
+[env]
+_.file = { path = ".env", tools = true }
+PYTHON = "$(mise which python)"
+
+[tasks.sync]
+description = "Install all dependencies (dev + vertex + observability)"
+run = "uv sync --group dev --extra vertex --extra observability"
+
+[tasks.install-observability]
+description = "Install observability dependencies like langfuse"
+run = "uv sync --extra observability"
+
+[tasks.lint]
+description = "Lint + format-check all code (Ruff)"
+run = "uv run ruff check src/ tests/ && uv run ruff format --check src/ tests/"
+
+[tasks.format]
+description = "Format all code (Ruff)"
+run = "uv run ruff check --fix src/ tests/ && uv run ruff format src/ tests/"
+
+[tasks.test]
+description = "Run all tests"
+run = "uv run pytest tests/ -v"
+
+[tasks.test-unit]
+description = "Run unit tests only"
+run = "uv run pytest tests/ -v -m unit"
+
+[tasks.security]
+description = "Run security scan (Bandit)"
+run = "uv run bandit -c .bandit -r src/"
+
+[tasks.check]
+description = "Run all checks (lint + security + test)"
+run = "mise run lint && mise run security && mise run test-unit"
+
+# =============================================================================
+# Server Commands
+# =============================================================================
+
+[tasks.router]
+description = "Start Router gRPC service"
+run = "uv run contextrouter serve"
+
+[tasks.dev]
+description = "Start Router gRPC service in development mode"
+run = "uv run contextrouter serve"
+
+[tasks.clean-redis]
+description = "Clean project registrations from Redis. Usage: `mise run clean-redis` (all) or `mise run clean-redis -- <project_id>`"
+run = "uv run python scripts/clean_registrations.py"
+
+# =============================================================================
+# RAG Commands
+# =============================================================================
+
+[tasks.rag-query]
+description = "Query the RAG system (e.g., mise run rag-query -- 'my question')"
+run = "uv run contextrouter rag query"
+
+[tasks.rag-retrieve]
+description = "Retrieve documents without generation"
+run = "uv run contextrouter rag retrieve"
+
+[tasks.rag-test]
+description = "Run RAG test suite"
+run = "uv run contextrouter rag test"
+
+[tasks.rag-benchmark]
+description = "Benchmark RAG performance"
+run = "uv run contextrouter rag benchmark"
+
+# =============================================================================
+# GCloud Commands
+# =============================================================================
+
+[tasks.gcloud-auth]
+description = "Authenticate with GCP"
+run = "gcloud auth login"
+
+[tasks.gcloud-adc]
+description = "Set up Application Default Credentials"
+run = "gcloud auth application-default login"
+
+[tasks.gcloud-set-project]
+description = "Set GCP project"
+run = "gcloud config set project $PROJECT_ID"
+
+[tasks.gcloud-check]
+description = "Check active gcloud auth/project"
+run = '''
+echo "active_account=$(gcloud auth list --filter=status:ACTIVE --format=value(account) 2>/dev/null || true)"
+echo "active_project=$(gcloud config get-value project 2>/dev/null || true)"
+echo "expected_PROJECT_ID=$PROJECT_ID"
+'''
+
+[tasks.setup]
+description = "Complete development environment setup"
+run = """
+mise run gcloud-auth &&
+mise run gcloud-adc &&
+mise run sync
+"""
+
+# =============================================================================
+# Utility
+# =============================================================================
+
+[tasks.clean]
+description = "Clean cache files and build artifacts"
+run = """
+find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+find . -type f -name "*.pyc" -delete 2>/dev/null || true
+find . -type f -name "*.pyo" -delete 2>/dev/null || true
+find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
+rm -rf .pytest_cache/ .ruff_cache/ build/ dist/ 2>/dev/null || true
+"""
+
+[tasks.build]
+description = "Build distribution packages"
+run = "uv build"
+
+[tasks.compile-protos]
+description = "Compile protobuf files (runs in contextcore)"
+run = "cd ../contextcore && ./compile_protos.sh"
+
+[tasks.rotate-redis]
+description = "Re-encrypt the Redis project secrets with a new REDIS_SECRET_KEY"
+run = "uv run contextcore rotate-redis-key"
