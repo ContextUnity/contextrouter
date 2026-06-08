@@ -1,0 +1,24 @@
+rules:
+  - entity_type: "person"
+    prefix: "PER"
+    pattern: "[А-ЯІЇЄҐ][а-яіїєґ']{1,20}\\s+[А-ЯІЇЄҐ][а-яіїєґ']{1,20}(?:\\s+[А-ЯІЇЄҐ][а-яіїєґ']{1,20})?"
+
+  - entity_type: "person"
+    prefix: "PER"
+    pattern: "[A-Z][a-z]{1,20}\\s+[A-Z][a-z]{1,20}"
+
+  - entity_type: "phone"
+    prefix: "PHN"
+    pattern: "\\+?380\\d{9}"
+
+  - entity_type: "phone"
+    prefix: "PHN"
+    pattern: "\\+\\d{10,13}"
+
+  - entity_type: "email"
+    prefix: "EML"
+    pattern: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"
+
+  - entity_type: "rnokpp"
+    prefix: "RNO"
+    pattern: "\\b\\d{10}\\b"

@@ -1,5 +1,4 @@
 """Core interfaces (ABCs + Protocols).
-
 These interfaces are intentionally small and transport-agnostic.
 Business logic lives in modules; orchestration lives in brain.
 """
@@ -7,25 +6,16 @@ Business logic lives in modules; orchestration lives in brain.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    AsyncIterator,
-    Protocol,
-    runtime_checkable,
-)
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from contextunity.core import get_contextunit_logger
+from contextunity.core.sdk.interfaces import BaseConnector, BaseTransformer
+from contextunity.core.types import JsonDict
 
 if TYPE_CHECKING:
     from contextunity.core import ContextUnit
-    from contextunity.core.tokens import ContextToken
 
-    from contextunity.router.core.state import AgentState
-else:
-    ContextUnit = Any  # type: ignore[misc,assignment]
-    ContextToken = Any  # type: ignore[misc,assignment]
-    AgentState = Any  # type: ignore[misc,assignment]
+    from contextunity.router.cortex.types import GraphState, StateUpdate
 
 logger = get_contextunit_logger(__name__)
 
@@ -37,74 +27,98 @@ class BaseAgent(ABC):
     """
 
     def __init__(self, registry: object | None = None) -> None:
+        """Initialize with optional component registry.
+
+        Args:
+            registry: Component registry for discovering connectors,
+                transformers, providers, and models at runtime.
+        """
         # Registry access (agents can discover connectors/transformers/providers/models).
-        self.registry = registry
+        self.registry: object | None = registry
 
     @abstractmethod
-    async def process(self, state: AgentState) -> dict[str, Any]:
+    async def process(self, state: GraphState) -> StateUpdate:
+        """Execute agent logic on the current graph state.
+
+        Subclasses must implement this to perform their domain-specific
+        processing and return a partial state update.
+
+        Args:
+            state: Current LangGraph execution state.
+
+        Returns:
+            Partial state update dict to merge into the graph.
+        """
         raise NotImplementedError
 
-    async def __call__(self, state: AgentState) -> dict[str, Any]:
+    async def __call__(self, state: GraphState) -> StateUpdate:
+        """Callable shorthand — delegates to ``process``.
+
+        Args:
+            state: Current graph execution state.
+
+        Returns:
+            Result of ``self.process(state)``.
+        """
         return await self.process(state)
 
 
 @runtime_checkable
 class IRead(Protocol):
-    """Read interface (optionally secured; enforced when security enabled)."""
+    """Read interface for providers.
+
+    Security is enforced at the SecureTool/secure_node boundary.
+    """
 
     async def read(
         self,
         query: str,
         *,
         limit: int = 5,
-        filters: dict[str, Any] | None = None,
-        token: ContextToken,
-    ) -> list[ContextUnit]: ...
+        filters: JsonDict | None = None,
+    ) -> list[ContextUnit]:
+        """Retrieve ContextUnits matching a query.
+
+        Args:
+            query: Natural-language or structured search expression.
+            limit: Maximum results to return.
+            filters: Optional provider-specific filter predicates.
+
+        Returns:
+            Ordered list of matching ContextUnits.
+        """
+        ...
 
 
 @runtime_checkable
 class IWrite(Protocol):
-    """Write interface (optionally secured; enforced when security enabled)."""
+    """Write interface for providers.
 
-    async def write(self, data: ContextUnit, *, token: ContextToken) -> None: ...
+    Security is enforced at the SecureTool/secure_node boundary.
+    """
 
+    async def write(self, data: ContextUnit) -> None:
+        """Persist a ContextUnit to the underlying store.
 
-class BaseConnector(ABC):
-    """Sources: produce raw data wrapped in ContextUnit."""
-
-    @abstractmethod
-    async def connect(self) -> AsyncIterator[ContextUnit]:
-        raise NotImplementedError
-
-
-class BaseTransformer(ABC):
-    """Logic pipes: pure-ish transformation over ContextUnit."""
-
-    def __init__(self) -> None:
-        self._params: dict[str, Any] = {}
-
-    def configure(self, params: dict[str, Any] | None) -> None:
-        """Optional configuration hook.
-
-        FlowManager will call this when it cannot pass params via `__init__(**params)`.
+        Args:
+            data: ContextUnit payload to persist.
         """
-
-        self._params = dict(params or {})
-
-    @property
-    def params(self) -> dict[str, Any]:
-        return dict(self._params)
-
-    @abstractmethod
-    async def transform(self, envelope: ContextUnit) -> ContextUnit:
-        raise NotImplementedError
+        ...
 
 
 class BaseProvider(ABC):
-    """Sinks: accept ContextUnit and persist/return it somewhere."""
+    """Sinks: accept ContextUnit and persist/return it somewhere.
+
+    Security is enforced at the SecureTool/secure_node boundary.
+    """
 
     @abstractmethod
-    async def sink(self, envelope: ContextUnit, *, token: ContextToken) -> Any:
+    async def sink(self, unit: ContextUnit) -> None:
+        """Persist a ContextUnit to the target storage.
+
+        Args:
+            unit: ContextUnit payload to persist.
+        """
         raise NotImplementedError
 
 

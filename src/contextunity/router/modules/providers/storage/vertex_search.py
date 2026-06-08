@@ -1,27 +1,85 @@
-"""Vertex AI Search low-level async client (storage provider I/O).
+"""Vertex AI Search — low-level async Discovery Engine client.
 
-Per `.cursorrules`: Vertex Search infrastructure belongs under
-`modules/providers/storage/` (NOT under retrieval logic).
+Pure storage I/O layer:
+- gRPC client lifecycle (``_get_async_client``)
+- Request construction (``_build_search_request``)
+- Endpoint resolution (``_endpoint_for_location``)
 
-This module preserves the existing parsing behavior (no logic loss).
+Result parsing is delegated to ``modules/retrieval/rag/vertex_parser.py``.
 """
 
 from __future__ import annotations
 
 import time
+from collections.abc import AsyncIterable
+from typing import Protocol
 
 from contextunity.core import get_contextunit_logger
 from contextunity.core.exceptions import ProviderError
 
-from contextunity.router.core import get_core_config
-from contextunity.router.core.types import coerce_struct_data
-from contextunity.router.modules.observability.langfuse import retrieval_span
+from contextunity.router.modules.providers._async_iterate import async_iterate
 from contextunity.router.modules.retrieval.rag.models import RetrievedDoc
-from contextunity.router.modules.retrieval.rag.settings import get_effective_data_store_id
 
 logger = get_contextunit_logger(__name__)
 
-_async_clients: dict[str, object] = {}
+
+class DiscoveryEngineSearchClient(Protocol):
+    def search(self, request: object) -> AsyncIterable[object]: ...
+
+
+def _safe_getattr(obj: object, name: str, default: object = "") -> object:
+    return getattr(obj, name, default)
+
+
+class _DiscoveryEngineSearchClientAdapter:
+    """Adapter narrowing vendor Discovery Engine client at the import boundary."""
+
+    _inner: object
+
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+
+    async def search(self, request: object) -> AsyncIterable[object]:
+        search_fn: object = _safe_getattr(self._inner, "search")
+        if not callable(search_fn):
+            raise ProviderError(
+                "Discovery Engine client.search is not callable",
+                code="VERTEX_SEARCH_IMPORT_ERROR",
+            )
+        search_response: object = search_fn(request)
+        from contextunity.core.narrowing import await_object
+
+        stream_source: object = await await_object(search_response)
+        async for item in async_iterate(stream_source):
+            yield item
+
+
+class _SearchRequestFactory(Protocol):
+    def __call__(
+        self,
+        *,
+        serving_config: str,
+        query: str,
+        page_size: int,
+        filter: str,
+        content_search_spec: object,
+    ) -> object: ...
+
+
+class _ContentSearchSpecFactory(Protocol):
+    def __call__(
+        self,
+        *,
+        snippet_spec: object,
+        extractive_content_spec: object,
+    ) -> object: ...
+
+
+class _NestedSpecFactory(Protocol):
+    def __call__(self, **kwargs: object) -> object: ...
+
+
+_async_clients: dict[str, DiscoveryEngineSearchClient] = {}
 
 
 def _endpoint_for_location(location: str) -> str:
@@ -38,138 +96,33 @@ def _endpoint_for_location(location: str) -> str:
     return f"{loc}-discoveryengine.googleapis.com"
 
 
-def _proto_to_dict(proto_obj: object) -> object:
-    """Convert protobuf object to dict."""
-    from typing import cast
+def _load_search_client_factory() -> object:
+    import importlib
 
-    from google.protobuf.json_format import (
-        MessageToDict,  # type: ignore[import-not-found]
-    )
-
-    if proto_obj is None:
-        return None
-    if hasattr(proto_obj, "DESCRIPTOR"):
-        try:
-            return MessageToDict(proto_obj, preserving_proto_field_name=True)
-        except Exception as e:
-            logger.debug("MessageToDict failed, trying fallback conversion: %s", e)
-    if hasattr(proto_obj, "items"):
-        try:
-            items = cast("dict[object, object]", proto_obj).items()
-        except Exception:
-            items = []
-        return {str(k): _proto_to_dict(v) for k, v in items}
-    if hasattr(proto_obj, "__iter__") and not isinstance(proto_obj, (str, bytes)):
-        try:
-            it = cast("list[object]", proto_obj)
-        except Exception:
-            it = []
-        return [_proto_to_dict(item) for item in it]
-    return proto_obj
-
-
-def _parse_search_result(result: object) -> RetrievedDoc | None:
-    """Parse Discovery Engine search result to RetrievedDoc."""
-    try:
-        doc = getattr(result, "document", None)
-        if doc is None:
-            return None
-
-        derived_obj = _proto_to_dict(getattr(doc, "derived_struct_data", None))
-        struct_obj = _proto_to_dict(getattr(doc, "struct_data", None))
-        derived_data: dict[str, object] = derived_obj if isinstance(derived_obj, dict) else {}
-        struct_data: dict[str, object] = struct_obj if isinstance(struct_obj, dict) else {}
-        doc_data: dict[str, object] = {**struct_data, **derived_data}
-
-        content = ""
-        ea = doc_data.get("extractive_answers")
-        if isinstance(ea, list) and ea and isinstance(ea[0], dict):
-            c = ea[0].get("content")
-            content = c if isinstance(c, str) else ""
-        else:
-            snippets = doc_data.get("snippets")
-            if isinstance(snippets, list) and snippets and isinstance(snippets[0], dict):
-                s = snippets[0].get("snippet")
-                content = s if isinstance(s, str) else ""
-
-        if not content:
-            c = doc_data.get("content")
-            t = doc_data.get("text")
-            if isinstance(c, str) and c:
-                content = c
-            elif isinstance(t, str) and t:
-                content = t
-
-        source_type = doc_data.get("source_type", "")
-        source_type = source_type if isinstance(source_type, str) else ""
-        if not source_type or source_type == "unknown":
-            if (
-                doc_data.get("book_title")
-                or doc_data.get("chapter_title")
-                or doc_data.get("page_start") is not None
-            ):
-                source_type = "book"
-            elif (
-                doc_data.get("video_id") or doc_data.get("video_url") or doc_data.get("video_name")
-            ):
-                source_type = "video"
-            elif (
-                doc_data.get("session_title") or doc_data.get("question") or doc_data.get("answer")
-            ):
-                source_type = "qa"
-            else:
-                source_type = "unknown"
-
-        parsed = RetrievedDoc(
-            content=content,
-            source_type=source_type,
-            relevance=float(getattr(result, "relevance_score", 0.0) or 0.0),
+    discoveryengine = importlib.import_module("google.cloud.discoveryengine_v1")
+    client_factory_obj: object = getattr(discoveryengine, "SearchServiceAsyncClient", None)
+    if not callable(client_factory_obj):
+        raise ProviderError(
+            "Discovery Engine SearchServiceAsyncClient is not callable",
+            code="VERTEX_SEARCH_IMPORT_ERROR",
         )
-
-        if source_type == "book":
-            parsed.book_title = doc_data.get("book_title") or ""
-            parsed.chapter = doc_data.get("chapter_title") or doc_data.get("chapter") or ""
-            parsed.chapter_number = doc_data.get("chapter_number")
-            parsed.page_start = doc_data.get("page_start")
-            parsed.page_end = doc_data.get("page_end")
-            parsed.keywords = doc_data.get("keywords") or []
-            quote = doc_data.get("quote")
-            if isinstance(quote, str) and quote.strip():
-                parsed.quote = quote
-                parsed.content = quote
-        elif source_type == "video":
-            parsed.video_id = doc_data.get("video_id") or ""
-            parsed.video_url = doc_data.get("video_url") or ""
-            parsed.title = doc_data.get("video_name") or doc_data.get("title") or ""
-            parsed.timestamp = doc_data.get("timestamp") or ""
-            parsed.timestamp_seconds = doc_data.get("timestamp_seconds")
-            parsed.keywords = doc_data.get("keywords") or []
-            quote = doc_data.get("quote")
-            if isinstance(quote, str) and quote.strip():
-                parsed.quote = quote
-                parsed.content = quote
-        elif source_type == "qa":
-            parsed.session_title = doc_data.get("session_title") or ""
-            parsed.question = doc_data.get("question") or ""
-            parsed.answer = doc_data.get("answer") or ""
-            parsed.keywords = doc_data.get("keywords") or []
-
-        parsed.metadata = coerce_struct_data(doc_data) if isinstance(doc_data, dict) else {}
-        return parsed
-    except Exception:
-        return None
+    return client_factory_obj
 
 
-def _get_async_client(*, api_endpoint: str):
+def _get_async_client(*, api_endpoint: str) -> DiscoveryEngineSearchClient:
     """Get or create async Discovery Engine client."""
     global _async_clients
     ep = (api_endpoint or "").strip() or "discoveryengine.googleapis.com"
     if ep not in _async_clients:
-        from google.cloud import discoveryengine_v1 as discoveryengine
-
-        _async_clients[ep] = discoveryengine.SearchServiceAsyncClient(
-            client_options={"api_endpoint": ep}
-        )
+        client_factory_obj = _load_search_client_factory()
+        if not callable(client_factory_obj):
+            raise ProviderError(
+                "Discovery Engine SearchServiceAsyncClient is not callable",
+                code="VERTEX_SEARCH_IMPORT_ERROR",
+            )
+        inner_client: object = client_factory_obj(client_options={"api_endpoint": ep})
+        client: DiscoveryEngineSearchClient = _DiscoveryEngineSearchClientAdapter(inner_client)
+        _async_clients[ep] = client
         logger.debug("Created async SearchServiceAsyncClient (endpoint=%s)", ep)
     return _async_clients[ep]
 
@@ -179,24 +132,55 @@ def _build_search_request(
     max_results: int,
     source_type_filter: str | None,
     serving_config: str,
-):
-    from google.cloud import discoveryengine_v1 as discoveryengine
+) -> object:
+    import importlib
+
+    discoveryengine = importlib.import_module("google.cloud.discoveryengine_v1")
 
     filter_expr = f'source_type: ANY("{source_type_filter}")' if source_type_filter else ""
-    return discoveryengine.SearchRequest(
+
+    search_request_cls_obj: object = getattr(discoveryengine, "SearchRequest", None)
+    if not callable(search_request_cls_obj):
+        raise ProviderError(
+            "Discovery Engine SearchRequest is not callable",
+            code="VERTEX_SEARCH_IMPORT_ERROR",
+        )
+    search_request_factory: _SearchRequestFactory = search_request_cls_obj
+
+    content_search_spec_cls_obj: object = getattr(search_request_cls_obj, "ContentSearchSpec", None)
+    if not callable(content_search_spec_cls_obj):
+        raise ProviderError(
+            "Discovery Engine ContentSearchSpec is not callable",
+            code="VERTEX_SEARCH_IMPORT_ERROR",
+        )
+    content_search_spec_factory: _ContentSearchSpecFactory = content_search_spec_cls_obj
+
+    snippet_spec_cls_obj: object = getattr(content_search_spec_cls_obj, "SnippetSpec", None)
+    extractive_spec_cls_obj: object = getattr(
+        content_search_spec_cls_obj, "ExtractiveContentSpec", None
+    )
+    if not callable(snippet_spec_cls_obj) or not callable(extractive_spec_cls_obj):
+        raise ProviderError(
+            "Discovery Engine nested search specs are not callable",
+            code="VERTEX_SEARCH_IMPORT_ERROR",
+        )
+    snippet_factory: _NestedSpecFactory = snippet_spec_cls_obj
+    extractive_factory: _NestedSpecFactory = extractive_spec_cls_obj
+
+    content_spec = content_search_spec_factory(
+        snippet_spec=snippet_factory(return_snippet=True),
+        extractive_content_spec=extractive_factory(
+            max_extractive_answer_count=1,
+            max_extractive_segment_count=1,
+        ),
+    )
+
+    return search_request_factory(
         serving_config=serving_config,
         query=query,
         page_size=max_results,
         filter=filter_expr,
-        content_search_spec=discoveryengine.SearchRequest.ContentSearchSpec(
-            snippet_spec=discoveryengine.SearchRequest.ContentSearchSpec.SnippetSpec(
-                return_snippet=True,
-            ),
-            extractive_content_spec=discoveryengine.SearchRequest.ContentSearchSpec.ExtractiveContentSpec(
-                max_extractive_answer_count=1,  # Reduced from 3 for lower latency
-                max_extractive_segment_count=1,  # Reduced from 3 for lower latency
-            ),
-        ),
+        content_search_spec=content_spec,
     )
 
 
@@ -205,28 +189,25 @@ async def search_vertex_ai_async(
     query: str,
     max_results: int,
     source_type_filter: str | None = None,
+    project_id: str,
+    location: str = "global",
+    data_store_id: str,
 ) -> list[RetrievedDoc]:
-    cfg = get_core_config()
-    project_id = cfg.vertex.project_id
-    # IMPORTANT: Discovery Engine location is often "global" even when Vertex LLM is regional.
-    # Prefer explicit provider config names.
-    location = (
-        (getattr(cfg.vertex, "data_store_location", "") or "").strip()
-        or (getattr(cfg.vertex, "discovery_engine_location", "") or "").strip()
-        or "global"
-    )
-    if not project_id:
-        logger.error("vertex.project_id must be set (TOML or env)")
-        return []
+    """Execute a Discovery Engine search and return parsed results.
 
-    try:
-        data_store_id = get_effective_data_store_id()
-    except ValueError as e:
-        logger.error("Failed to resolve RAG data_store_id: %s", e)
-        return []
+    Args:
+        query: Search query text.
+        max_results: Maximum number of results to return.
+        source_type_filter: Optional source_type filter value.
+        project_id: GCP project ID.
+        location: Discovery Engine location (default: "global").
+        data_store_id: Discovery Engine data store ID.
 
-    # Discovery Engine resource name format:
-    # projects/{project}/locations/{location}/collections/{collection}/dataStores/{dataStore}/servingConfigs/{servingConfig}
+    Returns:
+        List of ``RetrievedDoc`` objects (parsed by vertex_parser).
+    """
+    from contextunity.router.modules.retrieval.rag.vertex_parser import parse_search_result
+
     serving_config = (
         f"projects/{project_id}/locations/{location}"
         f"/collections/default_collection"
@@ -244,60 +225,45 @@ async def search_vertex_ai_async(
         source_type_filter or "all",
     )
 
-    with retrieval_span(
-        name="vertex_search",
-        input_data={
-            "query": query,
-            "source_type": source_type_filter,
-            "max_results": max_results,
-            "location": location,
-            "api_endpoint": api_endpoint,
-            "data_store_id": data_store_id,
-        },
-    ) as span_ctx:
-        try:
-            t0 = time.perf_counter()
-            client = _get_async_client(api_endpoint=api_endpoint)
-            request = _build_search_request(query, max_results, source_type_filter, serving_config)
+    try:
+        t0 = time.perf_counter()
+        client = _get_async_client(api_endpoint=api_endpoint)
+        request = _build_search_request(query, max_results, source_type_filter, serving_config)
 
-            response = await client.search(request)
-            results: list[RetrievedDoc] = []
-            async for result in response:
-                if doc := _parse_search_result(result):
-                    results.append(doc)
-                if len(results) >= max_results:
-                    break
+        results: list[RetrievedDoc] = []
+        async for result in client.search(request):
+            if doc := parse_search_result(result):
+                results.append(doc)
+            if len(results) >= max_results:
+                break
 
-            elapsed_ms = (time.perf_counter() - t0) * 1000
-            # Calculate relevance stats
-            relevance_scores = [d.relevance for d in results if hasattr(d, "relevance")]
-            avg_relevance = (
-                sum(relevance_scores) / len(relevance_scores) if relevance_scores else 0.0
-            )
-            max_relevance = max(relevance_scores) if relevance_scores else 0.0
-            non_zero_count = sum(1 for r in relevance_scores if r > 0.0)
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        relevance_scores = [d.relevance for d in results]
+        avg_relevance = sum(relevance_scores) / len(relevance_scores) if relevance_scores else 0.0
+        max_relevance = max(relevance_scores) if relevance_scores else 0.0
+        non_zero_count = sum(1 for r in relevance_scores if r > 0.0)
 
-            logger.debug(
+        logger.debug(
+            (
                 "Vertex AI Search COMPLETE: query=%r datastore=%s results=%d elapsed_ms=%.1f "
-                "avg_relevance=%.3f max_relevance=%.3f non_zero_relevance=%d/%d",
-                query[:80],
-                data_store_id,
-                len(results),
-                elapsed_ms,
-                avg_relevance,
-                max_relevance,
-                non_zero_count,
-                len(relevance_scores),
-            )
-            span_ctx["output"] = {"count": len(results), "elapsed_ms": elapsed_ms}
-            return results
-        except Exception as e:
-            logger.exception("Vertex AI Search failed for query: %s", query[:50])
-            raise ProviderError(
-                f"Vertex AI Search failed: {str(e)}",
-                code="VERTEX_SEARCH_ERROR",
-                query=query[:50],
-            ) from e
+                "avg_relevance=%.3f max_relevance=%.3f non_zero_relevance=%d/%d"
+            ),
+            query[:80],
+            data_store_id,
+            len(results),
+            elapsed_ms,
+            avg_relevance,
+            max_relevance,
+            non_zero_count,
+            len(relevance_scores),
+        )
+        return results
+    except Exception as e:
+        logger.exception("Vertex AI Search failed for query: %s", query[:50])
+        raise ProviderError(
+            "Vertex AI Search failed",
+            code="VERTEX_SEARCH_ERROR",
+        ) from e
 
 
-__all__ = ["search_vertex_ai_async"]
+__all__ = ["search_vertex_ai_async", "_endpoint_for_location"]

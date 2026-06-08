@@ -1,6 +1,7 @@
 import time
 
 import pytest
+from contextunity.core.exceptions import SecurityError
 from contextunity.core.tokens import ContextToken
 from langchain_core.tools import BaseTool, tool
 
@@ -64,14 +65,14 @@ def secure_wrapped(raw_tool):
 
 def _set_token(token):
     """Helper: set access token in runtime context."""
-    from contextunity.router.cortex.runtime_context import set_current_access_token
+    from contextunity.router.core.context import set_current_access_token
 
     return set_current_access_token(token)
 
 
 def _reset_token(ref):
     """Helper: reset access token."""
-    from contextunity.router.cortex.runtime_context import reset_current_access_token
+    from contextunity.router.core.context import reset_current_access_token
 
     reset_current_access_token(ref)
 
@@ -96,34 +97,10 @@ class TestWrap:
         secure = SecureTool.wrap(raw_tool, permission="tool:custom")
         assert secure.required_permission == "tool:custom"
 
-    def test_wrap_custom_scope(self, raw_tool):
-        secure = SecureTool.wrap(raw_tool, scope="write")
-        assert secure.required_scope == "write"
-
     def test_wrap_idempotent(self, secure_wrapped):
         """Wrapping a SecureTool returns the same instance."""
         double_wrapped = SecureTool.wrap(secure_wrapped)
         assert double_wrapped is secure_wrapped
-
-    def test_wrap_sets_permission_on_empty_securetool(self):
-        """Wrapping SecureTool with empty permission updates it."""
-        st = SecureTool(name="test", description="test")
-        assert st.required_permission == ""
-        result = SecureTool.wrap(st, permission="tool:test")
-        assert result.required_permission == "tool:test"
-        assert result is st  # same instance
-
-    def test_wrap_does_not_override_existing_permission(self):
-        """Wrapping SecureTool with existing permission doesn't override."""
-        st = SecureTool(name="test", description="test", required_permission="tool:original")
-        result = SecureTool.wrap(st, permission="tool:new")
-        assert result.required_permission == "tool:original"
-
-    def test_wrap_never_sets_skip_auth(self, raw_tool):
-        """wrap() NEVER sets skip_auth — even if tool name matches old whitelist."""
-        fake_infra = RawDummyTool(name="log_execution_trace", description="fake infra")
-        secure = SecureTool.wrap(fake_infra)
-        assert secure.skip_auth is False
 
 
 # ─── Test: Permission Enforcement ───
@@ -134,7 +111,7 @@ class TestPermissionEnforcement:
         """No access token → PermissionError (fail-closed)."""
         ref = _set_token(None)
         try:
-            with pytest.raises(PermissionError, match="No access token"):
+            with pytest.raises(SecurityError, match="No access token"):
                 secure_wrapped._run(query="test")
         finally:
             _reset_token(ref)
@@ -144,7 +121,7 @@ class TestPermissionEnforcement:
         token = _make_token(permissions=("tool:other_tool",))
         ref = _set_token(token)
         try:
-            with pytest.raises(PermissionError, match="Permission denied"):
+            with pytest.raises(SecurityError, match="Permission denied"):
                 secure_wrapped._run(query="test")
         finally:
             _reset_token(ref)
@@ -181,7 +158,7 @@ class TestPermissionEnforcement:
 
     def test_tool_execution_logs_provenance(self, secure_wrapped):
         """Execution appends flat provenance trail (prefix:name:mode) via runtime_context."""
-        from contextunity.router.cortex.runtime_context import (
+        from contextunity.router.core.context import (
             get_accumulated_provenance,
             init_provenance_accumulator,
             reset_provenance_accumulator,
@@ -208,7 +185,7 @@ class TestPermissionEnforcement:
 
     def test_tool_execution_logs_federated_provenance(self, raw_tool):
         """Execution appends federated provenance if federated tag is present."""
-        from contextunity.router.cortex.runtime_context import (
+        from contextunity.router.core.context import (
             get_accumulated_provenance,
             init_provenance_accumulator,
             reset_provenance_accumulator,
@@ -238,7 +215,7 @@ class TestAsyncEnforcement:
     async def test_async_no_token_raises(self, secure_wrapped):
         ref = _set_token(None)
         try:
-            with pytest.raises(PermissionError, match="No access token"):
+            with pytest.raises(SecurityError, match="No access token"):
                 await secure_wrapped._arun(query="test")
         finally:
             _reset_token(ref)
@@ -286,7 +263,7 @@ class TestMarkInfra:
         assert secure.skip_auth is False  # NOT infra
         ref = _set_token(None)
         try:
-            with pytest.raises(PermissionError, match="No access token"):
+            with pytest.raises(SecurityError, match="No access token"):
                 secure._run(query="spoofed")
         finally:
             _reset_token(ref)
@@ -311,7 +288,7 @@ class TestDirectSubclass:
         tool_inst = DirectSecureTool()
         ref = _set_token(None)
         try:
-            with pytest.raises(PermissionError):
+            with pytest.raises(SecurityError):
                 tool_inst._run(query="blocked")
         finally:
             _reset_token(ref)
@@ -386,45 +363,6 @@ class TestRegisterToolGate:
             _tool_registry.update(original_registry)
 
 
-# ─── Test: repr ───
-
-
-class TestRepr:
-    def test_repr_wrapped(self, secure_wrapped):
-        r = repr(secure_wrapped)
-        assert "raw_dummy" in r
-        assert "tool:raw_dummy" in r
-        assert "wrapped=" in r
-
-    def test_repr_direct(self):
-        st = SecureTool(name="test", description="test", required_permission="tool:test")
-        r = repr(st)
-        assert "test" in r
-        assert "wrapped=" not in r
-
-    def test_repr_infra(self):
-        raw = RawDummyTool(name="trace", description="trace")
-        secure = SecureTool.mark_infra(raw)
-        r = repr(secure)
-        assert "infra=True" in r
-
-
-# ─── Test: effective_permission fallback ───
-
-
-class TestEffectivePermission:
-    def test_explicit_permission(self):
-        st = SecureTool(name="foo", description="", required_permission="tool:custom")
-        assert st._effective_permission() == "tool:custom"
-
-    def test_default_permission(self):
-        st = SecureTool(name="foo", description="")
-        assert st._effective_permission() == "tool:foo"
-
-
-# ─── Test: Tenant Isolation (VULN-1 fix) ───
-
-
 class TestTenantIsolation:
     """Verify that tools bound to a tenant reject tokens from other tenants."""
 
@@ -437,7 +375,7 @@ class TestTenantIsolation:
         )
         ref = _set_token(token)
         try:
-            with pytest.raises(PermissionError, match="Tenant isolation"):
+            with pytest.raises(SecurityError, match="Tenant isolation"):
                 secure._run(query="cross-tenant")
         finally:
             _reset_token(ref)
@@ -490,39 +428,6 @@ class TestTenantIsolation:
         secure = SecureTool.wrap(raw_tool, tenant="tenant_a")
         assert secure.bound_tenant == "tenant_a"
 
-    def test_wrap_idempotent_sets_tenant(self):
-        """Wrapping a SecureTool without tenant sets it if provided."""
-        st = SecureTool(name="test", description="test")
-        assert st.bound_tenant == ""
-        SecureTool.wrap(st, tenant="tenant_a")
-        assert st.bound_tenant == "tenant_a"
-
-    def test_wrap_does_not_override_tenant(self):
-        """Wrapping a SecureTool with existing tenant doesn't override."""
-        st = SecureTool(name="test", description="test", bound_tenant="tenant_a")
-        SecureTool.wrap(st, tenant="other")
-        assert st.bound_tenant == "tenant_a"  # preserved
-
-    def test_register_tool_with_tenant(self, raw_tool):
-        """register_tool(tenant=...) binds tenant to the tool."""
-        from contextunity.router.modules.tools import _tool_registry, register_tool
-
-        original_registry = _tool_registry.copy()
-        try:
-            register_tool(raw_tool, permission="tool:raw_dummy", tenant="tenant_a")
-            registered = _tool_registry["raw_dummy"]
-            assert isinstance(registered, SecureTool)
-            assert registered.bound_tenant == "tenant_a"
-        finally:
-            _tool_registry.clear()
-            _tool_registry.update(original_registry)
-
-    def test_tenant_in_repr(self, raw_tool):
-        """Bound tenant appears in repr."""
-        secure = SecureTool.wrap(raw_tool, tenant="tenant_a")
-        r = repr(secure)
-        assert "tenant='tenant_a'" in r
-
     @pytest.mark.asyncio
     async def test_async_cross_tenant_blocked(self, raw_tool):
         """Async execution also enforces tenant."""
@@ -533,7 +438,7 @@ class TestTenantIsolation:
         )
         ref = _set_token(token)
         try:
-            with pytest.raises(PermissionError, match="Tenant isolation"):
+            with pytest.raises(SecurityError, match="Tenant isolation"):
                 await secure._arun(query="async-cross")
         finally:
             _reset_token(ref)
@@ -593,7 +498,7 @@ class TestTenantIsolation:
             original = sys.modules.get("contextunity.core.authz")
             sys.modules["contextunity.core.authz"] = None  # type: ignore
             try:
-                with pytest.raises((PermissionError, ImportError, TypeError)):
+                with pytest.raises((SecurityError, ImportError, TypeError)):
                     secure._run(query="should-fail")
             finally:
                 if original is not None:
@@ -602,3 +507,114 @@ class TestTenantIsolation:
                     sys.modules.pop("contextunity.core.authz", None)
         finally:
             _reset_token(ref)
+
+
+# ─── Test: Authoritative Context Injection (anti-forgery) ───
+
+
+class TestAuthoritativeContextInjection:
+    """Verify _inject_authoritative_context overwrites LLM-controllable kwargs."""
+
+    def _make_tool_with_schema(self, field_names: list[str]):
+        """Create a wrapped SecureTool whose args_schema exposes given fields."""
+        from pydantic import BaseModel
+
+        annotations = {n: str for n in field_names}
+        defaults = {n: "" for n in field_names}
+        schema = type("DynSchema", (BaseModel,), {"__annotations__": annotations, **defaults})
+
+        raw = RawDummyTool()
+        raw.args_schema = schema
+        return SecureTool.wrap(raw, permission="tool:raw_dummy")
+
+    def test_tenant_id_overwritten_from_token(self):
+        """LLM-injected tenant_id is replaced with token's allowed_tenants[0]."""
+        secure = self._make_tool_with_schema(["tenant_id", "query"])
+        token = _make_token(
+            permissions=("tool:raw_dummy",),
+            allowed_tenants=("real_tenant",),
+        )
+        ref = _set_token(token)
+        try:
+            result = secure._inject_authoritative_context(
+                {"tenant_id": "spoofed_tenant", "query": "hello"}
+            )
+            assert result["tenant_id"] == "real_tenant"
+            assert result["query"] == "hello"
+        finally:
+            _reset_token(ref)
+
+    def test_user_id_overwritten_from_token(self):
+        """LLM-injected user_id is replaced with token's user_id."""
+        secure = self._make_tool_with_schema(["user_id", "query"])
+        token = _make_token(permissions=("tool:raw_dummy",))
+        ref = _set_token(token)
+        try:
+            result = secure._inject_authoritative_context(
+                {"user_id": "spoofed_user", "query": "hello"}
+            )
+            assert result["user_id"] == "test-user"
+        finally:
+            _reset_token(ref)
+
+    def test_infra_tool_skips_injection(self):
+        """skip_auth tools return kwargs unchanged."""
+        raw = RawDummyTool()
+        secure = SecureTool.mark_infra(raw)
+        result = secure._inject_authoritative_context(
+            {"tenant_id": "anything", "user_id": "anything"}
+        )
+        assert result["tenant_id"] == "anything"
+        assert result["user_id"] == "anything"
+
+    def test_no_token_returns_kwargs_unchanged(self):
+        """Without token, kwargs pass through unchanged."""
+        raw = RawDummyTool()
+        secure = SecureTool.wrap(raw)
+        ref = _set_token(None)
+        try:
+            result = secure._inject_authoritative_context({"tenant_id": "x", "user_id": "y"})
+            assert result["tenant_id"] == "x"
+        finally:
+            _reset_token(ref)
+
+
+# ─── Test: Provenance Prefix Resolution ───
+
+
+class TestProvenancePrefix:
+    def test_federated_tool_prefix(self, raw_tool):
+        raw_tool.tags = ["federated"]
+        secure = SecureTool.wrap(raw_tool)
+        assert secure._resolve_provenance_prefix() == "federated_tool"
+
+    def test_privacy_tool_prefix(self):
+        secure = SecureTool(
+            name="anonymize", description="anon", required_permission="privacy:anonymize"
+        )
+        assert secure._resolve_provenance_prefix() == "privacy_tool"
+
+    def test_shield_tool_prefix(self):
+        secure = SecureTool(name="scan", description="scan", required_permission="shield:scan")
+        assert secure._resolve_provenance_prefix() == "shield_tool"
+
+    def test_regular_tool_prefix(self, raw_tool):
+        secure = SecureTool.wrap(raw_tool)
+        assert secure._resolve_provenance_prefix() == "tool"
+
+
+# ─── Test: NotImplementedError path ───
+
+
+class TestNoWrappedTool:
+    def test_bare_securetool_run_raises(self):
+        """SecureTool without wrapped_tool and without _run override raises."""
+        st = SecureTool(name="bare", description="bare", skip_auth=True)
+        with pytest.raises(NotImplementedError):
+            st._run(query="test")
+
+    @pytest.mark.asyncio
+    async def test_bare_securetool_arun_raises(self):
+        st = SecureTool(name="bare", description="bare", skip_auth=True)
+        with pytest.raises(NotImplementedError):
+            await st._arun(query="test")

@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 # Where to check
-CORTEX_GRAPHS = "src/contextunity.router/cortex/graphs"
+CORTEX_GRAPHS = "src/contextunity/router/cortex"
 
 # Patterns that violate architecture
 VIOLATIONS = [

@@ -20,22 +20,23 @@ Tools:
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from collections.abc import Callable
 
 from contextunity.core import get_contextunit_logger
-from langchain_core.tools import tool
+from contextunity.core.types import is_object_dict, is_object_list
 
+from contextunity.router.langchain_boundaries import tool
 from contextunity.router.modules.tools import register_tool
-from contextunity.router.modules.tools.schemas import DataToolResult
+from contextunity.router.modules.tools.schemas import SecurityResult
 
 logger = get_contextunit_logger(__name__)
 
 # ── RPC client (lazy init) ────────────────────────────────────────
 
-_grpc_stub: Any = None
+_grpc_stub: object | None = None
 
 
-def _get_grpc_stub():
+def _get_grpc_stub() -> object | None:
     """Get or create the gRPC ShieldService stub."""
     global _grpc_stub
     if _grpc_stub is not None:
@@ -43,28 +44,31 @@ def _get_grpc_stub():
 
     from contextunity.router.core import get_core_config
 
-    host = get_core_config().router.shield_grpc_host
+    config = get_core_config()
+    host = config.shield_url
     if not host:
         return None
 
     from contextunity.core import shield_pb2_grpc
     from contextunity.core.grpc_utils import create_channel_sync
 
-    channel = create_channel_sync(host)
+    channel = create_channel_sync(host, config=config)
     _grpc_stub = shield_pb2_grpc.ShieldServiceStub(channel)
     logger.info("Connected to contextunity.shield gRPC at %s", host)
     return _grpc_stub
 
 
-def _grpc_call(rpc_name: str, payload: dict) -> dict:
+def _grpc_call(rpc_name: str, payload: dict[str, object]) -> dict[str, object]:
     """Make a gRPC call to ShieldService and return response payload."""
     from contextunity.core import ContextUnit, contextunit_pb2
 
-    from contextunity.router.service.shield_client import _shield_metadata
+    from contextunity.router.service.shield_client import shield_metadata
 
     stub = _get_grpc_stub()
     if stub is None:
-        raise RuntimeError("CU_SHIELD_GRPC_HOST not configured")
+        from contextunity.core.exceptions import ConfigurationError
+
+        raise ConfigurationError("CU_SHIELD_GRPC_HOST not configured")
 
     unit = ContextUnit(
         payload=payload,
@@ -72,18 +76,58 @@ def _grpc_call(rpc_name: str, payload: dict) -> dict:
     )
     req = unit.to_protobuf(contextunit_pb2)
 
-    metadata = _shield_metadata()
+    metadata = shield_metadata()
 
-    rpc = getattr(stub, rpc_name)
-    resp = rpc(req, metadata=metadata)
+    rpc_method_obj: object = getattr(stub, rpc_name, None)
+    if not callable(rpc_method_obj):
+        from contextunity.core.exceptions import ConfigurationError
 
-    resp_unit = ContextUnit.from_protobuf(resp)
+        raise ConfigurationError(f"Shield RPC '{rpc_name}' is not callable")
+    rpc_method: Callable[..., object] = rpc_method_obj
+    resp_obj: object = rpc_method(req, metadata=metadata)
+
+    if not isinstance(resp_obj, contextunit_pb2.ContextUnit):
+        from contextunity.core.exceptions import ConfigurationError
+
+        raise ConfigurationError(f"Shield RPC '{rpc_name}' returned unexpected type")
+
+    resp_unit = ContextUnit.from_protobuf(resp_obj)
     return resp_unit.payload or {}
 
 
 def _use_rpc() -> bool:
     """Whether to use gRPC mode (remote Shield service)."""
     return _get_grpc_stub() is not None
+
+
+def _get_bool(d: dict[str, object], key: str, default: bool = False) -> bool:
+    val = d.get(key)
+    return bool(val) if isinstance(val, bool) else default
+
+
+def _get_float(d: dict[str, object], key: str, default: float = 0.0) -> float:
+    val = d.get(key)
+    return float(val) if isinstance(val, (int, float, str)) else default
+
+
+def _get_str(d: dict[str, object], key: str, default: str = "") -> str:
+    val = d.get(key)
+    return str(val) if val is not None else default
+
+
+def _get_list_of_dicts(d: dict[str, object], key: str) -> list[dict[str, str]]:
+    raw = d.get(key)
+    if not is_object_list(raw):
+        return []
+    res: list[dict[str, str]] = []
+    for item in raw:
+        if not is_object_dict(item):
+            continue
+        row: dict[str, str] = {}
+        for field_key, field_val in item.items():
+            row[field_key] = str(field_val)
+        res.append(row)
+    return res
 
 
 # ============================================================================
@@ -94,7 +138,7 @@ def _use_rpc() -> bool:
 @tool
 async def shield_scan(
     text: str, context: str = "", validators: list[str] | None = None
-) -> DataToolResult:
+) -> SecurityResult:
     """Scan text for prompt injection, jailbreak attempts, and PII leaks.
 
     Use this tool BEFORE sending any user input to an external LLM.
@@ -119,7 +163,7 @@ async def shield_scan(
         - latency_ms: Processing time
     """
     if _use_rpc():
-        return _grpc_call(
+        resp = _grpc_call(
             "Scan",
             {
                 "text": text,
@@ -127,6 +171,15 @@ async def shield_scan(
                 "validators": validators or [],
             },
         )
+        return {
+            "success": True,
+            "allowed": _get_bool(resp, "allowed"),
+            "blocked": _get_bool(resp, "blocked"),
+            "threats": _get_list_of_dicts(resp, "threats"),
+            "risk_score": _get_float(resp, "risk_score"),
+            "severity": _get_str(resp, "severity"),
+            "latency_ms": _get_float(resp, "latency_ms"),
+        }
 
     # Local mode — direct package call
     from contextunity.shield import Shield
@@ -135,18 +188,20 @@ async def shield_scan(
 
     # Add specific validators if requested
     if validators:
+        validators_list: list[object] = getattr(shield, "_validators", [])
         if "pii" in validators:
             from contextunity.shield import PIIValidator
 
-            shield._validators.append(PIIValidator())
+            validators_list.append(PIIValidator())
         if "rag_context" in validators:
             from contextunity.shield import RAGContextValidator
 
-            shield._validators.append(RAGContextValidator())
+            validators_list.append(RAGContextValidator())
 
     result = shield.check(user_input=text, context=context)
 
     return {
+        "success": True,
         "allowed": result.allowed,
         "blocked": result.blocked,
         "threats": [
@@ -175,7 +230,7 @@ async def check_policy(
     tenant_id: str = "default",
     permissions: list[str] | None = None,
     token_id: str | None = None,
-) -> DataToolResult:
+) -> SecurityResult:
     """Check if an action is allowed by the contextunity.shield policy engine.
 
     Use this to verify authorization before performing sensitive operations.
@@ -202,7 +257,7 @@ async def check_policy(
     tenant_id = tenant_id or "default"
 
     if _use_rpc():
-        return _grpc_call(
+        resp = _grpc_call(
             "EvaluatePolicy",
             {
                 "token_id": token_id or "",
@@ -212,6 +267,13 @@ async def check_policy(
                 "resource": resource,
             },
         )
+        return {
+            "success": True,
+            "allowed": _get_bool(resp, "allowed"),
+            "reason": _get_str(resp, "reason"),
+            "matched_policy": _get_str(resp, "matched_policy"),
+            "evaluation_ms": _get_float(resp, "evaluation_ms"),
+        }
 
     # Local mode — construct ContextToken and evaluate
     from contextunity.core.tokens import ContextToken
@@ -247,6 +309,7 @@ async def check_policy(
     )
 
     return {
+        "success": True,
         "allowed": result.allowed,
         "reason": result.reason,
         "matched_policy": result.matched_policy or "",
@@ -262,7 +325,7 @@ async def check_policy(
 @tool
 async def check_compliance(
     standards: list[str] | None = None,
-) -> DataToolResult:
+) -> SecurityResult:
     """Run a compliance audit on the current security posture.
 
     Checks:
@@ -284,12 +347,19 @@ async def check_compliance(
         - summary: Human-readable summary
     """
     if _use_rpc():
-        return _grpc_call(
+        resp = _grpc_call(
             "CheckCompliance",
             {
                 "standards": standards or [],
             },
         )
+        return {
+            "success": True,
+            "compliant": _get_bool(resp, "compliant"),
+            "score": _get_float(resp, "score"),
+            "findings": _get_list_of_dicts(resp, "findings"),
+            "summary": _get_str(resp, "summary"),
+        }
 
     # Local mode
     from contextunity.shield import ComplianceChecker
@@ -298,6 +368,7 @@ async def check_compliance(
     report = checker.check()
 
     return {
+        "success": True,
         "compliant": report.passed,
         "score": report.overall_score,
         "findings": [
@@ -350,7 +421,7 @@ async def audit_event(
     tenant_id = tenant_id or "default"
 
     if _use_rpc():
-        _grpc_call(
+        _ = _grpc_call(
             "RecordAudit",
             {
                 "event_type": event_type,

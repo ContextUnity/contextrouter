@@ -8,7 +8,7 @@ Usage:
     from contextunity.router.service.shield_client import shield_put_secret, shield_verify_secret
 
     # Store a secret:
-    shield_put_secret("acme/stream/auth_token", token_value, tenant_id="acme")
+    shield_put_secret("acme/stream/auth_token", token_value)
 
     # Verify (fetch + compare + discard):
     ok = shield_verify_secret("acme/stream/auth_token", candidate, tenant_id="acme")
@@ -17,9 +17,10 @@ Usage:
 from __future__ import annotations
 
 import secrets
-from typing import Any
 
 from contextunity.core import get_contextunit_logger
+from contextunity.core.sdk.types import GrpcMetadata
+from contextunity.core.types import ContextUnitPayload
 
 logger = get_contextunit_logger(__name__)
 
@@ -27,15 +28,22 @@ logger = get_contextunit_logger(__name__)
 _DEFAULT_SHIELD_URL = "localhost:50054"
 
 
-def _get_shield_url() -> str:
-    """Get Shield URL from core config (resolved at startup) or fallback to default."""
+def get_shield_url() -> str:
+    """Get Shield URL from Router config (resolved at startup).
+
+    Returns empty string when Shield is not configured — callers
+    must check before attempting gRPC calls.
+    """
     try:
         from contextunity.router.core import get_core_config
 
         config = get_core_config()
-        return config.router.shield_grpc_host or _DEFAULT_SHIELD_URL
-    except Exception:
-        return _DEFAULT_SHIELD_URL
+        return config.shield_url or ""
+    except Exception:  # graceful-degrade: Shield unavailable, continue without
+        return ""
+
+
+_get_shield_url = get_shield_url
 
 
 def _shield_stub(shield_url: str | None = None):
@@ -43,13 +51,15 @@ def _shield_stub(shield_url: str | None = None):
     from contextunity.core import shield_pb2_grpc
     from contextunity.core.grpc_utils import create_channel_sync
 
+    from contextunity.router.core import get_core_config as get_router_config
+
     url = shield_url or _get_shield_url()
-    channel = create_channel_sync(url)
+    channel = create_channel_sync(url, config=get_router_config())
     stub = shield_pb2_grpc.ShieldServiceStub(channel)
     return stub, channel
 
 
-def _shield_metadata():
+def shield_metadata(*, tenant_id: str | None = None) -> GrpcMetadata:
     """Create gRPC metadata with service token for Shield authentication.
 
     Single source of truth for all Router → Shield gRPC calls.
@@ -60,7 +70,7 @@ def _shield_metadata():
     # Ensure caller token gets propagated to Shield
     ctx = get_auth_context()
     if ctx and ctx.token_string:
-        return [("authorization", f"Bearer {ctx.token_string}")]
+        return (("authorization", f"Bearer {ctx.token_string}"),)
 
     # Fallback to local minting if background task
     from contextunity.core.signing import get_signing_backend
@@ -76,23 +86,26 @@ def _shield_metadata():
             "shield:get_secret",
             "shield:secrets:read",
         ),
+        allowed_tenants=(tenant_id or "default",),
     )
     backend = get_signing_backend(project_id="router")
     return create_grpc_metadata_with_token(token, backend=backend)
+
+
+_shield_metadata = shield_metadata
 
 
 def shield_put_secret(
     path: str,
     value: str,
     *,
-    tenant_id: str = "",
     shield_url: str | None = None,
+    tenant_id: str | None = None,
     tags: dict[str, str] | None = None,
-) -> dict[str, Any]:
-    """Store a secret in Shield.  Returns response dict or raises."""
+) -> ContextUnitPayload:
+    """Store a secret in Shield via gRPC ``PutSecret``. Raises ``PlatformServiceError`` on remote failure."""
     from contextunity.core import ContextUnit, contextunit_pb2
     from contextunity.core.sdk.models import SecurityScopes
-    from google.protobuf.json_format import MessageToDict
 
     stub, channel = _shield_stub(shield_url)
 
@@ -100,23 +113,33 @@ def shield_put_secret(
         payload={
             "path": path,
             "value": value,
-            "tenant_id": tenant_id,
             "created_by": "contextunity.router:shield_client",
             "tags": tags or {"type": "stream_auth_token"},
+            "tenant_id": tenant_id or "default",
         },
         provenance=["contextunity.router:shield_client:put_secret"],
         security=SecurityScopes(write=["secrets:write"]),
     )
     pb = unit.to_protobuf(contextunit_pb2)
 
-    metadata = _shield_metadata()
+    metadata = _shield_metadata(tenant_id=tenant_id)
 
     try:
-        response = stub.PutSecret(pb, metadata=metadata)
-        result = MessageToDict(response.payload)
+        response = stub.PutSecret(pb, metadata=tuple(metadata))
+        from contextunity.core.sdk.payload import wire_payload_from_field
+
+        result: ContextUnitPayload = wire_payload_from_field(response.payload)
+        if not result:
+            from contextunity.core.exceptions import PlatformServiceError
+
+            raise PlatformServiceError("Shield PutSecret returned invalid payload")
         if result.get("error"):
-            raise RuntimeError(f"Shield PutSecret error: {result.get('message', result['error'])}")
-        logger.info("Shield: stored secret at path=%s tenant=%s", path, tenant_id)
+            from contextunity.core.exceptions import PlatformServiceError
+
+            raise PlatformServiceError(
+                f"Shield PutSecret failed: path={path}, error={result.get('message', result['error'])}"
+            )
+        logger.info("Shield: stored secret at path=%s", path)
         return result
     finally:
         channel.close()
@@ -125,35 +148,52 @@ def shield_put_secret(
 def shield_get_secret(
     path: str,
     *,
-    tenant_id: str = "",
     shield_url: str | None = None,
+    tenant_id: str | None = None,
 ) -> str | None:
-    """Fetch a secret value from Shield.  Returns value or None."""
+    """Fetch a secret value from Shield.  Returns value or None.
+
+    Returns None immediately if Shield is not configured (no URL).
+    Logs a warning only when Shield IS configured but the RPC fails.
+    """
+    url = shield_url or _get_shield_url()
+    if not url:
+        return None
+
     from contextunity.core import ContextUnit, contextunit_pb2
     from contextunity.core.sdk.models import SecurityScopes
-    from google.protobuf.json_format import MessageToDict
 
-    stub, channel = _shield_stub(shield_url)
+    stub, channel = _shield_stub(url)
 
     unit = ContextUnit(
-        payload={"path": path, "tenant_id": tenant_id},
+        payload={"path": path, "tenant_id": tenant_id or "default"},
         provenance=["contextunity.router:shield_client:get_secret"],
         security=SecurityScopes(read=["secrets:read"]),
     )
     pb = unit.to_protobuf(contextunit_pb2)
 
-    metadata = _shield_metadata()
+    metadata = _shield_metadata(tenant_id=tenant_id)
+
+    from contextunity.core.exceptions import PlatformServiceError, SecurityError
 
     try:
-        response = stub.GetSecret(pb, metadata=metadata)
-        result = MessageToDict(response.payload)
+        response = stub.GetSecret(pb, metadata=tuple(metadata))
+        from contextunity.core.sdk.payload import wire_payload_from_field
+
+        result: ContextUnitPayload = wire_payload_from_field(response.payload)
+        if not result:
+            raise PlatformServiceError("Shield GetSecret returned invalid payload")
         if result.get("error"):
-            logger.warning("Shield GetSecret failed: path=%s error=%s", path, result.get("error"))
-            return None
-        return result.get("value", None)
-    except Exception as e:
-        logger.warning("Shield unavailable for GetSecret: path=%s error=%s", path, e)
-        return None
+            raise PlatformServiceError(
+                f"Shield GetSecret failed: path={path}, error={result.get('error')}"
+            )
+        value = result.get("value")
+        return value if isinstance(value, str) else None
+    except PlatformServiceError:
+        raise  # re-raise our own error above
+    except Exception as e:  # graceful-degrade: Shield unavailable, continue without
+        # Fail-closed: Shield is explicitly enabled but unreachable
+        raise SecurityError(f"Shield secret retrieval failed (fail-closed): path={path}") from e
     finally:
         channel.close()
 
@@ -162,8 +202,8 @@ def shield_verify_secret(
     path: str,
     candidate: str,
     *,
-    tenant_id: str = "",
     shield_url: str | None = None,
+    tenant_id: str | None = None,
 ) -> bool:
     """Verify a candidate secret against Shield — stateless, constant-time.
 
@@ -175,12 +215,11 @@ def shield_verify_secret(
     Returns:
         True if match, False otherwise.
     """
-    stored = shield_get_secret(path, tenant_id=tenant_id, shield_url=shield_url)
+    stored = shield_get_secret(path, shield_url=shield_url, tenant_id=tenant_id)
     if stored is None:
         logger.warning(
-            "Shield verify: no stored secret at path=%s tenant=%s",
+            "Shield verify: no stored secret at path=%s",
             path,
-            tenant_id,
         )
         return False
 
@@ -189,9 +228,8 @@ def shield_verify_secret(
 
     if not match:
         logger.warning(
-            "Shield verify: secret mismatch for path=%s tenant=%s",
+            "Shield verify: secret mismatch for path=%s",
             path,
-            tenant_id,
         )
 
     # `stored` goes out of scope here — never stored as attribute/field
@@ -207,6 +245,7 @@ def generate_stream_secret() -> str:
 
 
 __all__ = [
+    "shield_metadata",
     "shield_put_secret",
     "shield_get_secret",
     "shield_verify_secret",

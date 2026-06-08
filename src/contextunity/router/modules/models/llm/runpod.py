@@ -1,19 +1,27 @@
 """RunPod LLM provider (OpenAI-compatible API).
-
 RunPod Serverless provides OpenAI-compatible endpoints for vLLM and TGI.
 Custom workers can support additional modalities.
 """
 
 from __future__ import annotations
 
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
+from typing import override
 
 from contextunity.core import get_contextunit_logger
-from contextunity.core.tokens import ContextToken
+from contextunity.core.exceptions import ConfigurationError
 
-from contextunity.router.core import Config
+from contextunity.router.core import RouterConfig
 
-from ..base import BaseModel
+from ..base import BaseLLM as BaseModel
+from ..boundary_common import (
+    invoke_openai_chat_create,
+    iter_openai_stream_text,
+    openai_choice_text,
+    resolve_json_object_mode,
+    resolve_max_output_tokens,
+    resolve_temperature,
+)
 from ..registry import model_registry
 from ..types import (
     FinalTextEvent,
@@ -24,7 +32,9 @@ from ..types import (
     ProviderInfo,
     TextDeltaEvent,
 )
-from ._openai_compat import build_native_openai_messages
+from .openai_boundary import load_async_openai_client
+from .openai_compat import build_native_openai_messages
+from .types import RunPodProviderConfig
 
 logger = get_contextunit_logger(__name__)
 
@@ -36,22 +46,21 @@ class RunPodLLM(BaseModel):
     Supports text and images for vision models deployed on RunPod.
     """
 
-    def __init__(self, config: Config, *, model_name: str | None = None, **kwargs: object) -> None:
-        try:
-            from langfuse.openai import AsyncOpenAI
-        except ImportError:
-            try:
-                from openai import AsyncOpenAI
-            except ImportError as e:
-                raise ImportError(
-                    "RunPodLLM requires `openai` package. Install with `pip install openai`."
-                ) from e
+    _client: object
+    _cfg: RouterConfig
+    _base_url: str
+    _capabilities: ModelCapabilities
 
+    def __init__(
+        self, config: RouterConfig, *, model_name: str | None = None, **kwargs: object
+    ) -> None:
+        """Create an ``AsyncOpenAI`` client targeting the RunPod serverless endpoint."""
+        resolved_name = (model_name or "").strip() or "runpod-model"
+        super().__init__(provider="runpod", model_name=resolved_name)
         self._cfg = config
-        self._model_name = (model_name or "").strip() or "runpod-model"
         self._base_url = (config.runpod.base_url or "").strip()
 
-        self._client = AsyncOpenAI(
+        self._client = load_async_openai_client(
             api_key=(config.runpod.api_key or "skip"),
             base_url=self._base_url,
             max_retries=config.llm.max_retries,
@@ -63,27 +72,46 @@ class RunPodLLM(BaseModel):
         )
 
     @property
+    @override
     def capabilities(self) -> ModelCapabilities:
+        """Declare modality support for the RunPod backend."""
         return self._capabilities
 
-    async def generate(
-        self, request: ModelRequest, *, token: ContextToken | None = None
-    ) -> ModelResponse:
-        _ = token
+    @override
+    async def _generate(self, request: ModelRequest) -> ModelResponse:
+        """Call the OpenAI-compatible RunPod serverless endpoint and return a complete response."""
         messages = build_native_openai_messages(request)
-        kwargs = {
-            "model": self._model_name,
-            "messages": messages,
-            "timeout": request.timeout_sec,
-        }
-        if request.temperature is not None:
-            kwargs["temperature"] = request.temperature
-        if request.max_output_tokens is not None:
-            kwargs["max_tokens"] = request.max_output_tokens
+        pc = RunPodProviderConfig.model_validate(request.provider_config)
+        json_mode = resolve_json_object_mode(
+            request_response_format=request.response_format,
+            provider_response_format=pc.response_format,
+        )
+        response_obj = await invoke_openai_chat_create(
+            self._client,
+            model=self._model_name,
+            messages=messages,
+            timeout=request.timeout_sec,
+            temperature=resolve_temperature(
+                request_temperature=request.temperature,
+                provider_temperature=pc.temperature,
+            ),
+            max_tokens=resolve_max_output_tokens(
+                request_max_output_tokens=request.max_output_tokens,
+                provider_max_tokens=pc.get_max_tokens(),
+            ),
+            response_format={"type": "json_object"} if json_mode else None,
+        )
+        choices_obj: object = getattr(response_obj, "choices", None)
+        from contextunity.core.types import is_object_list
 
-        response = await self._client.chat.completions.create(**kwargs)
-        choice = response.choices[0]
-        text = str(choice.message.content or "")
+        from contextunity.router.modules.models.boundary_common import first_list_item
+
+        if not is_object_list(choices_obj) or not choices_obj:
+            raise ConfigurationError("RunPod returned no completion choices")
+        first_choice = first_list_item(choices_obj)
+        if first_choice is None:
+            raise ConfigurationError("RunPod response missing choices", provider="runpod")
+        text = openai_choice_text(first_choice)
 
         return ModelResponse(
             text=text,
@@ -94,31 +122,44 @@ class RunPodLLM(BaseModel):
             ),
         )
 
-    async def stream(
-        self, request: ModelRequest, *, token: ContextToken | None = None
+    @override
+    def _stream(
+        self,
+        request: ModelRequest,
     ) -> AsyncIterator[ModelStreamEvent]:
-        _ = token
+        """Stream token deltas from the OpenAI-compatible RunPod serverless endpoint."""
         messages = build_native_openai_messages(request)
-        kwargs = {
-            "model": self._model_name,
-            "messages": messages,
-            "timeout": request.timeout_sec,
-            "stream": True,
-        }
-        if request.temperature is not None:
-            kwargs["temperature"] = request.temperature
-        if request.max_output_tokens is not None:
-            kwargs["max_tokens"] = request.max_output_tokens
+        pc = RunPodProviderConfig.model_validate(request.provider_config)
+        json_mode = resolve_json_object_mode(
+            request_response_format=request.response_format,
+            provider_response_format=pc.response_format,
+        )
 
-        full = ""
-        stream = await self._client.chat.completions.create(**kwargs)
-        async for chunk in stream:
-            if chunk.choices and len(chunk.choices) > 0:
-                delta = chunk.choices[0].delta.content
-                if delta:
-                    full += delta
-                    yield TextDeltaEvent(delta=delta)
-        yield FinalTextEvent(text=full)
+        async def _event_stream() -> AsyncIterator[ModelStreamEvent]:
+            """Yield ``TextDelta`` / ``UsageEvent`` from the OpenAI-compatible RunPod serverless endpoint stream."""
+            full = ""
+            stream_obj = await invoke_openai_chat_create(
+                self._client,
+                model=self._model_name,
+                messages=messages,
+                timeout=request.timeout_sec,
+                stream=True,
+                temperature=resolve_temperature(
+                    request_temperature=request.temperature,
+                    provider_temperature=pc.temperature,
+                ),
+                max_tokens=resolve_max_output_tokens(
+                    request_max_output_tokens=request.max_output_tokens,
+                    provider_max_tokens=pc.get_max_tokens(),
+                ),
+                response_format={"type": "json_object"} if json_mode else None,
+            )
+            async for delta in iter_openai_stream_text(stream_obj):
+                full += delta
+                yield TextDeltaEvent(delta=delta)
+            yield FinalTextEvent(text=full)
+
+        return _event_stream()
 
 
 __all__ = ["RunPodLLM"]

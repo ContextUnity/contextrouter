@@ -1,21 +1,24 @@
-"""Knowledge graph queries (Postgres)."""
+"""Knowledge graph queries -- ltree-based traversal, path queries, and entity resolution against PostgreSQL."""
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from psycopg.rows import dict_row
+
+from .store import DictConnection
 
 
 async def fetch_kg_facts(
     *,
-    conn,
+    conn: DictConnection,
     tenant_id: str,
     entrypoints: Iterable[str],
     allowed_relations: list[str] | None,
     max_depth: int,
     max_facts: int,
 ) -> list[tuple[str, str, str]]:
+    """Fetch kg facts."""
     if not entrypoints:
         return []
     conn.row_factory = dict_row
@@ -52,7 +55,16 @@ async def fetch_kg_facts(
     rows = await conn.execute(sql, params)
     out: list[tuple[str, str, str]] = []
     async for row in rows:
-        out.append((row["source_id"], row["target_id"], row["relation"]))
+        source_id = row["source_id"]
+        target_id = row["target_id"]
+        relation = row["relation"]
+        out.append(
+            (
+                source_id if isinstance(source_id, str) else str(source_id),
+                target_id if isinstance(target_id, str) else str(target_id),
+                relation if isinstance(relation, str) else str(relation),
+            )
+        )
     return out
 
 

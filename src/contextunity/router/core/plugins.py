@@ -1,9 +1,7 @@
 """Plugin manifest and context for contextunity.router plugin system.
-
 Plugins are directories containing:
 - plugin.yaml — manifest with metadata, capabilities, and requirements
 - entry_point.py — Python module with on_load(ctx: PluginContext) function
-
 Plugins without a manifest are loaded in legacy mode (bare .py files).
 """
 
@@ -11,13 +9,19 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
-from typing import Any
 
 from contextunity.core import get_contextunit_logger
+from contextunity.core.sdk.interfaces import BaseTransformer
+from contextunity.core.types import JsonDict, is_json_dict
+from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field, field_validator
 
-logger = get_contextunit_logger(__name__)
+from contextunity.router.core.exceptions import RouterPluginError
+from contextunity.router.core.interfaces import BaseConnector, BaseProvider
+from contextunity.router.core.registry import ZeroArgGraphThunk
+from contextunity.router.cortex.types import RunnableGraphFactory
 
+logger = get_contextunit_logger(__name__)
 
 # ============================================================================
 # Plugin Manifest (parsed from plugin.yaml)
@@ -63,7 +67,7 @@ class PluginManifest(BaseModel):
     @field_validator("entry_point")
     @classmethod
     def validate_entry_point(cls, v: str) -> str:
-        """Entry point must be a .py file without path traversal."""
+        """Reject entry points with path traversal or non-``.py`` extensions."""
         if not v.endswith(".py"):
             raise ValueError("entry_point must be a .py file")
         if ".." in v or "/" in v or "\\" in v:
@@ -96,9 +100,10 @@ class PluginContext:
     """
 
     def __init__(self, manifest: PluginManifest, *, plugin_dir: Path) -> None:
-        self._manifest = manifest
-        self._capabilities = set(manifest.capabilities)
-        self._plugin_dir = plugin_dir
+        """Store *manifest*, derive the capability set, and initialise per-type registration trackers."""
+        self._manifest: PluginManifest = manifest
+        self._capabilities: set[PluginCapability] = set(manifest.capabilities)
+        self._plugin_dir: Path = plugin_dir
         self._registered_tools: list[str] = []
         self._registered_graphs: list[str] = []
         self._registered_connectors: list[str] = []
@@ -109,36 +114,40 @@ class PluginContext:
 
     @property
     def name(self) -> str:
-        """Plugin name."""
+        """Human-readable plugin identifier from the manifest."""
         return self._manifest.name
 
     @property
     def version(self) -> str:
-        """Plugin version."""
+        """Semver string declared in the plugin manifest."""
         return self._manifest.version
 
     @property
     def capabilities(self) -> set[PluginCapability]:
-        """Granted capabilities."""
+        """Copy of the capability flags granted to this plugin at load time."""
         return self._capabilities.copy()
 
     @property
     def plugin_dir(self) -> Path:
-        """Plugin directory path (read-only)."""
+        """Absolute path to the plugin’s directory on disk."""
         return self._plugin_dir
 
     # ---- Capability-gated registration -------------------------------------
 
     def _check_capability(self, cap: PluginCapability) -> None:
-        """Raise PermissionError if capability not granted."""
+        """Raise securityerror if capability not granted."""
         if cap not in self._capabilities:
-            raise PermissionError(
-                f"Plugin '{self.name}' lacks '{cap.value}' capability. "
-                f"Add '{cap.value}' to capabilities in plugin.yaml."
+            from contextunity.core.exceptions import SecurityError
+
+            raise SecurityError(
+                (
+                    f"Plugin '{self.name}' lacks '{cap.value}' capability. "
+                    f"Add '{cap.value}' to capabilities in plugin.yaml."
+                )
             )
 
-    def register_tool(self, tool_instance: Any) -> None:
-        """Register a tool (requires 'tools' capability)."""
+    def register_tool(self, tool_instance: BaseTool) -> None:
+        """Register a LangChain tool (requires the ``tools`` capability)."""
         self._check_capability(PluginCapability.TOOLS)
 
         from contextunity.router.modules.tools import register_tool
@@ -148,61 +157,66 @@ class PluginContext:
         self._registered_tools.append(tool_name)
         logger.info("[Plugin:%s] Registered tool: %s", self.name, tool_name)
 
-    def register_graph(self, name: str, builder: Any) -> None:
-        """Register a graph builder (requires 'graphs' capability)."""
+    def register_graph(
+        self,
+        name: str,
+        builder: RunnableGraphFactory | ZeroArgGraphThunk,
+    ) -> None:
+        """Register a graph builder under *name* (requires the ``graphs`` capability)."""
         self._check_capability(PluginCapability.GRAPHS)
 
-        from contextunity.router.core.registry import graph_registry
+        from contextunity.router.core.registry import as_runnable_graph_factory, graph_registry
 
-        graph_registry.register(name, builder)
+        graph_registry.register(name, as_runnable_graph_factory(builder))
         self._registered_graphs.append(name)
         logger.info("[Plugin:%s] Registered graph: %s", self.name, name)
 
-    def register_connector(self, name: str, cls: Any) -> None:
-        """Register a connector class (requires 'connectors' capability)."""
+    def register_connector(self, name: str, cls: type[BaseConnector]) -> None:
+        """Register a connector class under *name* (requires the ``connectors`` capability)."""
         self._check_capability(PluginCapability.CONNECTORS)
 
         from contextunity.router.core.registry import register_connector
 
         # Call the decorator function directly
-        register_connector(name)(cls)
+        _ = register_connector(name)(cls)
         self._registered_connectors.append(name)
         logger.info("[Plugin:%s] Registered connector: %s", self.name, name)
 
-    def register_provider(self, name: str, cls: Any) -> None:
-        """Register a provider class (requires 'providers' capability)."""
+    def register_provider(self, name: str, cls: type[BaseProvider]) -> None:
+        """Register a provider class under *name* (requires the ``providers`` capability)."""
         self._check_capability(PluginCapability.PROVIDERS)
 
         from contextunity.router.core.registry import register_provider
 
-        register_provider(name)(cls)
+        _ = register_provider(name)(cls)
         self._registered_providers.append(name)
         logger.info("[Plugin:%s] Registered provider: %s", self.name, name)
 
-    def register_transformer(self, name: str, cls: Any) -> None:
-        """Register a transformer class (requires 'transformers' capability)."""
+    def register_transformer(self, name: str, cls: type[BaseTransformer]) -> None:
+        """Register a transformer class under *name* (requires the ``transformers`` capability)."""
         self._check_capability(PluginCapability.TRANSFORMERS)
 
         from contextunity.router.core.registry import register_transformer
 
-        register_transformer(name)(cls)
+        _ = register_transformer(name)(cls)
         self._registered_transformers.append(name)
         logger.info("[Plugin:%s] Registered transformer: %s", self.name, name)
 
     # ---- Introspection -----------------------------------------------------
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self) -> JsonDict:
         """Return a summary of what this plugin registered."""
-        return {
+        summary: JsonDict = {
             "name": self.name,
             "version": self.version,
             "capabilities": [c.value for c in self._capabilities],
-            "tools": self._registered_tools,
-            "graphs": self._registered_graphs,
-            "connectors": self._registered_connectors,
-            "providers": self._registered_providers,
-            "transformers": self._registered_transformers,
+            "tools": list(self._registered_tools),
+            "graphs": list(self._registered_graphs),
+            "connectors": list(self._registered_connectors),
+            "providers": list(self._registered_providers),
+            "transformers": list(self._registered_transformers),
         }
+        return summary
 
 
 # ============================================================================
@@ -214,30 +228,26 @@ _loaded_plugins: dict[str, PluginContext] = {}
 
 
 def load_manifest(plugin_dir: Path) -> PluginManifest | None:
-    """Load and validate plugin.yaml from a directory.
-
-    Returns None if no manifest found.
-    Raises ValueError if manifest is invalid.
-    """
+    """Parse and validate ``plugin.yaml`` (or ``.yml``) from *plugin_dir*; return ``None`` if absent."""
     manifest_path = plugin_dir / "plugin.yaml"
     if not manifest_path.exists():
         manifest_path = plugin_dir / "plugin.yml"
     if not manifest_path.exists():
         return None
 
-    import yaml
+    from contextunity.core.parsing import yaml_load
 
     with open(manifest_path) as f:
-        data = yaml.safe_load(f)
+        raw = yaml_load(f)
 
-    if not isinstance(data, dict):
-        raise ValueError(f"Invalid plugin manifest in {manifest_path}: expected mapping")
+    if not is_json_dict(raw):
+        raise RouterPluginError(f"Invalid plugin manifest in {manifest_path}: expected mapping")
 
-    return PluginManifest(**data)
+    return PluginManifest.model_validate(raw)
 
 
 def _check_version_compatibility(manifest: PluginManifest) -> None:
-    """Check if contextunity.router version satisfies plugin requirements."""
+    """Raise ``ValueError`` if the installed ``contextunity.router`` version violates the plugin’s semver constraints."""
     required = manifest.requires.get("contextunity.router")
     if not required:
         return
@@ -257,31 +267,22 @@ def _check_version_compatibility(manifest: PluginManifest) -> None:
     if required.startswith(">="):
         min_version = Version(required[2:])
         if current < min_version:
-            raise ValueError(
-                f"Plugin '{manifest.name}' requires contextunity.router>={min_version}, "
-                f"but {current} is installed"
+            raise RouterPluginError(
+                (
+                    f"Plugin '{manifest.name}' requires contextunity.router>={min_version}, "
+                    f"but {current} is installed"
+                )
             )
     elif required.startswith("=="):
         exact = Version(required[2:])
         if current != exact:
-            raise ValueError(
+            raise RouterPluginError(
                 f"Plugin '{manifest.name}' requires contextunity.router=={exact}, but {current} is installed"
             )
 
 
 def load_plugin(plugin_dir: Path) -> PluginContext | None:
-    """Load a plugin from a directory with manifest.
-
-    Steps:
-    1. Parse plugin.yaml
-    2. Validate manifest
-    3. Check version compatibility
-    4. Import entry point module
-    5. Call on_load(ctx) if present
-
-    Returns:
-        PluginContext if loaded successfully, None if no manifest found.
-    """
+    """Load a plugin from a directory with manifest."""
     manifest = load_manifest(plugin_dir)
     if manifest is None:
         return None
@@ -318,7 +319,7 @@ def load_plugin(plugin_dir: Path) -> PluginContext | None:
     # Call on_load hook
     on_load = getattr(module, "on_load", None)
     if callable(on_load):
-        on_load(ctx)
+        _ = on_load(ctx)
     else:
         logger.debug("Plugin '%s' has no on_load() function, loaded module only", manifest.name)
 

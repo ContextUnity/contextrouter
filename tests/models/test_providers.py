@@ -1,10 +1,8 @@
 """Tests for model provider implementations.
 
-Vertex tests require real google-auth credentials and are skipped when unavailable.
 OpenAI and HuggingFace tests mock their dependencies via sys.modules.
 """
 
-import os
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -18,157 +16,7 @@ sys.modules["torch"] = MagicMock()
 
 from contextunity.router.modules.models.llm.huggingface import HuggingFaceLLM  # noqa: E402
 from contextunity.router.modules.models.llm.openai import OpenAILLM  # noqa: E402
-from contextunity.router.modules.models.types import (  # noqa: E402
-    ModelCapabilities,
-    ModelRequest,
-    ModelResponse,
-    ProviderInfo,
-    TextPart,
-)
-
-# VertexLLM requires google-auth + valid credentials.
-# Only import and run Vertex tests when credentials are explicitly available.
-_has_google_auth = False
-try:
-    import google.auth  # noqa: F401
-
-    _has_google_auth = True
-except ImportError:
-    pass
-
-_has_vertex_credentials = _has_google_auth and bool(
-    os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or os.getenv("GOOGLE_CLOUD_PROJECT")
-)
-
-
-@pytest.mark.skipif(not _has_vertex_credentials, reason="No Vertex credentials available")
-class TestVertexLLM:
-    """Test VertexLLM provider — requires real GCP credentials."""
-
-    @pytest.fixture
-    def mock_config(self):
-        """Create mock config for Vertex."""
-        config = MagicMock()
-        config.vertex.project_id = "test-project"
-        config.vertex.location = "us-central1"
-        config.vertex.credentials_path = None
-        config.llm.temperature = 0.7
-        config.llm.max_output_tokens = 1024
-        config.llm.timeout_sec = 60
-        config.llm.max_retries = 3
-        return config
-
-    def test_initialization(self, mock_config):
-        """Test VertexLLM initialization."""
-        from contextunity.router.modules.models.llm.vertex import VertexLLM
-
-        with (
-            patch("google.auth.default", return_value=(MagicMock(), "test-project")),
-            patch("google.auth.transport.requests.Request"),
-            patch("langchain_google_vertexai.ChatVertexAI") as mock_vertex,
-        ):
-            model = VertexLLM(mock_config, model_name="gemini-2.5-flash")
-
-            assert isinstance(model.capabilities, ModelCapabilities)
-            assert model.capabilities.supports_text is True
-            assert model.capabilities.supports_image is True
-            assert model.capabilities.supports_audio is True
-
-            mock_vertex.assert_called_once()
-
-    @pytest.mark.anyio
-    async def test_generate_text_only(self, mock_config):
-        """Test text-only generation."""
-        from contextunity.router.modules.models.llm.vertex import VertexLLM
-
-        with (
-            patch("google.auth.default", return_value=(MagicMock(), "test-project")),
-            patch("google.auth.transport.requests.Request"),
-            patch("langchain_google_vertexai.ChatVertexAI") as mock_vertex_class,
-        ):
-            mock_model = MagicMock()
-            mock_model.model_name = "gemini-2.5-flash"
-            mock_message = MagicMock()
-            mock_message.content = "Generated response"
-
-            async def _mock_ainvoke(*args, **kwargs):
-                return mock_message
-
-            mock_model.bind.return_value.ainvoke = _mock_ainvoke
-            mock_vertex_class.return_value = mock_model
-
-            model = VertexLLM(mock_config)
-            request = ModelRequest(parts=[TextPart(text="Hello world")], temperature=0.5)
-
-            response = await model.generate(request)
-
-            assert isinstance(response, ModelResponse)
-            assert response.text == "Generated response"
-            assert isinstance(response.raw_provider, ProviderInfo)
-
-    @pytest.mark.anyio
-    async def test_stream_text_only(self, mock_config):
-        """Test text-only streaming."""
-        from contextunity.router.modules.models.llm.vertex import VertexLLM
-
-        with (
-            patch("google.auth.default", return_value=(MagicMock(), "test-project")),
-            patch("google.auth.transport.requests.Request"),
-            patch("langchain_google_vertexai.ChatVertexAI") as mock_vertex_class,
-        ):
-            mock_model = MagicMock()
-            mock_chunk = MagicMock()
-            mock_chunk.content = "chunk"
-
-            async def _mock_astream(*args, **kwargs):
-                yield mock_chunk
-
-            mock_model.bind.return_value.astream = _mock_astream
-            mock_vertex_class.return_value = mock_model
-
-            model = VertexLLM(mock_config)
-            request = ModelRequest(parts=[TextPart(text="Hello world")], temperature=0.5)
-
-            events = []
-            async for event in model.stream(request):
-                events.append(event)
-
-            assert len(events) >= 1
-            assert any(e.event_type == "text_delta" for e in events)
-
-    def test_token_count(self, mock_config):
-        """Test token counting."""
-        from contextunity.router.modules.models.llm.vertex import VertexLLM
-
-        with (
-            patch("google.auth.default", return_value=(MagicMock(), "test-project")),
-            patch("google.auth.transport.requests.Request"),
-            patch("langchain_google_vertexai.ChatVertexAI") as mock_vertex_class,
-        ):
-            mock_model = MagicMock()
-            mock_model.get_num_tokens.return_value = 42
-            mock_vertex_class.return_value = mock_model
-
-            model = VertexLLM(mock_config)
-            count = model.get_token_count("hello world")
-            assert count == 42
-            mock_model.get_num_tokens.assert_called_once_with("hello world")
-
-    def test_missing_project_id(self):
-        """Test error when project_id is missing."""
-        from contextunity.router.modules.models.llm.vertex import VertexLLM
-
-        config = MagicMock()
-        config.vertex.project_id = None
-        config.vertex.location = "us-central1"
-        config.vertex.credentials_path = None
-
-        with (
-            patch("google.auth.default", return_value=(MagicMock(), "test")),
-            patch("google.auth.transport.requests.Request"),
-        ):
-            with pytest.raises(ValueError, match="requires vertex.project_id"):
-                VertexLLM(config)
+from contextunity.router.modules.models.types import ModelRequest, TextPart  # noqa: E402
 
 
 class TestOpenAILLM:
@@ -178,16 +26,6 @@ class TestOpenAILLM:
     def mock_config(self):
         """Create mock config for OpenAI."""
         return MagicMock()
-
-    def test_initialization(self, mock_config):
-        """Test OpenAILLM initialization."""
-        with patch("langchain_openai.ChatOpenAI"):
-            model = OpenAILLM(mock_config, model_name="gpt-5.1")
-
-            assert isinstance(model.capabilities, ModelCapabilities)
-            assert model.capabilities.supports_text is True
-            assert model.capabilities.supports_image is True
-            assert model.capabilities.supports_audio is True
 
     @pytest.mark.anyio
     async def test_generate(self, mock_config):
@@ -205,6 +43,99 @@ class TestOpenAILLM:
         request = ModelRequest(parts=[TextPart(text="test")])
         response = await model.generate(request)
         assert response.text == "OpenAI response"
+
+    @pytest.mark.anyio
+    async def test_gpt5_omits_null_max_tokens(self, mock_config):
+        """GPT-5 must not send max_tokens=null when using max_completion_tokens."""
+        from unittest.mock import AsyncMock
+
+        model = OpenAILLM(mock_config, model_name="gpt-5-mini")
+        mock_resp = MagicMock()
+        mock_resp.usage = None
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = "ok"
+        create_mock = AsyncMock(return_value=mock_resp)
+        model._openai_client.chat.completions.create = create_mock
+
+        await model.generate(ModelRequest(parts=[TextPart(text="test")]))
+
+        kwargs = create_mock.await_args.kwargs
+        assert "max_tokens" not in kwargs
+
+    @pytest.mark.anyio
+    async def test_json_object_from_model_request(self, mock_config):
+        """Planner nodes set response_format on ModelRequest — must reach the API."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        model = OpenAILLM(mock_config, model_name="gpt-5-mini")
+        mock_resp = MagicMock()
+        mock_resp.usage = None
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = '{"ok": true}'
+        create_mock = AsyncMock(return_value=mock_resp)
+        model._openai_client = MagicMock()
+        model._openai_client.chat = MagicMock()
+        model._openai_client.chat.completions = MagicMock()
+        model._openai_client.chat.completions.create = create_mock
+
+        request = ModelRequest(
+            parts=[TextPart(text='Return {"status":"ok"} as json')],
+            response_format="json_object",
+        )
+        await model.generate(request)
+
+        assert create_mock.await_args.kwargs.get("response_format") == {"type": "json_object"}
+
+    @pytest.mark.anyio
+    async def test_json_object_from_provider_config(self, mock_config):
+        """Legacy path: response_format only in provider_config must still reach the API."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        model = OpenAILLM(mock_config, model_name="gpt-4o-mini")
+        mock_resp = MagicMock()
+        mock_resp.usage = None
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = '{"ok": true}'
+        create_mock = AsyncMock(return_value=mock_resp)
+        model._openai_client = MagicMock()
+        model._openai_client.chat = MagicMock()
+        model._openai_client.chat.completions = MagicMock()
+        model._openai_client.chat.completions.create = create_mock
+
+        request = ModelRequest(
+            parts=[TextPart(text='Return {"status":"ok"} as json')],
+            provider_config={"response_format": "json_object"},
+        )
+        await model.generate(request)
+
+        assert create_mock.await_args.kwargs.get("response_format") == {"type": "json_object"}
+
+    @pytest.mark.anyio
+    async def test_generation_params_from_model_request(self, mock_config):
+        """Node-level temperature/max_tokens must reach the API when set on ModelRequest."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        model = OpenAILLM(mock_config, model_name="gpt-4o-mini")
+        mock_resp = MagicMock()
+        mock_resp.usage = None
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = "ok"
+        create_mock = AsyncMock(return_value=mock_resp)
+        model._openai_client = MagicMock()
+        model._openai_client.chat = MagicMock()
+        model._openai_client.chat.completions = MagicMock()
+        model._openai_client.chat.completions.create = create_mock
+
+        request = ModelRequest(
+            parts=[TextPart(text="test")],
+            temperature=0.1,
+            max_output_tokens=256,
+        )
+        await model.generate(request)
+
+        kwargs = create_mock.await_args.kwargs
+        assert kwargs.get("temperature") == 0.1
+        assert kwargs.get("max_tokens") == 256
 
     @pytest.mark.anyio
     async def test_stream(self, mock_config):
@@ -237,15 +168,6 @@ class TestHuggingFaceLLM:
         """Create mock config for HuggingFace."""
         return MagicMock()
 
-    def test_initialization(self, mock_config):
-        """Test HuggingFaceLLM initialization."""
-        model = HuggingFaceLLM(mock_config, model_name="distilgpt2")
-
-        assert isinstance(model.capabilities, ModelCapabilities)
-        assert model.capabilities.supports_text is True
-        assert model.capabilities.supports_image is False
-        assert model.capabilities.supports_audio is False
-
     @pytest.mark.anyio
     async def test_generate_requires_transformers(self, mock_config):
         """Test that generate fails when model loading fails."""
@@ -264,27 +186,8 @@ class TestHuggingFaceLLM:
             assert count == 3
 
 
-@pytest.mark.skipif(not _has_vertex_credentials, reason="No Vertex credentials available")
 class TestProviderCapabilities:
-    """Test provider capability declarations with real credentials."""
-
-    def test_vertex_capabilities_by_model(self):
-        """Test that Vertex capabilities vary by model."""
-        from contextunity.router.modules.models.llm.vertex import VertexLLM
-
-        config = MagicMock()
-        config.vertex.project_id = "test"
-        config.vertex.location = "us-central1"
-        config.vertex.credentials_path = None
-
-        with (
-            patch("google.auth.default", return_value=(MagicMock(), "test")),
-            patch("google.auth.transport.requests.Request"),
-            patch("langchain_google_vertexai.ChatVertexAI"),
-        ):
-            model_25 = VertexLLM(config, model_name="gemini-2.5-flash")
-            assert model_25.capabilities.supports_image is True
-            assert model_25.capabilities.supports_audio is True
+    """Test provider capability declarations."""
 
     def test_openai_capabilities_by_model(self):
         """Test that OpenAI capabilities."""

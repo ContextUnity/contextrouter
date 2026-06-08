@@ -20,10 +20,12 @@ LIMITATIONS:
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Sequence
+from typing import TypedDict, TypeGuard
 
 from contextunity.core import get_contextunit_logger
 from contextunity.core.exceptions import ProviderError
+from contextunity.core.types import is_json_dict
 
 from contextunity.router.core import get_core_config
 from contextunity.router.modules.retrieval.rag.settings import get_effective_data_store_id
@@ -31,15 +33,240 @@ from contextunity.router.modules.retrieval.rag.settings import get_effective_dat
 logger = get_contextunit_logger(__name__)
 
 
+class VertexGroundingCitation(TypedDict):
+    """Citation record extracted from Vertex grounding metadata."""
+
+    title: str
+    uri: str
+    chunk_id: str
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_object_tuple(value: object) -> TypeGuard[tuple[object, ...]]:
+    return isinstance(value, tuple)
+
+
+def _safe_getattr(obj: object, name: str, default: object = "") -> object:
+    return getattr(obj, name, default)
+
+
+def _obj_attr(obj: object, name: str, default: str = "") -> str:
+    val: object = _safe_getattr(obj, name, default)
+    if val is None:
+        return default
+    return str(val)
+
+
+def _obj_seq(obj: object, name: str) -> tuple[object, ...]:
+    raw: object = _safe_getattr(obj, name, None)
+    if raw is None:
+        return ()
+    if _is_object_list(raw):
+        return tuple(raw)
+    if _is_object_tuple(raw):
+        return raw
+    return (raw,)
+
+
+class _GenAIModelsAdapter:
+    _inner: object
+
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+
+    def generate_content(
+        self,
+        *,
+        model: str,
+        contents: list[str],
+        config: object,
+    ) -> object:
+        generate_obj: object = _safe_getattr(self._inner, "generate_content")
+        if not callable(generate_obj):
+            raise ProviderError(
+                "Gen AI models.generate_content is not callable",
+                code="VERTEX_GROUNDING_IMPORT_ERROR",
+            )
+        return generate_obj(model=model, contents=contents, config=config)
+
+
+class _GenAIClientAdapter:
+    _inner: object
+
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+
+    @property
+    def models(self) -> _GenAIModelsAdapter:
+        return _GenAIModelsAdapter(_safe_getattr(self._inner, "models"))
+
+
+class _GenAIClientFactoryAdapter:
+    _inner: object
+
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+
+    def __call__(
+        self,
+        *,
+        vertexai: bool,
+        project: str,
+        location: str,
+    ) -> _GenAIClientAdapter:
+        constructor_obj: object = _safe_getattr(self._inner, "__call__")
+        if not callable(constructor_obj):
+            raise ProviderError(
+                "Gen AI Client factory is not callable",
+                code="VERTEX_GROUNDING_IMPORT_ERROR",
+            )
+        inner_obj: object = constructor_obj(vertexai=vertexai, project=project, location=location)
+        return _GenAIClientAdapter(inner_obj)
+
+
+class _GenAITypeFactoryAdapter:
+    _inner: object
+
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+
+    def __call__(self, **kwargs: object) -> object:
+        constructor_obj: object = _safe_getattr(self._inner, "__call__")
+        if not callable(constructor_obj):
+            raise ProviderError(
+                "Gen AI type factory is not callable",
+                code="VERTEX_GROUNDING_IMPORT_ERROR",
+            )
+        built: object = constructor_obj(**kwargs)
+        return built
+
+
+def _rag_chunk_id(rag_chunk: object) -> str:
+    if is_json_dict(rag_chunk):
+        raw = rag_chunk.get("chunk_id", "")
+        return str(raw) if raw is not None else ""
+    return _obj_attr(rag_chunk, "chunk_id")
+
+
+def _citation_from_metadata_item(cit: object) -> VertexGroundingCitation:
+    uri = _obj_attr(cit, "uri") or _obj_attr(cit, "url")
+    return {
+        "title": _obj_attr(cit, "title"),
+        "uri": uri,
+        "chunk_id": "",
+    }
+
+
+def _citation_from_retrieved_context(ctx: object) -> VertexGroundingCitation:
+    chunk_id = ""
+    rag_chunk_raw: object = _safe_getattr(ctx, "rag_chunk", None)
+    rag_chunk: object | None = rag_chunk_raw if rag_chunk_raw is not None else None
+    if rag_chunk is not None:
+        chunk_id = _rag_chunk_id(rag_chunk)
+    return {
+        "title": _obj_attr(ctx, "title"),
+        "uri": _obj_attr(ctx, "uri"),
+        "chunk_id": chunk_id,
+    }
+
+
+def _extract_text_from_candidate(candidate: object) -> str:
+    content_raw: object = _safe_getattr(candidate, "content", None)
+    content: object | None = content_raw if content_raw is not None else None
+    if content is None:
+        return ""
+    parts = _obj_seq(content, "parts")
+    text_parts: list[str] = []
+    for part in parts:
+        text: object | None = _safe_getattr(part, "text", None)
+        if isinstance(text, str) and text:
+            text_parts.append(text)
+    return "".join(text_parts)
+
+
+def _extract_citations_from_candidate(candidate: object) -> list[VertexGroundingCitation]:
+    citations: list[VertexGroundingCitation] = []
+
+    citation_metadata_raw: object = _safe_getattr(candidate, "citation_metadata", None)
+    citation_metadata: object | None = (
+        citation_metadata_raw if citation_metadata_raw is not None else None
+    )
+    if citation_metadata is not None:
+        for cit in _obj_seq(citation_metadata, "citations"):
+            citations.append(_citation_from_metadata_item(cit))
+
+    grounding_metadata_raw: object = _safe_getattr(candidate, "grounding_metadata", None)
+    grounding_metadata: object | None = (
+        grounding_metadata_raw if grounding_metadata_raw is not None else None
+    )
+    if grounding_metadata is None:
+        return citations
+
+    for chunk in _obj_seq(grounding_metadata, "grounding_chunks"):
+        retrieved_raw: object = _safe_getattr(chunk, "retrieved_context", None)
+        retrieved: object | None = retrieved_raw if retrieved_raw is not None else None
+        if retrieved is not None:
+            citations.append(_citation_from_retrieved_context(retrieved))
+
+    return citations
+
+
+def _message_to_content(msg: object) -> str | None:
+    """Return user/assistant content string, or None to skip (system messages)."""
+    if is_json_dict(msg):
+        if msg.get("type") == "system":
+            return None
+        raw = msg.get("content", "")
+        return str(raw) if raw is not None else ""
+    msg_type: object | None = _safe_getattr(msg, "type", None)
+    if msg_type == "system":
+        return None
+    if hasattr(msg, "content"):
+        content_obj: object = _safe_getattr(msg, "content")
+        if isinstance(content_obj, str):
+            return content_obj
+        return str(content_obj)
+    return str(msg)
+
+
+def _load_genai_client_factory() -> _GenAIClientFactoryAdapter:
+    import importlib
+
+    genai = importlib.import_module("google.genai")
+    client_factory_obj: object = getattr(genai, "Client", None)
+    if not callable(client_factory_obj):
+        raise ProviderError(
+            "Google Gen AI SDK Client is not callable",
+            code="VERTEX_GROUNDING_IMPORT_ERROR",
+        )
+    return _GenAIClientFactoryAdapter(client_factory_obj)
+
+
+def _load_genai_type(name: str) -> _GenAITypeFactoryAdapter:
+    import importlib
+
+    types_mod = importlib.import_module("google.genai.types")
+    type_factory_obj: object = getattr(types_mod, name, None)
+    if not callable(type_factory_obj):
+        raise ProviderError(
+            f"Google Gen AI SDK type {name!r} is not callable",
+            code="VERTEX_GROUNDING_IMPORT_ERROR",
+        )
+    return _GenAITypeFactoryAdapter(type_factory_obj)
+
+
 async def generate_with_grounding(
     *,
     query: str,
-    messages: list[Any] | None = None,
+    messages: Sequence[object] | None = None,
     system_prompt: str | None = None,
     graph_facts: list[str] | None = None,
     style_prompt: str | None = None,
     filter: str | None = None,
-) -> tuple[str, list[dict[str, Any]]]:
+) -> tuple[str, list[VertexGroundingCitation]]:
     """Generate response using Vertex AI Gemini with native grounding.
 
     This function uses Vertex AI's native grounding feature, where the LLM directly
@@ -82,8 +309,6 @@ async def generate_with_grounding(
     """
     cfg = get_core_config()
     project_id = cfg.vertex.project_id
-    # IMPORTANT: Discovery Engine location is often "global" even when Vertex LLM is regional.
-    # Use the same location logic as vertex_search.py to ensure consistency.
     location = (
         (getattr(cfg.vertex, "data_store_location", "") or "").strip()
         or (getattr(cfg.vertex, "discovery_engine_location", "") or "").strip()
@@ -106,11 +331,9 @@ async def generate_with_grounding(
             code="VERTEX_GROUNDING_DATASTORE_ERROR",
         ) from e
 
-    # Build datastore resource name for grounding
-    # Format: projects/{project}/locations/{location}/collections/{collection}/dataStores/{dataStore}
     datastore_resource = (
         f"projects/{project_id}/locations/{location}"
-        f"/collections/default_collection"
+        "/collections/default_collection"
         f"/dataStores/{data_store_id}"
     )
 
@@ -122,49 +345,32 @@ async def generate_with_grounding(
     )
 
     try:
-        # Use google-genai SDK (modern, non-deprecated API)
-        from google import genai
-        from google.genai import types
-
-        # Initialize client with Vertex AI
-        client = genai.Client(
+        client_factory = _load_genai_client_factory()
+        client = client_factory(
             vertexai=True,
             project=project_id,
-            location=cfg.vertex.location
-            or "us-central1",  # Vertex AI LLM location, not datastore location
+            location=cfg.vertex.location or "us-central1",
         )
 
-        # Create VertexAISearch instance with datastore resource name
-        # Format: projects/{project}/locations/{location}/collections/{collection}/dataStores/{dataStore}
-        # Optionally include filter for hard filtering (e.g., "source_type: ANY('book', 'video')")
-        vertex_ai_search_kwargs = {
+        vertex_ai_search_kwargs: dict[str, str] = {
             "datastore": datastore_resource,
         }
         if filter:
             vertex_ai_search_kwargs["filter"] = filter
             logger.info("Vertex Grounding: applying hard filter: %r", filter)
 
-        vertex_ai_search = types.VertexAISearch(**vertex_ai_search_kwargs)
-
-        # Create Retrieval instance with VertexAISearch
-        retrieval = types.Retrieval(
+        vertex_ai_search = _load_genai_type("VertexAISearch")(**vertex_ai_search_kwargs)
+        retrieval = _load_genai_type("Retrieval")(
             vertex_ai_search=vertex_ai_search,
             disable_attribution=False,
         )
+        grounding_tool = _load_genai_type("Tool")(retrieval=retrieval)
 
-        # Create Tool with Retrieval
-        grounding_tool = types.Tool(
-            retrieval=retrieval,
-        )
+        system_instruction_parts: list[str] = []
 
-        # Build system instruction from system_prompt, graph_facts, and style_prompt
-        system_instruction_parts = []
-
-        # Add system prompt if provided
         if system_prompt:
             system_instruction_parts.append(system_prompt.strip())
 
-        # Add graph facts if provided
         if graph_facts:
             graph_facts_text = "\n".join([str(f).strip() for f in graph_facts if str(f).strip()])
             if graph_facts_text:
@@ -172,7 +378,6 @@ async def generate_with_grounding(
                     "\n\n=== GRAPH FACTS (Use for Logic/Reasoning) ===\n" + graph_facts_text
                 )
 
-        # Add style prompt if provided
         if style_prompt:
             system_instruction_parts.append("\n\n" + style_prompt.strip())
 
@@ -180,7 +385,6 @@ async def generate_with_grounding(
             "\n".join(system_instruction_parts).strip() if system_instruction_parts else None
         )
 
-        # Log system instruction for debugging
         if system_instruction:
             logger.info(
                 "Vertex Grounding: system_instruction length=%d preview=%r",
@@ -190,32 +394,15 @@ async def generate_with_grounding(
         else:
             logger.warning("Vertex Grounding: no system_instruction provided!")
 
-        # Build contents from messages and query
-        contents_list = []
+        contents_list: list[str] = []
         if messages:
-            # Convert LangChain messages to Content objects
-            # Skip SystemMessage as we'll use system_instruction instead
             for msg in messages:
-                # Skip system messages - they'll be in system_instruction
-                if hasattr(msg, "type") and msg.type == "system":
-                    continue
-                if isinstance(msg, dict) and msg.get("type") == "system":
-                    continue
-
-                if hasattr(msg, "content"):
-                    content = msg.content
-                    if isinstance(content, str):
-                        contents_list.append(content)
-                    else:
-                        contents_list.append(str(content))
-                elif isinstance(msg, dict):
-                    contents_list.append(str(msg.get("content", "")))
-                else:
-                    contents_list.append(str(msg))
+                content = _message_to_content(msg)
+                if content is not None:
+                    contents_list.append(content)
         contents_list.append(query)
 
-        # Build config with system_instruction if available
-        config_dict = {
+        config_dict: dict[str, object] = {
             "temperature": 0.7,
             "max_output_tokens": 8192,
             "tools": [grounding_tool],
@@ -223,108 +410,32 @@ async def generate_with_grounding(
         if system_instruction:
             config_dict["system_instruction"] = system_instruction
 
-        # Generate with grounding using google-genai
+        generate_content_config = _load_genai_type("GenerateContentConfig")(**config_dict)
         response = client.models.generate_content(
-            model="gemini-2.0-flash-exp",  # Use latest grounding-capable model
+            model="gemini-2.0-flash-exp",
             contents=contents_list,
-            config=types.GenerateContentConfig(**config_dict),
+            config=generate_content_config,
         )
 
-        # Extract response text and citations from candidate
-        # google-genai response has candidates[0].content.parts[0].text
-        # grounding_metadata is in candidate.grounding_metadata, not response.grounding_metadata
         response_text = ""
-        citations = []
+        citations: list[VertexGroundingCitation] = []
 
-        if hasattr(response, "candidates") and response.candidates:
-            candidate = response.candidates[0]
-
-            # Extract text from content.parts
-            if hasattr(candidate, "content") and candidate.content:
-                if hasattr(candidate.content, "parts") and candidate.content.parts:
-                    text_parts = [
-                        p.text for p in candidate.content.parts if hasattr(p, "text") and p.text
-                    ]
-                    response_text = "".join(text_parts)
-
-            # Extract citations from candidate.grounding_metadata or citation_metadata
-            # Check citation_metadata first (might be simpler format)
-            if hasattr(candidate, "citation_metadata") and candidate.citation_metadata:
+        candidates = _obj_seq(response, "candidates")
+        if candidates:
+            candidate = candidates[0]
+            response_text = _extract_text_from_candidate(candidate)
+            citations = _extract_citations_from_candidate(candidate)
+            if citations:
                 logger.debug(
-                    "Found citation_metadata in candidate: citations=%s",
-                    len(candidate.citation_metadata.citations)
-                    if hasattr(candidate.citation_metadata, "citations")
-                    and candidate.citation_metadata.citations
-                    else 0,
+                    "Vertex Grounding: extracted %d citations from candidate metadata",
+                    len(citations),
                 )
-                if (
-                    hasattr(candidate.citation_metadata, "citations")
-                    and candidate.citation_metadata.citations
-                ):
-                    for cit in candidate.citation_metadata.citations:
-                        citations.append(
-                            {
-                                "title": getattr(cit, "title", "") or "",
-                                "uri": getattr(cit, "uri", "") or getattr(cit, "url", "") or "",
-                                "chunk_id": "",
-                            }
-                        )
-
-            # Also check grounding_metadata for retrieved_context citations
-            if hasattr(candidate, "grounding_metadata") and candidate.grounding_metadata:
-                metadata = candidate.grounding_metadata
-                logger.debug(
-                    "Grounding metadata available: grounding_chunks=%s",
-                    len(metadata.grounding_chunks)
-                    if hasattr(metadata, "grounding_chunks") and metadata.grounding_chunks
-                    else 0,
-                )
-
-                if hasattr(metadata, "grounding_chunks") and metadata.grounding_chunks:
-                    logger.debug("Processing %d grounding chunks", len(metadata.grounding_chunks))
-                    for idx, chunk in enumerate(metadata.grounding_chunks):
-                        logger.debug(
-                            "Chunk %d: has retrieved_context=%s has web=%s has maps=%s",
-                            idx,
-                            hasattr(chunk, "retrieved_context")
-                            and chunk.retrieved_context is not None,
-                            hasattr(chunk, "web") and chunk.web is not None,
-                            hasattr(chunk, "maps") and chunk.maps is not None,
-                        )
-
-                        # Check for retrieved_context (google-genai format)
-                        if hasattr(chunk, "retrieved_context") and chunk.retrieved_context:
-                            ctx = chunk.retrieved_context
-                            logger.debug(
-                                "Retrieved context: title=%r uri=%r has_rag_chunk=%s",
-                                getattr(ctx, "title", ""),
-                                getattr(ctx, "uri", ""),
-                                hasattr(ctx, "rag_chunk") and ctx.rag_chunk is not None,
-                            )
-
-                            # Extract chunk_id from rag_chunk if available
-                            chunk_id = ""
-                            if hasattr(ctx, "rag_chunk") and ctx.rag_chunk:
-                                rag_chunk = ctx.rag_chunk
-                                if isinstance(rag_chunk, dict):
-                                    chunk_id = rag_chunk.get("chunk_id", "")
-                                elif hasattr(rag_chunk, "chunk_id"):
-                                    chunk_id = getattr(rag_chunk, "chunk_id", "")
-
-                            citations.append(
-                                {
-                                    "title": getattr(ctx, "title", "") or "",
-                                    "uri": getattr(ctx, "uri", "") or "",
-                                    "chunk_id": chunk_id,
-                                }
-                            )
-                else:
-                    logger.warning("No grounding_chunks found in grounding_metadata")
             else:
-                logger.warning("No grounding_metadata found in candidate")
+                logger.warning("No grounding_chunks found in grounding_metadata")
+        else:
+            logger.warning("No grounding_metadata found in candidate")
 
         if not response_text:
-            # Fallback to string representation
             response_text = str(response)
 
         logger.info(
@@ -335,15 +446,14 @@ async def generate_with_grounding(
             filter or "none",
         )
 
-        # If filter is applied but no citations found, this means grounding didn't find any relevant documents
-        # In this case, we should return an error instead of letting LLM generate from its own knowledge
         if filter and len(citations) == 0:
             logger.warning(
-                "Vertex Grounding: filter applied but no citations found - grounding found no relevant documents. "
-                "This likely means the query doesn't match any filtered documents."
+                (
+                    "Vertex Grounding: filter applied but no citations found - "
+                    "grounding found no relevant documents. "
+                    "This likely means the query doesn't match any filtered documents."
+                )
             )
-            # Return empty response to indicate no relevant documents were found
-            # The calling code should handle this and return a "no results" message
             return "", []
 
         return response_text, citations
@@ -351,7 +461,11 @@ async def generate_with_grounding(
     except ImportError as e:
         logger.error("Google Gen AI SDK not available: %s", e)
         raise ProviderError(
-            "Google Gen AI SDK not installed. Install with: pip install 'google-genai' or install contextunity.router with vertex extras: pip install 'contextunity.router[vertex]'",
+            (
+                "Google Gen AI SDK not installed. Install with: pip install 'google-genai' "
+                "or install contextunity.router with vertex extras: "
+                "pip install 'contextunity.router[vertex]'"
+            ),
             code="VERTEX_GROUNDING_IMPORT_ERROR",
         ) from e
     except Exception as e:
@@ -363,4 +477,4 @@ async def generate_with_grounding(
         ) from e
 
 
-__all__ = ["generate_with_grounding"]
+__all__ = ["VertexGroundingCitation", "generate_with_grounding"]

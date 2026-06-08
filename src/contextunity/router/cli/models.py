@@ -50,7 +50,11 @@ def generate(
     stream: Annotated[bool, typer.Option(help="Enable streaming output")] = True,
 ) -> None:
     """Quick smoke test for an LLM model."""
-    from contextunity.router.core.config import Config
+    from contextunity.router.core.config import get_core_config
+    from contextunity.router.core.context import (
+        reset_current_access_token,
+        set_current_access_token,
+    )
     from contextunity.router.modules.models.registry import model_registry
     from contextunity.router.modules.models.types import (
         FinalTextEvent,
@@ -60,7 +64,15 @@ def generate(
     )
 
     async def _run() -> None:
-        cfg = Config.load()
+        cfg = get_core_config()
+        from contextunity.core.tokens import ContextToken
+
+        test_token = ContextToken(
+            token_id="cli-test",
+            user_id="cli-test",
+            permissions=("router:execute",),
+            allowed_tenants=("cli",),
+        )
         try:
             llm = model_registry.create_llm(model, config=cfg)
         except Exception as e:
@@ -72,18 +84,22 @@ def generate(
         console.print(f"[bold cyan]Provider:[/bold cyan] {llm.__class__.__name__}")
         console.print(f"[bold cyan]Capabilities:[/bold cyan] {llm.capabilities}")
 
-        if not stream:
-            console.print("\n[bold green]=== Generating ===[/bold green]")
-            resp = await llm.generate(req)
-            console.print(resp.text)
-        else:
-            console.print("\n[bold green]=== Streaming ===[/bold green]")
-            async for ev in llm.stream(req):
-                if isinstance(ev, TextDeltaEvent):
-                    print(ev.delta, end="", flush=True)
-                elif isinstance(ev, FinalTextEvent):
-                    print(f"\n\n[dim][Final response: {len(ev.text)} chars][/dim]")
-                    break
+        token_ref = set_current_access_token(test_token)
+        try:
+            if not stream:
+                console.print("\n[bold green]=== Generating ===[/bold green]")
+                resp = await llm.generate(req)
+                console.print(resp.text)
+            else:
+                console.print("\n[bold green]=== Streaming ===[/bold green]")
+                async for ev in llm.stream(req):
+                    if isinstance(ev, TextDeltaEvent):
+                        print(ev.delta, end="", flush=True)
+                    elif isinstance(ev, FinalTextEvent):
+                        print(f"\n\n[dim][Final response: {len(ev.text)} chars][/dim]")
+                        break
+        finally:
+            reset_current_access_token(token_ref)
 
     asyncio.run(_run())
 
@@ -112,57 +128,80 @@ def test_multimodal(
             cfg = PROVIDER_TESTS[prov]
             tests = [modality] if modality else cfg["tests"]
             model_key = cfg["key"]
+            if not isinstance(model_key, str):
+                continue
 
             console.print(f"\n[bold cyan]## Testing {prov} ({model_key})[/bold cyan]")
 
-            from contextunity.router.core.config import Config
+            from contextunity.router.core.config import get_core_config
+            from contextunity.router.core.context import (
+                reset_current_access_token,
+                set_current_access_token,
+            )
             from contextunity.router.modules.models.registry import model_registry
-            from contextunity.router.modules.models.types import ImagePart, ModelRequest, TextPart
+            from contextunity.router.modules.models.types import (
+                ImagePart,
+                ModelRequest,
+                TextDeltaEvent,
+                TextPart,
+            )
 
-            config = Config.load()
+            config = get_core_config()
+            from contextunity.core.tokens import ContextToken
+
+            test_token = ContextToken(
+                token_id="cli-test",
+                user_id="cli-test",
+                permissions=("router:execute",),
+                allowed_tenants=("cli",),
+            )
             try:
                 llm = model_registry.create_llm(model_key, config=config)
             except Exception as e:
                 console.print(f"  [red]Failed to init {model_key}:[/red] {e}")
                 continue
 
-            for t in tests:
-                try:
-                    if t == "text":
-                        req = ModelRequest(parts=[TextPart(text="Say OK.")])
-                        resp = await llm.generate(req)
-                        console.print(f"  [green]✓ Text:[/green] {resp.text.strip()}")
-                    elif t == "image":
-                        if not llm.capabilities.supports_image:
-                            console.print("  [yellow]⏭️ Image: Not supported[/yellow]")
-                            continue
-                        req = ModelRequest(
-                            parts=[
-                                TextPart(text="What color is this image? One word."),
-                                ImagePart(mime="image/png", data_b64=TINY_PNG_B64),
-                            ]
-                        )
-                        resp = await llm.generate(req)
-                        console.print(f"  [green]✓ Image:[/green] {resp.text.strip()}")
-                    elif t == "audio":
-                        if not llm.capabilities.supports_audio:
-                            console.print("  [yellow]⏭️ Audio: Not supported[/yellow]")
-                            continue
-                        console.print("  [green]✓ Audio (stub)[/green]")
-                    elif t == "video":
-                        if not llm.capabilities.supports_video:
-                            console.print("  [yellow]⏭️ Video: Not supported[/yellow]")
-                            continue
-                        console.print("  [green]✓ Video (stub)[/green]")
-                    elif t == "stream":
-                        req = ModelRequest(parts=[TextPart(text="Count 1 2 3")])
-                        console.print("  [green]✓ Stream:[/green] ", end="")
-                        async for ev in llm.stream(req):
-                            if getattr(ev, "delta", None):
-                                print(ev.delta, end="", flush=True)
-                        print()
-                except Exception as e:
-                    console.print(f"  [red]✗ {t.capitalize()} failed:[/red] {e}")
+            token_ref = set_current_access_token(test_token)
+            try:
+                for t in tests:
+                    try:
+                        if t == "text":
+                            req = ModelRequest(parts=[TextPart(text="Say OK.")])
+                            resp = await llm.generate(req)
+                            console.print(f"  [green]✓ Text:[/green] {resp.text.strip()}")
+                        elif t == "image":
+                            if not llm.capabilities.supports_image:
+                                console.print("  [yellow]⏭️ Image: Not supported[/yellow]")
+                                continue
+                            req = ModelRequest(
+                                parts=[
+                                    TextPart(text="What color is this image? One word."),
+                                    ImagePart(mime="image/png", data_b64=TINY_PNG_B64),
+                                ]
+                            )
+                            resp = await llm.generate(req)
+                            console.print(f"  [green]✓ Image:[/green] {resp.text.strip()}")
+                        elif t == "audio":
+                            if not llm.capabilities.supports_audio:
+                                console.print("  [yellow]⏭️ Audio: Not supported[/yellow]")
+                                continue
+                            console.print("  [green]✓ Audio (stub)[/green]")
+                        elif t == "video":
+                            if not llm.capabilities.supports_video:
+                                console.print("  [yellow]⏭️ Video: Not supported[/yellow]")
+                                continue
+                            console.print("  [green]✓ Video (stub)[/green]")
+                        elif t == "stream":
+                            req = ModelRequest(parts=[TextPart(text="Count 1 2 3")])
+                            console.print("  [green]✓ Stream:[/green] ", end="")
+                            async for ev in llm.stream(req):
+                                if isinstance(ev, TextDeltaEvent):
+                                    print(ev.delta, end="", flush=True)
+                            print()
+                    except Exception as e:
+                        console.print(f"  [red]✗ {t.capitalize()} failed:[/red] {e}")
+            finally:
+                reset_current_access_token(token_ref)
 
     asyncio.run(_run())
 

@@ -6,14 +6,16 @@ Provides memory operations with ContextUnit governance and safe caching strategi
 from __future__ import annotations
 
 import hashlib
-import json
+from datetime import UTC, datetime
 
 from contextunity.core import get_contextunit_logger
-from langchain_core.tools import tool
+from contextunity.core.parsing import json_dumps, json_loads
+from contextunity.core.types import JsonDict, is_json_dict
 
 from contextunity.router.core import get_core_config
+from contextunity.router.langchain_boundaries import tool
 from contextunity.router.modules.providers.redis import RedisProvider
-from contextunity.router.modules.tools.schemas import DataToolResult
+from contextunity.router.modules.tools.schemas import RedisMemoryResult
 
 logger = get_contextunit_logger(__name__)
 
@@ -26,13 +28,30 @@ def get_redis_provider() -> RedisProvider:
     global _redis_provider
     if _redis_provider is None:
         config = get_core_config()
-        _redis_provider = RedisProvider(
-            host=config.redis.host,
-            port=config.redis.port,
-            db=config.redis.db,
-            password=config.redis.password,
-        )
+        if config.redis.enabled and config.redis.url:
+            _redis_provider = RedisProvider.from_url(config.redis.url)
+        else:
+            _redis_provider = RedisProvider(host="")  # no-op provider
     return _redis_provider
+
+
+def _parse_redis_payload(data_str: str) -> JsonDict:
+    parsed = json_loads(data_str)
+    if is_json_dict(parsed):
+        return parsed
+    return {}
+
+
+def _iso_timestamp() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _optional_str(value: object) -> str | None:
+    return str(value) if value is not None else None
+
+
+def _normalize_tenant_id(tenant_id: str | None) -> str:
+    return tenant_id or "default"
 
 
 # ============================================================================
@@ -43,31 +62,23 @@ def get_redis_provider() -> RedisProvider:
 def _make_query_cache_key(query: str, tenant_id: str | None = None) -> str:
     """Create cache key for query results."""
     query_hash = hashlib.sha256(query.encode()).hexdigest()[:16]
+    tenant_id = _normalize_tenant_id(tenant_id)
     tenant_prefix = f"{tenant_id}:" if tenant_id else ""
     return f"cache:query:{tenant_prefix}{query_hash}"
 
 
 def _make_session_key(session_id: str, tenant_id: str | None = None) -> str:
     """Create cache key for session data."""
+    tenant_id = _normalize_tenant_id(tenant_id)
     tenant_prefix = f"{tenant_id}:" if tenant_id else ""
     return f"session:{tenant_prefix}{session_id}"
 
 
-def _make_config_key(config_name: str, tenant_id: str | None = None) -> str:
-    """Create cache key for configuration."""
-    tenant_prefix = f"{tenant_id}:" if tenant_id else ""
-    return f"config:{tenant_prefix}{config_name}"
-
-
 def _make_memory_key(key: str, session_id: str, tenant_id: str | None = None) -> str:
-    """Create cache key for memory storage."""
+    """Create cache key for memory entries."""
+    tenant_id = _normalize_tenant_id(tenant_id)
     tenant_prefix = f"{tenant_id}:" if tenant_id else ""
     return f"memory:{tenant_prefix}{session_id}:{key}"
-
-
-# ============================================================================
-# Memory Tools
-# ============================================================================
 
 
 @tool
@@ -77,24 +88,15 @@ async def store_memory(
     session_id: str,
     tenant_id: str | None = None,
     ttl_seconds: int = 3600,
-) -> DataToolResult:
-    """Store a value in Redis memory for later retrieval.
+) -> RedisMemoryResult:
+    """Store a value in Redis memory with session and tenant isolation.
 
-    This tool allows the agent to store information in memory that persists
-    across tool calls within a session. Use this for:
-    - Storing user preferences
-    - Caching intermediate results
-    - Remembering context from previous interactions
-
-    IMPORTANT: Follow ContextUnit governance:
-    - Only store data you have permission to store
-    - Respect tenant isolation (use tenant_id when available)
-    - Set appropriate TTL to avoid stale data
-    - Never store sensitive credentials or tokens
+    Use this for user-specific or session-specific data that should persist
+    across agent turns within a session.
 
     Args:
-        key: Unique key for the memory entry
-        value: Value to store (will be JSON-serialized)
+        key: Key for the memory entry
+        value: Value to store (string)
         session_id: Session identifier for isolation
         tenant_id: Optional tenant identifier for multi-tenant isolation
         ttl_seconds: Time-to-live in seconds (default: 3600 = 1 hour)
@@ -103,30 +105,30 @@ async def store_memory(
         Dict with success status and stored key
     """
     try:
-        tenant_id = tenant_id or "default"
+        tenant_id = _normalize_tenant_id(tenant_id)
         redis = get_redis_provider()
         memory_key = _make_memory_key(key, session_id, tenant_id)
 
         # Store as JSON for structured data
-        data = {
+        data: JsonDict = {
             "value": value,
             "session_id": session_id,
             "tenant_id": tenant_id,
-            "timestamp": str(__import__("datetime").datetime.now().isoformat()),
+            "timestamp": _iso_timestamp(),
         }
 
-        await redis.set(memory_key, json.dumps(data), ex=ttl_seconds)
+        await redis.set(memory_key, json_dumps(data), ex=ttl_seconds)
         logger.debug("Stored memory: %s", memory_key)
 
-        return {
-            "success": True,
-            "key": key,
-            "memory_key": memory_key,
-            "ttl_seconds": ttl_seconds,
-        }
+        return RedisMemoryResult(
+            success=True,
+            key=key,
+            memory_key=memory_key,
+            ttl_seconds=ttl_seconds,
+        )
     except Exception as e:
         logger.error("Failed to store memory: %s", e)
-        return {"success": False, "error": str(e)}
+        return RedisMemoryResult(success=False, error=str(e))
 
 
 @tool
@@ -134,7 +136,7 @@ async def retrieve_memory(
     key: str,
     session_id: str,
     tenant_id: str | None = None,
-) -> DataToolResult:
+) -> RedisMemoryResult:
     """Retrieve a value from Redis memory.
 
     Retrieves previously stored memory by key and session.
@@ -153,21 +155,22 @@ async def retrieve_memory(
 
         data_str = await redis.get(memory_key)
         if not data_str:
-            return {"success": False, "found": False, "key": key}
+            return RedisMemoryResult(success=False, found=False, key=key)
 
-        data = json.loads(data_str)
+        data = _parse_redis_payload(data_str)
         logger.debug("Retrieved memory: %s", memory_key)
 
-        return {
-            "success": True,
-            "found": True,
-            "key": key,
-            "value": data.get("value"),
-            "timestamp": data.get("timestamp"),
-        }
+        stored = RedisMemoryResult(success=True, found=True, key=key)
+        value = _optional_str(data.get("value"))
+        if value is not None:
+            stored["value"] = value
+        timestamp = _optional_str(data.get("timestamp"))
+        if timestamp is not None:
+            stored["timestamp"] = timestamp
+        return stored
     except Exception as e:
         logger.error("Failed to retrieve memory: %s", e)
-        return {"success": False, "error": str(e)}
+        return RedisMemoryResult(success=False, error=str(e))
 
 
 @tool
@@ -176,7 +179,7 @@ async def cache_query_result(
     result: str,
     tenant_id: str | None = None,
     ttl_seconds: int = 1800,
-) -> DataToolResult:
+) -> RedisMemoryResult:
     """Cache a query result for faster future retrieval.
 
     Use this to cache expensive query results (e.g., LLM responses, API calls).
@@ -201,31 +204,31 @@ async def cache_query_result(
         redis = get_redis_provider()
         cache_key = _make_query_cache_key(query, tenant_id)
 
-        data = {
+        data: JsonDict = {
             "query": query,
             "result": result,
             "tenant_id": tenant_id,
-            "timestamp": str(__import__("datetime").datetime.now().isoformat()),
+            "timestamp": _iso_timestamp(),
         }
 
-        await redis.set(cache_key, json.dumps(data), ex=ttl_seconds)
+        await redis.set(cache_key, json_dumps(data), ex=ttl_seconds)
         logger.debug("Cached query result: %s", cache_key)
 
-        return {
-            "success": True,
-            "cache_key": cache_key,
-            "ttl_seconds": ttl_seconds,
-        }
+        return RedisMemoryResult(
+            success=True,
+            cache_key=cache_key,
+            ttl_seconds=ttl_seconds,
+        )
     except Exception as e:
         logger.error("Failed to cache query result: %s", e)
-        return {"success": False, "error": str(e)}
+        return RedisMemoryResult(success=False, error=str(e))
 
 
 @tool
 async def get_cached_query(
     query: str,
     tenant_id: str | None = None,
-) -> DataToolResult:
+) -> RedisMemoryResult:
     """Retrieve a cached query result.
 
     Checks if a query result is cached and returns it if found.
@@ -243,28 +246,29 @@ async def get_cached_query(
 
         data_str = await redis.get(cache_key)
         if not data_str:
-            return {"success": False, "found": False, "query": query}
+            return RedisMemoryResult(success=False, found=False, query=query)
 
-        data = json.loads(data_str)
+        data = _parse_redis_payload(data_str)
         logger.debug("Retrieved cached query: %s", cache_key)
 
-        return {
-            "success": True,
-            "found": True,
-            "query": query,
-            "result": data.get("result"),
-            "timestamp": data.get("timestamp"),
-        }
+        cached = RedisMemoryResult(success=True, found=True, query=query)
+        result_value = _optional_str(data.get("result"))
+        if result_value is not None:
+            cached["result"] = result_value
+        timestamp = _optional_str(data.get("timestamp"))
+        if timestamp is not None:
+            cached["timestamp"] = timestamp
+        return cached
     except Exception as e:
         logger.error("Failed to get cached query: %s", e)
-        return {"success": False, "error": str(e)}
+        return RedisMemoryResult(success=False, error=str(e))
 
 
 @tool
 async def get_session_data(
     session_id: str,
     tenant_id: str | None = None,
-) -> DataToolResult:
+) -> RedisMemoryResult:
     """Retrieve all session data from Redis.
 
     Gets all stored data for a session, including memory entries and metadata.
@@ -282,25 +286,25 @@ async def get_session_data(
 
         data_str = await redis.get(session_key)
         if not data_str:
-            return {
-                "success": True,
-                "found": False,
-                "session_id": session_id,
-                "data": {},
-            }
+            return RedisMemoryResult(
+                success=True,
+                found=False,
+                session_id=session_id,
+                data={},
+            )
 
-        data = json.loads(data_str)
+        data = _parse_redis_payload(data_str)
         logger.debug("Retrieved session data: %s", session_key)
 
-        return {
-            "success": True,
-            "found": True,
-            "session_id": session_id,
-            "data": data,
-        }
+        return RedisMemoryResult(
+            success=True,
+            found=True,
+            session_id=session_id,
+            data=data,
+        )
     except Exception as e:
         logger.error("Failed to get session data: %s", e)
-        return {"success": False, "error": str(e)}
+        return RedisMemoryResult(success=False, error=str(e))
 
 
 @tool
@@ -308,54 +312,39 @@ async def clear_memory(
     key: str | None = None,
     session_id: str | None = None,
     tenant_id: str | None = None,
-) -> DataToolResult:
-    """Clear memory entries.
+) -> RedisMemoryResult:
+    """Clear memory entries from Redis.
 
-    Clears specific memory entry or all memory for a session.
-
-    IMPORTANT: Only clear memory you have permission to clear.
-    Respect tenant isolation - never clear other tenants' data.
+    Can clear a specific key, all keys for a session, or all keys for a tenant.
 
     Args:
-        key: Specific key to clear (if None, clears all session memory)
-        session_id: Session identifier (required if key is None)
+        key: Optional specific key to clear
+        session_id: Optional session to clear all keys for
         tenant_id: Optional tenant identifier
 
     Returns:
-        Dict with success status
+        Dict with success status and what was cleared
     """
     try:
         redis = get_redis_provider()
+        tenant_id = tenant_id or "default"
 
         if key and session_id:
-            # Clear specific key
             memory_key = _make_memory_key(key, session_id, tenant_id)
             await redis.delete(memory_key)
-            logger.debug("Cleared memory: %s", memory_key)
-            return {"success": True, "cleared": key}
+            cleared = f"memory:{memory_key}"
         elif session_id:
-            # Clear all session memory (would need pattern matching)
-            # For now, return error - implement pattern deletion if needed
-            return {
-                "success": False,
-                "error": "Bulk session clear not implemented. Clear specific keys.",
-            }
+            session_key = _make_session_key(session_id, tenant_id)
+            await redis.delete(session_key)
+            cleared = f"session:{session_key}"
         else:
-            return {
-                "success": False,
-                "error": "Either key+session_id or session_id required",
-            }
+            return RedisMemoryResult(
+                success=False,
+                error="Must provide key+session_id or session_id to clear",
+            )
+
+        logger.debug("Cleared memory: %s", cleared)
+        return RedisMemoryResult(success=True, cleared=cleared)
     except Exception as e:
         logger.error("Failed to clear memory: %s", e)
-        return {"success": False, "error": str(e)}
-
-
-__all__ = [
-    "store_memory",
-    "retrieve_memory",
-    "cache_query_result",
-    "get_cached_query",
-    "get_session_data",
-    "clear_memory",
-    "get_redis_provider",
-]
+        return RedisMemoryResult(success=False, error=str(e))

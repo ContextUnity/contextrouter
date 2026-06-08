@@ -10,16 +10,18 @@ from dataclasses import dataclass
 
 from contextunity.core import get_contextunit_logger
 
-from contextunity.router.core import ContextToken
 from contextunity.router.modules.retrieval import BaseRetrievalPipeline
 
 from .models import RetrievedDoc
+from .pipeline_helpers import coerce_doc_from_envelope
 
 logger = get_contextunit_logger(__name__)
 
 
 @dataclass(frozen=True)
 class ParityConfig:
+    """Settings controlling the dual-read shadow harness (sample rate, timeout, backend)."""
+
     enabled: bool
     shadow_backend: str | None
     sample_rate: float
@@ -29,6 +31,8 @@ class ParityConfig:
 
 @dataclass(frozen=True)
 class ParityMetrics:
+    """Overlap and latency comparison between primary and shadow retrieval runs."""
+
     overlap_at_k: float
     primary_count: int
     shadow_count: int
@@ -37,7 +41,7 @@ class ParityMetrics:
 
 
 def _doc_key(doc: RetrievedDoc) -> str:
-    # Prefer stable URL, otherwise hash content+title to avoid logging raw text.
+    """Return a stable identity key for a doc — URL if available, else content hash."""
     raw = (doc.url or "").strip()
     if raw:
         return raw
@@ -46,6 +50,7 @@ def _doc_key(doc: RetrievedDoc) -> str:
 
 
 def _overlap(primary: list[RetrievedDoc], shadow: list[RetrievedDoc], k: int) -> float:
+    """Compute Jaccard-like set overlap at top-k between two result lists."""
     if k <= 0:
         return 0.0
     p = {_doc_key(d) for d in primary[:k]}
@@ -59,10 +64,12 @@ class DualReadHarness:
     """Runs a shadow retrieval in parallel and logs parity metrics."""
 
     def __init__(self, cfg: ParityConfig) -> None:
-        self._cfg = cfg
-        self._base = BaseRetrievalPipeline()
+        """Bind parity config and create a shadow retrieval pipeline."""
+        self._cfg: ParityConfig = cfg
+        self._base: BaseRetrievalPipeline = BaseRetrievalPipeline()
 
     def should_run(self) -> bool:
+        """Return ``True`` if dual-read is enabled and this request is sampled."""
         if not self._cfg.enabled:
             return False
         if not self._cfg.shadow_backend:
@@ -73,28 +80,20 @@ class DualReadHarness:
         self,
         *,
         query: str,
-        token: ContextToken,
         limit: int,
     ) -> tuple[list[RetrievedDoc], float]:
+        """Execute retrieval on the shadow backend and return (docs, elapsed_ms)."""
         t0 = time.perf_counter()
         res = await self._base.execute(
             query,
-            token=token,
             limit=limit,
             filters=None,
             providers=[self._cfg.shadow_backend] if self._cfg.shadow_backend else None,
         )
         docs: list[RetrievedDoc] = []
-        for env in getattr(res, "units", []) or []:
-            content = getattr(env, "content", None)
-            if isinstance(content, RetrievedDoc):
-                docs.append(content)
-            elif isinstance(content, dict):
-                try:
-                    docs.append(RetrievedDoc.model_validate(content))
-                except Exception as e:
-                    logger.debug("Failed to validate RetrievedDoc: %s", e)
-                    continue
+        for unit in res.units:
+            if doc := coerce_doc_from_envelope(unit):
+                docs.append(doc)
         elapsed_ms = (time.perf_counter() - t0) * 1000
         return docs, elapsed_ms
 
@@ -102,19 +101,20 @@ class DualReadHarness:
         self,
         *,
         query: str,
-        token: ContextToken,
         primary_docs: list[RetrievedDoc],
         primary_ms: float,
         limit: int,
     ) -> None:
+        """Run shadow retrieval, compute overlap metrics, and log results."""
         if not self.should_run():
             return
 
         timeout_s = max(0.05, self._cfg.timeout_ms / 1000.0)
 
         async def _run() -> tuple[list[RetrievedDoc], float]:
+            """Wrap shadow retrieval with a timeout."""
             return await asyncio.wait_for(
-                self._shadow_retrieve(query=query, token=token, limit=limit),
+                self._shadow_retrieve(query=query, limit=limit),
                 timeout=timeout_s,
             )
 
@@ -129,8 +129,7 @@ class DualReadHarness:
                 shadow_ms=shadow_ms,
             )
             logger.info(
-                "RAG dual-read parity: shadow_backend=%s overlap@k=%.3f primary=%d shadow=%d "
-                "primary_ms=%.1f shadow_ms=%.1f",
+                "RAG dual-read parity: shadow_backend=%s overlap@k=%.3f primary=%d shadow=%d primary_ms=%.1f shadow_ms=%.1f",
                 self._cfg.shadow_backend,
                 metrics.overlap_at_k,
                 metrics.primary_count,

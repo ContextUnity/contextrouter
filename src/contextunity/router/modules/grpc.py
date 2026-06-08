@@ -1,18 +1,16 @@
-"""gRPC client utilities for Router."""
+"""gRPC client utilities -- channel creation, stub caching, and health-check helpers for Router."""
 
 from __future__ import annotations
-
-from typing import Optional
 
 from contextunity.core import ContextToken, WorkerClient, get_contextunit_logger
 
 logger = get_contextunit_logger(__name__)
 
 # Global client instances
-_worker_client: Optional[WorkerClient] = None
+_worker_client: WorkerClient | None = None
 
 
-async def get_worker_client(token: Optional[ContextToken] = None) -> WorkerClient:
+async def get_worker_client(token: ContextToken | None = None) -> WorkerClient:
     """Get or create Worker gRPC client.
 
     Args:
@@ -25,15 +23,15 @@ async def get_worker_client(token: Optional[ContextToken] = None) -> WorkerClien
 
     from contextunity.router.core import get_core_config
 
-    worker_url = get_core_config().router.worker_grpc_endpoint
+    worker_url = get_core_config().worker_url
 
     if token:
         # Always return a fresh client for token-specific requests to avoid
         # cross-contamination and race conditions under concurrent execution.
-        return WorkerClient(host=worker_url, mode="grpc", token=token)
+        return WorkerClient(host=worker_url, token=token)
 
     if _worker_client is None:
-        _worker_client = WorkerClient(host=worker_url, mode="grpc", token=None)
+        _worker_client = WorkerClient(host=worker_url, token=None)
 
     return _worker_client
 

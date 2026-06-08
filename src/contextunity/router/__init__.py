@@ -1,18 +1,30 @@
-"""contextunity.router - shared LangGraph brain.
+"""contextunity.router - Distributed AI routing layer.
 
-This package is the single "agent brain" used by:
-- Web chat (AG-UI streaming via the API service)
-- Telegram bot (webhook via the API service)
-
-It contains the LangGraph graph and nodes, tool wrappers, and shared
-brain-side utilities.
+This package provides the central LangGraph-based workflow execution engine.
+It manages dynamic configuration, state routing, and streaming execution decoupled
+from any specific transport mechanism or user interface.
 """
 
 from __future__ import annotations
 
-import importlib
 import importlib.metadata
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from contextunity.router.cortex import (
+        invoke_agent,
+        invoke_dispatcher,
+        stream_agent,
+        stream_dispatcher,
+    )
+    from contextunity.router.cortex.services.dispatcher import get_dispatcher_service
+    from contextunity.router.modules.observability import (
+        flush as langfuse_flush,
+    )
+    from contextunity.router.modules.observability import (
+        get_langfuse_callbacks,
+        trace_context,
+    )
 
 __all__ = [
     "__version__",
@@ -36,22 +48,42 @@ except Exception:  # noqa: BLE001
     __version__ = "0.0.0"
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str) -> object:
     """Lazy exports to keep `import contextunity.router` lightweight.
 
     This is important for CLI usage (`python -m contextunity.router.cli`) where we want
     `--help` to work without importing the entire brain and its optional deps.
     """
-    if name in {"invoke_agent", "stream_agent", "invoke_dispatcher", "stream_dispatcher"}:
-        mod = importlib.import_module("contextunity.router.cortex")
-        return getattr(mod, name)
+    if name == "invoke_agent":
+        from contextunity.router.cortex import invoke_agent
+
+        return invoke_agent
+    if name == "stream_agent":
+        from contextunity.router.cortex import stream_agent
+
+        return stream_agent
+    if name == "invoke_dispatcher":
+        from contextunity.router.cortex import invoke_dispatcher
+
+        return invoke_dispatcher
+    if name == "stream_dispatcher":
+        from contextunity.router.cortex import stream_dispatcher
+
+        return stream_dispatcher
     if name == "get_dispatcher_service":
-        mod = importlib.import_module("contextunity.router.cortex.services.dispatcher")
-        return getattr(mod, name)
-    if name in {"get_langfuse_callbacks", "trace_context"}:
-        mod = importlib.import_module("contextunity.router.modules.observability")
-        return getattr(mod, name)
+        from contextunity.router.cortex.services.dispatcher import get_dispatcher_service
+
+        return get_dispatcher_service
+    if name == "get_langfuse_callbacks":
+        from contextunity.router.modules.observability import get_langfuse_callbacks
+
+        return get_langfuse_callbacks
+    if name == "trace_context":
+        from contextunity.router.modules.observability import trace_context
+
+        return trace_context
     if name == "langfuse_flush":
-        mod = importlib.import_module("contextunity.router.modules.observability")
-        return getattr(mod, "flush")
+        from contextunity.router.modules.observability import flush
+
+        return flush
     raise AttributeError(name)

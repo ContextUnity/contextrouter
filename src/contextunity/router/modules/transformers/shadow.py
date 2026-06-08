@@ -3,20 +3,28 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import override
 
-from contextunity.core import get_contextunit_logger
-from contextunity.router.modules.ingestion.rag.config import get_assets_paths, load_config
-from contextunity.router.modules.ingestion.rag.core import get_all_plugins
-from contextunity.router.modules.ingestion.rag.core.utils import parallel_map, resolve_workers
-from contextunity.router.modules.ingestion.rag.graph.lookup import GraphEnricher
-from contextunity.router.modules.ingestion.rag.settings import RagIngestionConfig
-from contextunity.router.modules.ingestion.rag.stages.store import (
+from contextunity.brain.core.config import BrainConfig
+from contextunity.brain.ingestion.rag.config import get_assets_paths, load_config
+from contextunity.brain.ingestion.rag.core import get_all_plugins
+from contextunity.brain.ingestion.rag.core.utils import parallel_map, resolve_workers
+from contextunity.brain.ingestion.rag.graph.lookup import GraphEnricher
+from contextunity.brain.ingestion.rag.settings import RagIngestionConfig
+from contextunity.brain.ingestion.rag.stages.store import (
     read_raw_data_jsonl,
     write_shadow_records_jsonl,
 )
+from contextunity.core import get_contextunit_logger
+from contextunity.core.exceptions import ConfigurationError
+from contextunity.core.sdk.payload import get_bool, get_int, get_str_list
+from contextunity.core.types import JsonDict
 
-from contextunity.router.core import BaseTransformer, Config, ContextUnit
+from contextunity.router.core import BaseTransformer, ContextUnit
+from contextunity.router.modules.transformers._ingestion_helpers import (
+    payload_metadata,
+    resolve_rag_ingestion_config,
+)
 
 logger = get_contextunit_logger(__name__)
 
@@ -24,11 +32,19 @@ logger = get_contextunit_logger(__name__)
 def build_shadow_records(
     *,
     config: RagIngestionConfig,
-    core_cfg: Config,
+    core_cfg: BrainConfig,
     only_types: list[str],
     overwrite: bool = True,
     workers: int = 1,
 ) -> dict[str, str]:
+    """Run all source-type plugins in parallel to produce shadow JSONL files.
+
+    For each type in *only_types*, loads the clean-text JSONL, runs the matching
+    plugin's ``transform`` (with graph enrichment from taxonomy + graph assets),
+    and writes the output to ``<shadow>/<type>.jsonl``.
+
+    Returns a ``{source_type: output_path}`` mapping for types that produced output.
+    """
     paths = get_assets_paths(config)
     taxonomy_path = paths["taxonomy"]
     graph_path = paths["graph"]
@@ -41,6 +57,7 @@ def build_shadow_records(
     plugins_by_type = {p.source_type: p for p in plugins}
 
     def _run_one(t: str) -> tuple[str, str]:
+        """Process a single source type: read clean-text JSONL, transform via plugin, write shadow records."""
         t0 = time.perf_counter()
         plugin = plugins_by_type.get(t)
         if plugin is None:
@@ -85,14 +102,19 @@ def build_shadow_records(
 
 
 class ShadowTransformer(BaseTransformer):
-    name = "ingestion.shadow"
+    """Ingestion-stage transformer: wraps ``build_shadow_records`` as a ContextUnit pipeline step."""
+
+    name: str = "ingestion.shadow"
 
     def __init__(self) -> None:
+        """Initialize config slots — populated later via ``configure()``."""
         super().__init__()
         self._config: RagIngestionConfig | None = None
-        self._core_cfg: Config | None = None
+        self._core_cfg: BrainConfig | None = None
 
-    def configure(self, params: dict[str, Any] | None) -> None:
+    @override
+    def configure(self, params: dict[str, object] | None) -> None:
+        """Extract ``RagIngestionConfig`` and ``BrainConfig`` from *params* for later use in ``transform``."""
         super().configure(params)
         cfg = (params or {}).get("config")
         if isinstance(cfg, RagIngestionConfig):
@@ -102,47 +124,34 @@ class ShadowTransformer(BaseTransformer):
         else:
             self._config = None
         cc = (params or {}).get("core_cfg")
-        self._core_cfg = cc if isinstance(cc, Config) else None
+        self._core_cfg = cc if isinstance(cc, BrainConfig) else None
 
+    @override
     async def transform(self, unit: ContextUnit) -> ContextUnit:
+        """Resolve ingestion config (payload → metadata → self._config → default),
+        run ``build_shadow_records``, and store output paths in ``metadata.shadow_paths``.
+        """
         unit.provenance.append(self.name)
 
-        payload = unit.payload or {}
-        if not isinstance(payload, dict):
-            payload = {}
+        payload, metadata = payload_metadata(unit.payload)
 
-        cfg = None
-        content = payload.get("content")
-        metadata = payload.get("metadata", {}) if isinstance(payload.get("metadata"), dict) else {}
-
-        if isinstance(content, RagIngestionConfig):
-            cfg = content
-        elif isinstance(content, dict):
-            cfg = RagIngestionConfig.model_validate(content)
-        elif isinstance(metadata.get("ingestion_config"), RagIngestionConfig):
-            cfg = metadata["ingestion_config"]
-        elif isinstance(metadata.get("ingestion_config"), dict):
-            cfg = RagIngestionConfig.model_validate(metadata["ingestion_config"])
-        elif isinstance(metadata.get("config"), RagIngestionConfig):
-            cfg = metadata["config"]
-        elif isinstance(metadata.get("config"), dict):
-            cfg = RagIngestionConfig.model_validate(metadata["config"])
-        if cfg is None and self._config is not None:
-            cfg = self._config
-        if cfg is None:
-            cfg = load_config()
+        cfg = resolve_rag_ingestion_config(
+            payload,
+            metadata,
+            configured=self._config,
+            default_loader=load_config,
+        )
         if self._core_cfg is None:
-            raise ValueError(
+            raise ConfigurationError(
                 "ShadowTransformer requires core_cfg (Config) via configure(params={'core_cfg': ...})"
             )
 
-        only_types = metadata.get("only_types")
-        if not isinstance(only_types, list) or not only_types:
+        only_types = get_str_list(metadata, "only_types")
+        if not only_types:
             only_types = ["video", "book", "qa", "web", "knowledge"]
-        only_types = [t for t in only_types if isinstance(t, str) and t.strip()]
 
-        overwrite = bool(metadata.get("overwrite", self.params.get("overwrite", True)))
-        workers = int(metadata.get("workers", self.params.get("workers", 1)))
+        overwrite = get_bool(metadata, "overwrite", bool(self.params.get("overwrite", True)))
+        workers = get_int(metadata, "workers", get_int(self.params, "workers", 1))
 
         out = build_shadow_records(
             config=cfg,
@@ -151,7 +160,8 @@ class ShadowTransformer(BaseTransformer):
             overwrite=overwrite,
             workers=workers,
         )
-        metadata["shadow_paths"] = out
+        shadow_paths: JsonDict = {k: v for k, v in out.items()}
+        metadata["shadow_paths"] = shadow_paths
         payload["metadata"] = metadata
         unit.payload = payload
         return unit

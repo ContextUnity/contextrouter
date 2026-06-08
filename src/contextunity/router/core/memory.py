@@ -3,12 +3,13 @@
 Uses BrainClient SDK for all persistent memory operations.
 """
 
-from typing import Any, Dict, Optional
+from __future__ import annotations
 
 from contextunity.core import get_contextunit_logger
 from contextunity.core.sdk import BrainClient
+from contextunity.core.types import JsonDict, WireValue, is_json_dict
 
-from .config import Config
+from .config import RouterConfig
 
 logger = get_contextunit_logger(__name__)
 
@@ -19,20 +20,23 @@ class MemoryManager:
     Builds context blocks for LLM nodes using real Brain data.
     """
 
-    def __init__(self, config: Config):
-        self.config = config
+    def __init__(self, config: RouterConfig):
+        """Resolve the first configured tenant and create a ``BrainClient`` with a service token."""
+        self.config: RouterConfig = config
 
         from contextunity.router.core.brain_token import get_brain_service_token
 
-        # Use the first tenant defined for the router, or None (shared mode)
-        tenant_id = config.router.tenants[0] if getattr(config.router, "tenants", None) else None
-        self.brain = BrainClient(tenant_id=tenant_id, token=get_brain_service_token())
+        tenant_scope = tuple(config.router.tenants or ("default",))
+        self.brain: BrainClient = BrainClient(
+            tenant_id=tenant_scope[0],
+            token=get_brain_service_token(allowed_tenants=tenant_scope),
+        )
 
     async def compile_context(
         self,
         user_id: str,
         query: str,
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
         tenant_id: str = "default",
     ) -> str:
         """Assemble a system context block from multiple memory layers.
@@ -40,13 +44,14 @@ class MemoryManager:
         Args:
             user_id: User identifier.
             query: Current user query (for semantic search).
-            session_id: Optional session identifier.
+            session_id: Optional session identifier (reserved for future use).
             tenant_id: Tenant scope.
 
         Returns:
             Formatted context string for LLM system prompt.
         """
-        context_parts = []
+        _ = session_id
+        context_parts: list[str] = []
 
         # 1. Semantic Memory (RAG Chunks)
         try:
@@ -70,10 +75,14 @@ class MemoryManager:
                 limit=5,
             )
             if episodes:
-                episode_lines = []
+                episode_lines: list[str] = []
                 for ep in episodes:
-                    ts = ep.get("created_at", "")
-                    content = ep.get("content", "")
+                    if not is_json_dict(ep):
+                        continue
+                    ts_obj = ep.get("created_at", "")
+                    ts = ts_obj if isinstance(ts_obj, str) else str(ts_obj)
+                    content_obj = ep.get("content", "")
+                    content = content_obj if isinstance(content_obj, str) else str(content_obj)
                     if content:
                         episode_lines.append(f"- [{ts}] {content}")
                 if episode_lines:
@@ -100,7 +109,7 @@ class MemoryManager:
         user_id: str,
         content: str,
         session_id: str,
-        metadata: Optional[Dict] = None,
+        metadata: JsonDict | None = None,
         tenant_id: str = "default",
     ) -> str:
         """Persist a new interaction to episodic memory via Brain.
@@ -133,7 +142,7 @@ class MemoryManager:
         self,
         user_id: str,
         key: str,
-        value: Any,
+        value: WireValue,
         confidence: float = 1.0,
         tenant_id: str = "default",
     ) -> None:

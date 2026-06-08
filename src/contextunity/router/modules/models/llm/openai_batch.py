@@ -1,28 +1,31 @@
 """OpenAI Batch API provider for async batch processing.
-
 This module provides 50% cost savings for large-scale async operations.
 Batches complete within 24 hours (often faster during low-load periods).
-
 Use cases:
 - Commerce harvester enrichment (thousands of products)
 - Bulk content generation
 - Large-scale data labeling/extraction
-
 NOT for real-time operations - use regular OpenAI LLM for that.
 """
 
 from __future__ import annotations
 
-import json
 import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from contextunity.core import get_contextunit_logger
+from contextunity.core.parsing import json_dumps, json_loads
+from contextunity.core.sdk.payload import get_json_dict_list, get_str
+from contextunity.core.types import JsonDict, is_json_dict
 
-from contextunity.router.core import Config
+from contextunity.router.core import RouterConfig
+from contextunity.router.core.exceptions import RouterLLMError
+
+if TYPE_CHECKING:
+    from openai import AsyncOpenAI
 
 logger = get_contextunit_logger(__name__)
 
@@ -32,7 +35,7 @@ class BatchRequest:
     """Single request in a batch job."""
 
     custom_id: str
-    messages: list[dict[str, Any]]
+    messages: list[JsonDict]
     model: str = "gpt-4o-mini"
     temperature: float | None = None
     max_tokens: int | None = None
@@ -85,12 +88,13 @@ class OpenAIBatchClient:
         results = await client.get_batch_results(job)
     """
 
-    def __init__(self, config: Config) -> None:
-        self._config = config
-        self._client: Any = None
+    def __init__(self, config: RouterConfig) -> None:
+        """Create an ``AsyncOpenAI`` client configured for the batch file-upload API."""
+        self._config: RouterConfig = config
+        self._client: AsyncOpenAI | None = None
 
-    def _get_client(self) -> Any:
-        """Lazy init OpenAI client."""
+    def _get_client(self) -> AsyncOpenAI:
+        """Lazily initialize and return the OpenAI client."""
         if self._client is None:
             try:
                 from openai import AsyncOpenAI
@@ -111,21 +115,13 @@ class OpenAIBatchClient:
         *,
         description: str | None = None,
     ) -> BatchJob:
-        """Create a new batch job.
-
-        Args:
-            requests: List of batch requests
-            description: Optional description for the batch
-
-        Returns:
-            BatchJob with ID to track progress
-        """
+        """Create a new batch job."""
         client = self._get_client()
 
         # Create JSONL content
-        jsonl_lines = []
+        jsonl_lines: list[str] = []
         for req in requests:
-            body: dict[str, Any] = {
+            body: dict[str, object] = {
                 "model": req.model,
                 "messages": req.messages,
             }
@@ -136,19 +132,19 @@ class OpenAIBatchClient:
             if req.response_format is not None:
                 body["response_format"] = req.response_format
 
-            line = {
+            line: dict[str, object] = {
                 "custom_id": req.custom_id,
                 "method": "POST",
                 "url": "/v1/chat/completions",
                 "body": body,
             }
-            jsonl_lines.append(json.dumps(line))
+            jsonl_lines.append(json_dumps(line))
 
         jsonl_content = "\n".join(jsonl_lines)
 
         # Upload file
         with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
-            f.write(jsonl_content)
+            _ = f.write(jsonl_content)
             temp_path = Path(f.name)
 
         try:
@@ -210,10 +206,10 @@ class OpenAIBatchClient:
             ValueError: If job is not completed or has no output
         """
         if job.status != "completed":
-            raise ValueError(f"Batch job not completed: {job.status}")
+            raise RouterLLMError(f"Batch job not completed: {job.status}")
 
         if not job.output_file_id:
-            raise ValueError("Batch job has no output file")
+            raise RouterLLMError("Batch job has no output file")
 
         client = self._get_client()
 
@@ -221,17 +217,20 @@ class OpenAIBatchClient:
         content = await client.files.content(job.output_file_id)
         text = content.text
 
-        results = []
+        results: list[BatchResult] = []
         for line in text.strip().split("\n"):
             if not line:
                 continue
 
-            data = json.loads(line)
-            custom_id = data.get("custom_id", "unknown")
+            data_obj: object = json_loads(line)
+            if not is_json_dict(data_obj):
+                continue
+            row: JsonDict = data_obj
+            custom_id = get_str(row, "custom_id", "unknown")
 
             # Check for error
-            error = data.get("error")
-            if error:
+            error = row.get("error")
+            if error is not None:
                 results.append(
                     BatchResult(
                         custom_id=custom_id,
@@ -242,16 +241,30 @@ class OpenAIBatchClient:
                 continue
 
             # Extract response
-            response = data.get("response", {})
-            body = response.get("body", {})
-            choices = body.get("choices", [])
+            response_obj = row.get("response")
+            response = response_obj if isinstance(response_obj, dict) else {}
+            body_obj = response.get("body")
+            body = body_obj if isinstance(body_obj, dict) else {}
+            choices_obj = body.get("choices")
+            choices = choices_obj if isinstance(choices_obj, list) else []
 
             content_text = ""
-            if choices:
-                message = choices[0].get("message", {})
-                content_text = message.get("content", "")
+            if choices and isinstance(choices[0], dict):
+                message_obj = choices[0].get("message")
+                message = message_obj if isinstance(message_obj, dict) else {}
+                raw_content = message.get("content")
+                content_text = (
+                    raw_content if isinstance(raw_content, str) else str(raw_content or "")
+                )
 
-            usage = body.get("usage")
+            usage_obj = body.get("usage")
+            usage: dict[str, int] | None = None
+            if isinstance(usage_obj, dict):
+                usage = {
+                    str(key): int(value)
+                    for key, value in usage_obj.items()
+                    if isinstance(value, int)
+                }
 
             results.append(
                 BatchResult(
@@ -323,7 +336,7 @@ class OpenAIBatchClient:
                 return job
 
             if job.status in ("failed", "expired", "cancelled"):
-                raise RuntimeError(f"Batch job {job.status}: {batch_id}")
+                raise RouterLLMError(f"Batch job {job.status}: {batch_id}")
 
             elapsed = time.time() - start
             if elapsed > max_wait:
@@ -335,8 +348,8 @@ class OpenAIBatchClient:
 
 # Helper function for simple batch operations
 async def run_batch_completions(
-    config: Config,
-    requests: list[dict[str, Any]],
+    config: RouterConfig,
+    requests: list[JsonDict],
     *,
     model: str = "gpt-4o-mini",
     description: str | None = None,
@@ -366,16 +379,22 @@ async def run_batch_completions(
     """
     client = OpenAIBatchClient(config)
 
-    batch_requests = [
-        BatchRequest(
-            custom_id=req["id"],
-            messages=req["messages"],
-            model=model,
-            temperature=req.get("temperature"),
-            max_tokens=req.get("max_tokens"),
+    batch_requests: list[BatchRequest] = []
+    for req in requests:
+        messages = get_json_dict_list(req, "messages")
+        temperature_raw = req.get("temperature")
+        temperature = temperature_raw if isinstance(temperature_raw, (int, float)) else None
+        max_tokens_raw = req.get("max_tokens")
+        max_tokens = max_tokens_raw if isinstance(max_tokens_raw, int) else None
+        batch_requests.append(
+            BatchRequest(
+                custom_id=get_str(req, "id"),
+                messages=messages,
+                model=model,
+                temperature=float(temperature) if temperature is not None else None,
+                max_tokens=max_tokens,
+            )
         )
-        for req in requests
-    ]
 
     job = await client.create_batch(batch_requests, description=description)
 

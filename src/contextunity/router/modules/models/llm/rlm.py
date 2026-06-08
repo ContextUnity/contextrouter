@@ -1,27 +1,26 @@
 """Recursive Language Model (RLM) provider.
-
 RLMs are a task-agnostic inference paradigm where LMs can programmatically
 examine, decompose, and recursively call themselves over input context.
-
 This enables processing of near-infinite length contexts by:
 1. Storing context as Python variable in REPL environment
 2. Allowing LM to interact with and recurse over context programmatically
 3. Breaking down complex tasks into smaller sub-LLM calls
-
 Reference: https://arxiv.org/abs/2512.24601
 Library: https://github.com/alexzhang13/rlm
 """
 
 from __future__ import annotations
 
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
+from typing import override
 
 from contextunity.core import get_contextunit_logger
-from contextunity.core.tokens import ContextToken
+from contextunity.core.exceptions import ConfigurationError
+from contextunity.core.parsing import json_dumps
 
-from contextunity.router.core import Config
+from contextunity.router.core import RouterConfig
 
-from ..base import BaseModel
+from ..base import BaseLLM as BaseModel
 from ..registry import model_registry
 from ..types import (
     FinalTextEvent,
@@ -31,7 +30,16 @@ from ..types import (
     ModelStreamEvent,
     ProviderInfo,
     TextDeltaEvent,
+    TextPart,
     UsageStats,
+)
+from .rlm_boundary import (
+    RLMEngine,
+    ensure_rlm_installed,
+    load_rlm_engine,
+    load_rlm_logger,
+    rlm_response_text,
+    rlm_usage_tokens,
 )
 
 logger = get_contextunit_logger(__name__)
@@ -59,14 +67,14 @@ class RLMLLM(BaseModel):
 
     def __init__(
         self,
-        config: Config,
+        config: RouterConfig,
         *,
         model_name: str | None = None,
-        environment: str = "local",
-        environment_kwargs: dict | None = None,
+        environment: str = "docker",
+        environment_kwargs: dict[str, object] | None = None,
         verbose: bool = False,
         log_dir: str | None = None,
-        custom_tools: dict | None = None,
+        custom_tools: dict[str, object] | None = None,
         **kwargs: object,
     ) -> None:
         """Initialize RLM wrapper.
@@ -75,8 +83,8 @@ class RLMLLM(BaseModel):
             config: contextunity.router configuration
             model_name: Base model to use (e.g., "gpt-5-mini", "claude-sonnet")
             environment: REPL environment type:
-                - "local": Uses Python exec (default, same process)
-                - "docker": Isolated Docker container
+                - "local": Uses Python exec in the Router process (explicit opt-in only)
+                - "docker": Isolated Docker container (default)
                 - "modal": Modal.com sandboxes (cloud)
                 - "prime": Prime Intellect sandboxes (cloud)
             environment_kwargs: Additional environment configuration
@@ -84,24 +92,26 @@ class RLMLLM(BaseModel):
             log_dir: Directory for trajectory logs (for visualization)
         """
         try:
-            from rlm import RLM
+            ensure_rlm_installed()
         except ImportError as e:
-            raise ImportError(
+            raise ConfigurationError(
                 "RLMLLM requires the 'rlm' package. Install with: pip install rlm or uv add rlm"
             ) from e
 
-        self._cfg = config
-        self._model_name = (model_name or "gpt-5-mini").strip()
-        self._environment = environment
-        self._verbose = verbose
+        resolved_name = (model_name or "gpt-5-mini").strip()
+        super().__init__(provider="rlm", model_name=resolved_name)
+        self._cfg: RouterConfig = config
+        self._environment: str = environment
+        self._verbose: bool = verbose
 
         # Determine backend from model name
         backend, extra_kwargs = self._infer_backend(self._model_name)
+        backend_kwargs: dict[str, object] = {"model_name": self._model_name, **extra_kwargs}
 
         # Build RLM instance
-        rlm_kwargs: dict = {
+        rlm_kwargs: dict[str, object] = {
             "backend": backend,
-            "backend_kwargs": {"model_name": self._model_name, **extra_kwargs},
+            "backend_kwargs": backend_kwargs,
             "environment": environment,
             "verbose": verbose,
             "max_timeout": 300.0,  # 5 min per brand — prevents indefinite runs
@@ -110,7 +120,7 @@ class RLMLLM(BaseModel):
 
         # Forward api_key to backend if provided (bypasses module-level env cache)
         if "api_key" in kwargs:
-            rlm_kwargs["backend_kwargs"]["api_key"] = kwargs.pop("api_key")
+            backend_kwargs["api_key"] = kwargs.pop("api_key")
 
         if environment_kwargs:
             rlm_kwargs["environment_kwargs"] = environment_kwargs
@@ -120,26 +130,20 @@ class RLMLLM(BaseModel):
 
         # Add logger if log_dir specified
         if log_dir:
-            from rlm.logger import RLMLogger
+            rlm_kwargs["logger"] = load_rlm_logger(log_dir)
 
-            rlm_kwargs["logger"] = RLMLogger(log_dir=log_dir)
+        self._rlm: RLMEngine = load_rlm_engine(**rlm_kwargs)
+        self._custom_tools: dict[str, object] | None = custom_tools
 
-        self._rlm = RLM(**rlm_kwargs)
-        self._custom_tools = custom_tools
-
-        self._capabilities = ModelCapabilities(
+        self._capabilities: ModelCapabilities = ModelCapabilities(
             supports_text=True,
             supports_image=False,  # RLM is text-focused
             supports_audio=False,
         )
 
     @staticmethod
-    def _infer_backend(model_name: str) -> tuple[str, dict]:
-        """Infer RLM backend and extra kwargs from model name.
-
-        Returns:
-            Tuple of (backend_name, extra_backend_kwargs).
-        """
+    def _infer_backend(model_name: str) -> tuple[str, dict[str, object]]:
+        """Infer the RLM backend and extra kwargs from the model name."""
         model_lower = model_name.lower()
 
         if any(x in model_lower for x in ["gpt", "o1", "o3", "o4"]):
@@ -159,28 +163,19 @@ class RLMLLM(BaseModel):
             return "openai", {}  # default fallback
 
     @property
+    @override
     def capabilities(self) -> ModelCapabilities:
+        """Declare modality support for the RLM backend."""
         return self._capabilities
 
-    async def generate(
+    @override
+    async def _generate(
         self,
         request: ModelRequest,
         *,
-        token: ContextToken | None = None,
-        custom_tools: dict | None = None,
+        custom_tools: dict[str, object] | None = None,
     ) -> ModelResponse:
-        """Generate response using RLM recursive completion.
-
-        The RLM will create a REPL environment and may spawn recursive
-        LLM calls to process the request, especially for large contexts.
-
-        Args:
-            request: Model request with prompt and parameters.
-            token: Optional context token.
-            custom_tools: Per-request REPL variables/functions.
-                Non-callable values become REPL variables accessible immediately.
-        """
-        _ = token
+        """Call the ContextUnity RLM inference backend and return a complete response."""
 
         # Merge per-request tools with instance tools
         if custom_tools:
@@ -196,10 +191,7 @@ class RLMLLM(BaseModel):
 
         result = await loop.run_in_executor(None, lambda: self._rlm.completion(prompt))
 
-        # Extract response text
-        response_text = getattr(result, "response", str(result))
-
-        # Build usage stats from RLM metrics if available
+        response_text = rlm_response_text(result)
         usage = self._extract_usage(result)
 
         return ModelResponse(
@@ -212,25 +204,27 @@ class RLMLLM(BaseModel):
             ),
         )
 
-    async def stream(
+    @override
+    def _stream(
         self,
         request: ModelRequest,
-        *,
-        token: ContextToken | None = None,
     ) -> AsyncIterator[ModelStreamEvent]:
-        """Stream is not natively supported by RLM - falls back to generate."""
-        _ = token
+        """Stream token deltas from the ContextUnity RLM inference backend."""
 
-        # RLM doesn't support streaming natively, emit full response
-        response = await self.generate(request, token=token)
+        async def _event_stream() -> AsyncIterator[ModelStreamEvent]:
+            # RLM doesn't support streaming natively, emit full response
+            """Yield ``TextDelta`` / ``UsageEvent`` from the ContextUnity RLM inference backend stream."""
+            response = await self._generate(request)
 
-        # Emit as single chunk
-        yield TextDeltaEvent(delta=response.text)
-        yield FinalTextEvent(text=response.text)
+            # Emit as single chunk
+            yield TextDeltaEvent(delta=response.text)
+            yield FinalTextEvent(text=response.text)
+
+        return _event_stream()
 
     def _build_prompt(self, request: ModelRequest) -> str:
-        """Build RLM prompt from ModelRequest."""
-        parts = []
+        """Build RLM prompt from ``ModelRequest``."""
+        parts: list[str] = []
 
         # Add system prompt if present
         if request.system:
@@ -238,24 +232,23 @@ class RLMLLM(BaseModel):
 
         # Add content from parts
         for part in request.parts:
-            if hasattr(part, "text"):
+            if isinstance(part, TextPart):
                 parts.append(part.text)
 
         return "\n".join(parts)
 
     def _extract_usage(self, result: object) -> UsageStats | None:
-        """Extract usage stats from RLM result (RLMChatCompletion)."""
+        """Extract usage stats from the RLM result."""
         try:
-            # RLMChatCompletion has usage_summary: UsageSummary
-            usage_summary = getattr(result, "usage_summary", None)
-            if usage_summary:
-                input_tokens = getattr(usage_summary, "total_input_tokens", 0) or 0
-                output_tokens = getattr(usage_summary, "total_output_tokens", 0) or 0
-                return UsageStats(
-                    input_tokens=int(input_tokens),
-                    output_tokens=int(output_tokens),
-                    total_tokens=int(input_tokens + output_tokens),
-                )
+            tokens = rlm_usage_tokens(result)
+            if tokens is None:
+                return None
+            input_tokens, output_tokens = tokens
+            return UsageStats(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=input_tokens + output_tokens,
+            )
         except Exception:
             pass
         return None
@@ -270,8 +263,8 @@ class RLMContextHandler:
 
     @staticmethod
     def prepare_product_matching_prompt(
-        supplier_products: list[dict],
-        site_products: list[dict],
+        supplier_products: list[dict[str, object]],
+        site_products: list[dict[str, object]],
         *,
         matching_instructions: str | None = None,
     ) -> str:
@@ -285,8 +278,6 @@ class RLMContextHandler:
         Returns:
             RLM-optimized prompt that stores products as variables
         """
-        import json
-
         default_instructions = """
 TASK: Match supplier products to site products.
 
@@ -326,26 +317,20 @@ Return FINAL_VAR(matches) where matches is a JSON list:
 {instructions}
 
 The data is already loaded:
-- supplier_products = {json.dumps(supplier_products[:5])}... # ({len(supplier_products)} total items, access full list via variable)
-- site_products = {json.dumps(site_products[:5])}... # ({len(site_products)} total items, access full list via variable)
+- supplier_products = {json_dumps(supplier_products[:5])}... # ({len(supplier_products)} total items, access full list via variable)
+- site_products = {json_dumps(site_products[:5])}... # ({len(site_products)} total items, access full list via variable)
 
 Write code to perform the matching. Use recursive LLM calls for complex comparisons.
 """
 
     @staticmethod
     def prepare_taxonomy_classification_prompt(
-        products: list[dict],
-        taxonomy_tree: dict,
+        products: list[dict[str, object]],
+        taxonomy_tree: dict[str, object],
         *,
         classification_rules: str | None = None,
     ) -> str:
-        """Prepare RLM prompt for bulk taxonomy classification.
-
-        Taxonomy tree can be 1000+ categories - RLM navigates it
-        programmatically instead of having it all in context.
-        """
-        import json
-
+        """Prepare RLM prompt for bulk taxonomy classification."""
         default_rules = """
 TASK: Classify products into taxonomy categories.
 
@@ -365,8 +350,8 @@ OUTPUT: FINAL_VAR(classifications) as JSON list
         return f"""
 {classification_rules or default_rules}
 
-Products sample: {json.dumps(products[:3])}... ({len(products)} total)
-Taxonomy root: {json.dumps(list(taxonomy_tree.keys())[:10])}... (navigate via variable)
+Products sample: {json_dumps(products[:3])}... ({len(products)} total)
+Taxonomy root: {json_dumps(list(taxonomy_tree.keys())[:10])}... (navigate via variable)
 """
 
 

@@ -1,8 +1,6 @@
 """Modular configuration system for contextunity.router."""
 
-from .base import (
-    DEFAULT_READ_PERMISSION,
-    DEFAULT_WRITE_PERMISSION,
+from contextunity.core.config import (
     get_bool_env,
     get_env,
 )
@@ -10,16 +8,16 @@ from .base import (
 # RAGConfig moved - check if still needed for retrieval
 # from .ingestion import RAGConfig
 from .main import (
-    Config,
-    ConfigPaths,
-    FlowConfig,
+    RouterConfig,
     get_core_config,
+    load_config,
+    reset_core_config,
     set_core_config,
 )
 from .models import (
     LLMConfig,
     ModelsConfig,
-    RouterConfig,
+    RouterSection,
 )
 
 # ConfigPaths is already imported from .main above
@@ -43,21 +41,19 @@ from .security import (
 # Re-export for backward compatibility
 __all__ = [
     # Main classes
-    "Config",
-    "FlowConfig",
-    "ConfigPaths",
+    "RouterConfig",
     # Main functions
     "get_core_config",
+    "load_config",
+    "reset_core_config",
     "set_core_config",
     # Base utilities
     "get_env",
     "get_bool_env",
-    "DEFAULT_READ_PERMISSION",
-    "DEFAULT_WRITE_PERMISSION",
     # Model configs
     "ModelsConfig",
     "LLMConfig",
-    "RouterConfig",
+    "RouterSection",
     # Provider configs
     "VertexConfig",
     "OpenAIConfig",

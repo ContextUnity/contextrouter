@@ -1,13 +1,9 @@
 """Rate limiter for contextunity.router.
-
 Redis-based sliding window rate limiter for API and agent request throttling.
 Supports per-token, per-tenant, and per-IP limiting.
-
 Exception handling uses contextunity.core.exceptions hierarchy.
-
 Usage:
     from contextunity.router.modules.providers.rate_limiter import RateLimiter
-
     limiter = RateLimiter(redis)
     if not await limiter.is_allowed("user:123", limit=100, window_seconds=60):
         raise RateLimitExceeded("Too many requests")
@@ -16,7 +12,7 @@ Usage:
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import TypedDict
 
 from contextunity.core import get_contextunit_logger
 from contextunity.core.exceptions import ProviderError
@@ -26,12 +22,35 @@ from .redis import RedisProvider
 logger = get_contextunit_logger(__name__)
 
 
+class RateLimitRemaining(TypedDict):
+    limit: int
+    remaining: int
+    reset: int
+
+
+def _zcard_from_pipeline_results(results: list[object]) -> int:
+    """Parse the ``zcard`` slot from a rate-limit pipeline ``execute`` result."""
+    if len(results) < 2:
+        return 0
+    count_obj = results[1]
+    if isinstance(count_obj, int):
+        return count_obj
+    if isinstance(count_obj, float):
+        return int(count_obj)
+    return 0
+
+
 class RateLimitExceeded(ProviderError):
     """Raised when a rate limit is exceeded.
 
     Inherits from ProviderError (contextunity.core.exceptions) since
     rate limiting is a provider-level concern.
     """
+
+    identifier: str
+    limit: int
+    window_seconds: int
+    retry_after: int | None
 
     def __init__(
         self,
@@ -41,6 +60,7 @@ class RateLimitExceeded(ProviderError):
         *,
         retry_after: int | None = None,
     ):
+        """Store throttle context (identifier, limits) and format the error message."""
         self.identifier = identifier
         self.limit = limit
         self.window_seconds = window_seconds
@@ -65,12 +85,16 @@ class RateLimiter:
         key_prefix: Optional prefix for Redis keys.
     """
 
+    _redis: RedisProvider
+    _prefix: str
+
     def __init__(self, redis: RedisProvider, *, key_prefix: str = "rl"):
+        """Bind the underlying Redis provider and key namespace."""
         self._redis = redis
         self._prefix = key_prefix
 
     def _key(self, identifier: str) -> str:
-        """Build Redis key for the given identifier."""
+        """Build redis key for the given identifier."""
         return f"{self._prefix}:{identifier}"
 
     async def is_allowed(
@@ -102,16 +126,16 @@ class RateLimiter:
             pipe = self._redis.pipeline()
 
             # Remove entries outside the window
-            pipe.zremrangebyscore(key, 0, window_start)
+            _ = pipe.zremrangebyscore(key, 0, window_start)
             # Count entries in the window
-            pipe.zcard(key)
+            _ = pipe.zcard(key)
             # Add current request
-            pipe.zadd(key, {str(now): now})
+            _ = pipe.zadd(key, {str(now): now})
             # Set TTL so Redis auto-cleans
-            pipe.expire(key, window_seconds + 1)
+            _ = pipe.expire(key, window_seconds + 1)
 
             results = await pipe.execute()
-            current_count = results[1]  # zcard result
+            current_count = _zcard_from_pipeline_results(results)
 
             if current_count >= limit:
                 logger.warning(
@@ -161,22 +185,18 @@ class RateLimiter:
         identifier: str,
         limit: int,
         window_seconds: int,
-    ) -> dict[str, Any]:
-        """Get remaining quota info (for response headers).
-
-        Returns:
-            Dict with limit, remaining, and reset timestamp.
-        """
+    ) -> RateLimitRemaining:
+        """Return ``{limit, remaining, reset}`` for HTTP rate-limit response headers."""
         key = self._key(identifier)
         now = time.time()
         window_start = now - window_seconds
 
         try:
             pipe = self._redis.pipeline()
-            pipe.zremrangebyscore(key, 0, window_start)
-            pipe.zcard(key)
+            _ = pipe.zremrangebyscore(key, 0, window_start)
+            _ = pipe.zcard(key)
             results = await pipe.execute()
-            current_count = results[1]
+            current_count = _zcard_from_pipeline_results(results)
 
             return {
                 "limit": limit,
@@ -192,4 +212,4 @@ class RateLimiter:
             }
 
 
-__all__ = ["RateLimiter", "RateLimitExceeded"]
+__all__ = ["RateLimiter", "RateLimitExceeded", "RateLimitRemaining"]

@@ -21,13 +21,13 @@ def discover_builtin_commands() -> None:
     package_path = cli_pkg.__path__
     prefix = cli_pkg.__name__ + "."
 
-    for _, modname, ispkg in pkgutil.iter_modules(package_path, prefix):
+    for _, modname, _ispkg in pkgutil.iter_modules(package_path, prefix):
         # Skip app, registry, and this package itself to avoid cycles/noise
         if modname.endswith((".app", ".registry", ".commands", ".__main__")):
             continue
 
         # Importing triggers @register_command at module level
-        importlib.import_module(modname)
+        _ = importlib.import_module(modname)
 
 
 # Trigger discovery on import

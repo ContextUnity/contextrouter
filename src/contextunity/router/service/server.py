@@ -1,4 +1,4 @@
-"""gRPC server for Router Service."""
+"""gRPC server -- async server lifecycle, reflection, and graceful shutdown for Router."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import asyncio
 import grpc
 from contextunity.core import (
     get_contextunit_logger,
-    load_shared_config_from_env,
     router_pb2_grpc,
     setup_logging,
 )
@@ -18,15 +17,14 @@ logger = get_contextunit_logger(__name__)
 
 
 async def serve():
-    """Start the gRPC server for Router Service. Config: .env loaded only via Config.load() (single entry)."""
+    """Start the gRPC server for Router Service."""
     from contextunity.router.core import set_core_config
-    from contextunity.router.core.config import Config
+    from contextunity.router.core.config import get_core_config
 
-    cfg = Config.load()  # Load service .env once
+    cfg = get_core_config()  # Load service config once
     set_core_config(cfg)
 
-    config = load_shared_config_from_env()
-    setup_logging(config=config, service_name="contextunity.router")
+    setup_logging(config=cfg, service_name="contextunity.router")
 
     # Silence chatty third-party loggers
     import logging as _logging
@@ -36,17 +34,17 @@ async def serve():
     # Build interceptor list: security + domain permission checks
     from .interceptors import RouterPermissionInterceptor
 
-    interceptors = []
-    interceptors.append(
+    interceptors: list[grpc.aio.ServerInterceptor] = [
         RouterPermissionInterceptor(
-            shield_url=cfg.router.shield_grpc_host or config.shield_url,
+            shield_url=cfg.shield_url,
+            config=cfg,
         )
-    )
+    ]
 
     server = grpc.aio.server(
         interceptors=interceptors,
         options=(
-            ("grpc.so_reuseport", 1 if config.grpc_reuse_port else 0),
+            ("grpc.so_reuseport", 1 if cfg.grpc_reuse_port else 0),
             ("grpc.max_send_message_length", 50 * 1024 * 1024),
             ("grpc.max_receive_message_length", 50 * 1024 * 1024),
         ),
@@ -57,7 +55,7 @@ async def serve():
     router_pb2_grpc.add_RouterServiceServicer_to_server(dispatcher, server)
     logger.info("Dispatcher Service registered")
 
-    port = cfg.router.port
+    port = cfg.port
 
     from contextunity.core.grpc_utils import graceful_shutdown, start_grpc_server
 
@@ -65,8 +63,11 @@ async def serve():
         server,
         "router",
         port,
+        host=cfg.host,
         instance_name=cfg.router.instance_name,
         tenants=cfg.router.tenants,
+        redis_url=cfg.redis.url,
+        config=cfg,
     )
 
     # Restore persisted project registrations from Redis
@@ -84,5 +85,5 @@ async def serve():
 
 
 if __name__ == "__main__":
-    # .env loaded in Config.load() when router runs; no load_dotenv here (single config entry)
+    # .env loaded in load_service_config() when router runs; no load_dotenv here
     asyncio.run(serve())

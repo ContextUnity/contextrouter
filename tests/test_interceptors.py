@@ -11,33 +11,31 @@ Key tests:
 from __future__ import annotations
 
 import contextunity.core.router_pb2 as router_pb2
+
+# ── RPC Permission Map ──────────────────────────────────────────
+import pytest
 from contextunity.core.permissions import Permissions
 
 from contextunity.router.service.interceptors import (
     RPC_PERMISSION_MAP,
-    RouterPermissionInterceptor,
 )
-
-# ── RPC Permission Map ──────────────────────────────────────────
 
 
 class TestRPCPermissionMap:
     """Verify all Router RPCs are mapped to correct permissions."""
 
-    def test_execute_agent_mapped(self):
-        assert RPC_PERMISSION_MAP["ExecuteAgent"] == Permissions.ROUTER_EXECUTE
-
-    def test_stream_agent_mapped(self):
-        assert RPC_PERMISSION_MAP["StreamAgent"] == Permissions.ROUTER_EXECUTE
-
-    def test_execute_dispatcher_mapped(self):
-        assert RPC_PERMISSION_MAP["ExecuteDispatcher"] == Permissions.ROUTER_EXECUTE
-
-    def test_stream_dispatcher_mapped(self):
-        assert RPC_PERMISSION_MAP["StreamDispatcher"] == Permissions.ROUTER_EXECUTE
-
-    def test_tool_executor_stream_mapped(self):
-        assert RPC_PERMISSION_MAP["ToolExecutorStream"] == Permissions.TOOLS_REGISTER
+    @pytest.mark.parametrize(
+        ("rpc", "expected"),
+        [
+            ("ExecuteAgent", Permissions.ROUTER_EXECUTE),
+            ("StreamAgent", Permissions.ROUTER_EXECUTE),
+            ("ExecuteDispatcher", Permissions.ROUTER_EXECUTE),
+            ("StreamDispatcher", Permissions.ROUTER_EXECUTE),
+            ("ToolExecutorStream", ""),
+        ],
+    )
+    def test_rpc_mapped_to_permission(self, rpc, expected):
+        assert RPC_PERMISSION_MAP[rpc] == expected
 
     def test_all_rpcs_covered(self):
         """Every Router RPC must be in the map."""
@@ -46,6 +44,8 @@ class TestRPCPermissionMap:
             "StreamAgent",
             "ExecuteDispatcher",
             "StreamDispatcher",
+            "ExecuteNode",
+            "IntrospectRegistrations",
             "RegisterManifest",
             "ToolExecutorStream",
         }
@@ -60,12 +60,12 @@ class TestRPCPermissionMap:
                 f"{rpc} should require invoke/execute, got {perm}"
             )
 
-    def test_registration_rpcs_require_register(self):
-        """Registration RPCs should require register permission."""
+    def test_registration_rpcs_are_identity_only(self):
+        """Registration RPCs should be identity-only (handler-managed auth)."""
         reg_rpcs = ["RegisterManifest", "ToolExecutorStream"]
         for rpc in reg_rpcs:
             perm = RPC_PERMISSION_MAP[rpc]
-            assert ":register" in perm, f"{rpc} should require register, got {perm}"
+            assert perm == "", f"{rpc} should be identity-only (''), got {perm!r}"
 
 
 # ── Proto-driven coverage ────────────────────────────────────────
@@ -123,15 +123,3 @@ class TestProtoPermissionCoverage:
 
 
 # ── Interceptor ─────────────────────────────────────────────────
-
-
-class TestRouterPermissionInterceptor:
-    """Test interceptor construction."""
-
-    def test_service_name(self):
-        interceptor = RouterPermissionInterceptor()
-        assert interceptor._service_name == "Router"
-
-    def test_rpc_map_set(self):
-        interceptor = RouterPermissionInterceptor()
-        assert interceptor._rpc_map == RPC_PERMISSION_MAP

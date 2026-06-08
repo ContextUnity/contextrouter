@@ -1,0 +1,211 @@
+# Universal Retrieval Graph Template v1.0
+#
+# Merges semantic vector retrieval and exact SQL analytics into a single
+# pluggable graph architecture. Uses data_sources to route intents.
+
+name: retrieval_augmented
+version: "1.0"
+description: >
+  Universal memory-augmented generation pipeline with pluggable data sources.
+  Routes between semantic vector retrieval and exact SQL analytics.
+
+defaults:
+  model: openai/gpt-4o
+  temperature: 0.2
+  max_tokens: 8192
+
+config:
+  max_retries: 2
+  timeout: 120
+
+  # Default: no external data sources. Projects inject via manifest config.
+  data_sources: []
+
+  pipeline:
+    memory: false
+    reflection: true
+    verification: true
+    visualization: true
+    suggestions: true
+
+nodes:
+  # Base Shared Nodes
+  - name: extract_query
+    type: tool
+    tool_binding: router_extract_query
+    config:
+      output_mode: direct
+
+  - name: detect_intent
+    type: tool
+    tool_binding: router_detect_intent
+    config:
+      output_mode: direct
+
+  # Vector RAG Path
+  - name: retrieve
+    type: tool
+    tool_binding: router_retrieve
+    config:
+      output_mode: direct
+      tool_config:
+        top_k: 10
+        rerank: true
+
+  - name: ground
+    type: tool
+    tool_binding: router_ground
+    config:
+      output_mode: direct
+
+  - name: generate
+    type: tool
+    tool_binding: router_generate
+    config:
+      output_mode: direct
+
+  - name: suggest
+    type: tool
+    tool_binding: router_suggest
+    config:
+      output_mode: direct
+
+  # SQL Path
+  - name: plan
+    type: tool
+    tool_binding: router_sql_plan
+    config:
+      output_mode: direct
+      tool_config:
+        max_retries: 2
+        pii_masking: false
+
+  - name: execute_sql
+    type: tool
+    tool_binding: router_sql_execute
+    config:
+      output_mode: direct
+      tool_config:
+        timeout_seconds: 120
+        max_rows: 1000
+
+  - name: verify
+    type: tool
+    tool_binding: router_sql_verify
+    config:
+      output_mode: direct
+      tool_config:
+        strict_mode: true
+
+  - name: visualize
+    type: tool
+    tool_binding: router_sql_visualizer
+    config:
+      output_mode: direct
+      tool_config:
+        default_format: table
+        max_chart_points: 100
+
+  # Shared Terminals
+  - name: reflect
+    type: tool
+    tool_binding: router_reflect
+    config:
+      output_mode: direct
+
+  - name: format_output
+    type: tool
+    tool_binding: router_format_output
+    config:
+      output_mode: direct
+      tool_config:
+        default_format: auto
+        max_table_rows: 50
+        include_citations: true
+
+  - name: web_search
+    type: tool
+    tool_binding: router_web_search
+    config:
+      output_mode: direct
+
+  - name: synthesizer
+    type: tool
+    tool_binding: router_synthesize_results
+    config:
+      output_mode: direct
+
+  - name: no_results
+    type: tool
+    tool_binding: router_no_results
+    config:
+      output_mode: direct
+
+edges:
+  - from_node: __start__
+    to_node: extract_query
+
+  - from_node: extract_query
+    to_node: detect_intent
+
+  # Intent Router
+  - from_node: detect_intent
+    condition_key: intent_route
+    condition_map:
+      vector: retrieve     # Used by the fan-out compiler logic
+      sql: plan            # Used by the fan-out compiler logic
+      web: web_search      # Used by the fan-out compiler logic
+      retrieve: retrieve
+      ground: ground
+      skip_retrieve: generate
+      no_results: no_results
+      sql_analytics: plan      # Routes to SQL path
+
+  # Vector Sub-graph
+  - from_node: retrieve
+    to_node: suggest
+  - from_node: retrieve
+    to_node: generate
+  - from_node: ground
+    to_node: reflect
+  - from_node: suggest
+    to_node: reflect
+  - from_node: generate
+    to_node: reflect
+
+  # SQL Sub-graph
+  - from_node: plan
+    condition_key: plan_route
+    condition_map:
+      execute: execute_sql
+      error: reflect           # Fallback on parse failure
+  - from_node: execute_sql
+    condition_key: execute_route
+    condition_map:
+      verify: verify
+      retry: plan
+      error: reflect           # Fallback on exec failure
+  - from_node: verify
+    condition_key: verify_route
+    condition_map:
+      visualize: visualize
+      retry: plan
+  - from_node: visualize
+    to_node: reflect                # Combine output with reflect for final polish
+
+  # Terminals
+  - from_node: no_results
+    to_node: __end__
+  - from_node: web_search
+    condition_key: web_route
+    condition_map:
+      synthesize: synthesizer
+      reflect: reflect
+      format: format_output
+      generate: generate
+  - from_node: synthesizer
+    to_node: reflect
+  - from_node: reflect
+    to_node: format_output
+  - from_node: format_output
+    to_node: __end__

@@ -11,8 +11,10 @@ Core (`contextunity.router.core`) should not contain these settings.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any, Literal
+from typing import ClassVar, Literal
 
+from contextunity.core.exceptions import ConfigurationError
+from contextunity.core.types import JsonValue, is_object_dict
 from pydantic import BaseModel, ConfigDict, Field
 
 from contextunity.router.core import get_core_config, get_env
@@ -26,7 +28,7 @@ RagDataset = Literal["blue", "green"]
 class RagRetrievalSettings(BaseModel):
     """RAG retrieval and citation settings (UI-facing knobs)."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     # Per-source retrieval (used when general_retrieval_enabled=False)
     max_books: int = 10
@@ -94,7 +96,7 @@ class RagRetrievalSettings(BaseModel):
         data = self.model_dump()
         locked = set(self.env_locked)
 
-        def _set(key: str, val: Any) -> None:
+        def _set(key: str, val: JsonValue) -> None:
             if key in locked:
                 return
             data[key] = val
@@ -155,31 +157,34 @@ def resolve_data_store_id(rag_db_name: str | None = None) -> str:
     - actual datastore id -> returned as-is
     """
     cfg = get_core_config()
-    rag_cfg = getattr(cfg, "rag", None)
-    if isinstance(rag_cfg, dict):
-        cfg_db_name = str(rag_cfg.get("db_name") or "").strip()
-        cfg_blue = str(rag_cfg.get("data_store_id_blue") or "").strip()
-        cfg_green = str(rag_cfg.get("data_store_id_green") or "").strip()
+    rag_cfg_raw = getattr(cfg, "rag", None)
+    if is_object_dict(rag_cfg_raw):
+        db_name_raw = rag_cfg_raw.get("db_name")
+        blue_raw = rag_cfg_raw.get("data_store_id_blue")
+        green_raw = rag_cfg_raw.get("data_store_id_green")
+        cfg_db_name = str(db_name_raw).strip() if isinstance(db_name_raw, str) else ""
+        cfg_blue = str(blue_raw).strip() if isinstance(blue_raw, str) else ""
+        cfg_green = str(green_raw).strip() if isinstance(green_raw, str) else ""
     else:
-        cfg_db_name = str(getattr(rag_cfg, "db_name", "") or "").strip()
-        cfg_blue = str(getattr(rag_cfg, "data_store_id_blue", "") or "").strip()
-        cfg_green = str(getattr(rag_cfg, "data_store_id_green", "") or "").strip()
+        cfg_db_name = str(getattr(rag_cfg_raw, "db_name", "") or "").strip()
+        cfg_blue = str(getattr(rag_cfg_raw, "data_store_id_blue", "") or "").strip()
+        cfg_green = str(getattr(rag_cfg_raw, "data_store_id_green", "") or "").strip()
 
     # Prefer explicit arg, then environment (host app style), then core config.
     raw = (rag_db_name or _get_env_or_none("RAG_DB_NAME") or cfg_db_name or "").strip()
     if not raw:
-        raise ValueError("RAG datastore name (e.g. RAG_DB_NAME) is required")
+        raise ConfigurationError("RAG datastore name (e.g. RAG_DB_NAME) is required")
 
     name = raw.lower()
     if name == "blue":
         resolved = (_get_env_or_none("DATA_STORE_ID_BLUE") or cfg_blue).strip()
         if not resolved:
-            raise ValueError("RAG datastore is 'blue' but DATA_STORE_ID_BLUE is not set")
+            raise ConfigurationError("RAG datastore is 'blue' but DATA_STORE_ID_BLUE is not set")
         return resolved
     if name == "green":
         resolved = (_get_env_or_none("DATA_STORE_ID_GREEN") or cfg_green).strip()
         if not resolved:
-            raise ValueError("RAG datastore is 'green' but DATA_STORE_ID_GREEN is not set")
+            raise ConfigurationError("RAG datastore is 'green' but DATA_STORE_ID_GREEN is not set")
         return resolved
     return raw
 
@@ -187,7 +192,7 @@ def resolve_data_store_id(rag_db_name: str | None = None) -> str:
 def get_effective_data_store_id(*, runtime: RuntimeRagSettings | None = None) -> str:
     """Resolve datastore id using runtime override when provided."""
     rt = runtime if runtime is not None else get_runtime_settings()
-    ds = rt.get("rag_dataset") if isinstance(rt, dict) else None
+    ds = rt.get("rag_dataset")
     if isinstance(ds, str) and ds.strip().lower() in {"blue", "green"}:
         return resolve_data_store_id(ds.strip().lower())
     return resolve_data_store_id()
@@ -368,7 +373,7 @@ def get_rag_retrieval_settings(
     cfg.env_locked = locked
 
     rt = runtime if runtime is not None else get_runtime_settings()
-    return cfg.apply_runtime_overrides(rt if isinstance(rt, dict) else {})
+    return cfg.apply_runtime_overrides(rt if rt else {})
 
 
 __all__ = [

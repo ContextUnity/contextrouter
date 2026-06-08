@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any
+from typing import override
 
+from contextunity.brain.ingestion.rag.config import get_assets_paths, load_config
+from contextunity.brain.ingestion.rag.graph.builder import ALLOWED_RELATION_LABELS
+from contextunity.brain.ingestion.rag.settings import RagIngestionConfig
 from contextunity.core import get_contextunit_logger
-from contextunity.router.modules.ingestion.rag.config import get_assets_paths, load_config
-from contextunity.router.modules.ingestion.rag.graph.builder import ALLOWED_RELATION_LABELS
-from contextunity.router.modules.ingestion.rag.settings import RagIngestionConfig
+from contextunity.core.parsing import json_dumps
+from contextunity.core.sdk.payload import get_bool
 
 from contextunity.router.core import BaseTransformer, ContextUnit
+from contextunity.router.modules.transformers._ingestion_helpers import (
+    payload_metadata,
+    resolve_rag_ingestion_config,
+)
 
 logger = get_contextunit_logger(__name__)
-
 
 _DEFAULT_ENTITY_TYPES: list[str] = [
     "Concept",
@@ -27,7 +31,12 @@ _DEFAULT_ENTITY_TYPES: list[str] = [
 
 
 def build_ontology_from_taxonomy(*, config: RagIngestionConfig, overwrite: bool = True) -> Path:
-    """Build ontology.json, derived from the project’s current relation label whitelist."""
+    """Generate ``ontology.json`` containing entity type and relation label whitelists
+    derived from the graph builder's ``ALLOWED_RELATION_LABELS``.
+
+    Skips writing if the file already exists and *overwrite* is ``False``.
+    Returns the output path.
+    """
     paths = get_assets_paths(config)
     taxonomy_path = paths["taxonomy"]
     ontology_path = paths["ontology"]
@@ -75,7 +84,7 @@ def build_ontology_from_taxonomy(*, config: RagIngestionConfig, overwrite: bool 
     }
 
     ontology_path.parent.mkdir(parents=True, exist_ok=True)
-    ontology_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    _ = ontology_path.write_text(json_dumps(payload, ensure_ascii=False), encoding="utf-8")
     logger.info("ontology: wrote %s", ontology_path)
     return ontology_path
 
@@ -83,13 +92,16 @@ def build_ontology_from_taxonomy(*, config: RagIngestionConfig, overwrite: bool 
 class OntologyTransformer(BaseTransformer):
     """Ingestion stage transformer: taxonomy.json -> ontology.json."""
 
-    name = "ingestion.ontology"
+    name: str = "ingestion.ontology"
 
     def __init__(self) -> None:
+        """Initialize the ``RagIngestionConfig`` slot — populated later via ``configure()``."""
         super().__init__()
         self._config: RagIngestionConfig | None = None
 
-    def configure(self, params: dict[str, Any] | None) -> None:
+    @override
+    def configure(self, params: dict[str, object] | None) -> None:
+        """Extract ``RagIngestionConfig`` from *params* for later use in ``transform``."""
         super().configure(params)
         cfg = (params or {}).get("config")
         if isinstance(cfg, RagIngestionConfig):
@@ -99,33 +111,23 @@ class OntologyTransformer(BaseTransformer):
         else:
             self._config = None
 
+    @override
     async def transform(self, unit: ContextUnit) -> ContextUnit:
+        """Resolve ingestion config (payload → metadata → self._config → default),
+        run ``build_ontology_from_taxonomy``, and store the output path in ``metadata.ontology_path``.
+        """
         unit.provenance.append(self.name)
 
-        payload = unit.payload or {}
-        if not isinstance(payload, dict):
-            payload = {}
-        metadata = payload.get("metadata", {}) if isinstance(payload.get("metadata"), dict) else {}
+        payload, metadata = payload_metadata(unit.payload)
 
-        cfg = None
-        if isinstance(payload.get("content"), RagIngestionConfig):
-            cfg = payload.get("content")
-        elif isinstance(payload.get("content"), dict):
-            cfg = RagIngestionConfig.model_validate(payload.get("content"))
-        elif isinstance(metadata.get("ingestion_config"), RagIngestionConfig):
-            cfg = metadata["ingestion_config"]
-        elif isinstance(metadata.get("ingestion_config"), dict):
-            cfg = RagIngestionConfig.model_validate(metadata["ingestion_config"])
-        elif isinstance(metadata.get("config"), RagIngestionConfig):
-            cfg = metadata["config"]
-        elif isinstance(metadata.get("config"), dict):
-            cfg = RagIngestionConfig.model_validate(metadata["config"])
-        if cfg is None and self._config is not None:
-            cfg = self._config
-        if cfg is None:
-            cfg = load_config()
+        cfg = resolve_rag_ingestion_config(
+            payload,
+            metadata,
+            configured=self._config,
+            default_loader=load_config,
+        )
 
-        overwrite = bool(metadata.get("overwrite", self.params.get("overwrite", True)))
+        overwrite = get_bool(metadata, "overwrite", bool(self.params.get("overwrite", True)))
         out = build_ontology_from_taxonomy(config=cfg, overwrite=overwrite)
         metadata["ontology_path"] = str(out)
         payload["metadata"] = metadata

@@ -9,7 +9,11 @@
 from __future__ import annotations
 
 import importlib
-from typing import Any
+from types import ModuleType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from . import connectors, models, observability, providers, retrieval, transformers
 
 __all__ = [
     "connectors",
@@ -21,7 +25,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str) -> ModuleType:
     """Lazy submodule exports.
 
     Keep `import contextunity.router.modules` lightweight and avoid import-time side

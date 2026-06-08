@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import List
 
 from pydantic import BaseModel, Field
 
@@ -17,9 +16,11 @@ class TaxonomyPath(BaseModel):
 
 
 class GraphNode(BaseModel):
+    """A knowledge-graph node (concept or source chunk) with optional embedding."""
+
     id: str
     content: str
-    embedding: List[float] | None = None
+    embedding: list[float] | None = None
     node_kind: str = "concept"  # 'chunk' | 'concept'
     source_type: str | None = None  # video/book/qa/web/knowledge for chunks
     source_id: str | None = None
@@ -32,6 +33,8 @@ class GraphNode(BaseModel):
 
 
 class GraphEdge(BaseModel):
+    """Weighted, typed relationship between two ``GraphNode`` IDs."""
+
     source_id: str
     target_id: str
     relation: str  # e.g., supports/contradicts/requires_action/relates_to
@@ -41,45 +44,49 @@ class GraphEdge(BaseModel):
 
 
 class SearchResult(BaseModel):
+    """A ranked search hit: the matched node with its fused + per-channel scores."""
+
     node: GraphNode
     score: float
     vector_score: float | None = None
     text_score: float | None = None
-    connected_nodes: List[GraphNode] = Field(default_factory=list)
+    connected_nodes: list[GraphNode] = Field(default_factory=list)
 
 
 class KnowledgeStoreInterface(ABC):
+    """Abstract backend for storing and querying a knowledge graph."""
+
     @abstractmethod
     async def upsert_graph(
         self,
-        nodes: List[GraphNode],
-        edges: List[GraphEdge],
+        nodes: list[GraphNode],
+        edges: list[GraphEdge],
         *,
         tenant_id: str,
         user_id: str | None = None,
     ) -> None:
-        """Store nodes+edges transactionally."""
+        """Store nodes and edges transactionally (upsert semantics)."""
 
     @abstractmethod
     async def hybrid_search(
         self,
         *,
         query_text: str,
-        query_vec: List[float],
+        query_vec: list[float],
         candidate_k: int = 50,
         limit: int = 8,
         scope: TaxonomyPath | None = None,
-        source_types: List[str] | None = None,
+        source_types: list[str] | None = None,
         graph_depth: int = 2,
-        allowed_relations: List[str] | None = None,
+        allowed_relations: list[str] | None = None,
         fusion: str = "weighted",
         rrf_k: int = 60,
         vector_weight: float = 0.8,
         text_weight: float = 0.2,
         tenant_id: str,
         user_id: str | None = None,
-    ) -> List[SearchResult]:
-        """Hybrid search + optional graph enrichment."""
+    ) -> list[SearchResult]:
+        """Run hybrid vector + keyword search with optional graph-walk enrichment."""
 
 
 __all__ = [

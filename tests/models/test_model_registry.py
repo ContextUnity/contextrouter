@@ -4,8 +4,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from contextunity.router.core.config import Config
-from contextunity.router.modules.models.base import BaseModel
+from contextunity.router.core.config import RouterConfig
+from contextunity.router.core.exceptions import RouterRegistryError
+from contextunity.router.modules.models.base import BaseLLM
 from contextunity.router.modules.models.registry import ModelRegistry
 from contextunity.router.modules.models.types import (
     FinalTextEvent,
@@ -18,7 +19,7 @@ from contextunity.router.modules.models.types import (
 )
 
 
-class MockProvider(BaseModel):
+class MockProvider(BaseLLM):
     """Mock model provider for testing."""
 
     def __init__(
@@ -28,6 +29,7 @@ class MockProvider(BaseModel):
         supports_image: bool = False,
         supports_audio: bool = False,
     ):
+        super().__init__(provider="mock", model_name=name)
         self.name = name
         self._capabilities = ModelCapabilities(
             supports_text=supports_text,
@@ -35,11 +37,7 @@ class MockProvider(BaseModel):
             supports_audio=supports_audio,
         )
 
-    @property
-    def capabilities(self) -> ModelCapabilities:
-        return self._capabilities
-
-    async def generate(self, request: ModelRequest, *, token=None) -> ModelResponse:
+    async def _generate(self, request: ModelRequest) -> ModelResponse:
         return ModelResponse(
             text=f"Response from {self.name}",
             raw_provider=ProviderInfo(
@@ -47,7 +45,7 @@ class MockProvider(BaseModel):
             ),
         )
 
-    async def stream(self, request: ModelRequest, *, token=None):
+    async def _stream(self, request: ModelRequest):
         yield TextDeltaEvent(delta=f"Chunk from {self.name}")
         yield FinalTextEvent(text=f"Chunk from {self.name}")
 
@@ -66,7 +64,7 @@ class TestModelRegistry:
     @pytest.fixture
     def mock_config(self):
         """Create a mock config for testing."""
-        config = MagicMock(spec=Config)
+        config = MagicMock(spec=RouterConfig)
         # Mock the nested config attributes
         config.llm = MagicMock()
         config.llm.max_retries = 3
@@ -110,7 +108,7 @@ class TestModelRegistry:
 
     def test_invalid_key_format(self, registry, mock_config):
         """Test that invalid keys raise ValueError."""
-        with pytest.raises(ValueError):
+        with pytest.raises(RouterRegistryError):
             registry.create_llm("no-slash", config=mock_config)
 
     def test_unregistered_provider(self, registry, mock_config):

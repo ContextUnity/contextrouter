@@ -1,0 +1,62 @@
+# Gardener Graph Template v1.0
+#
+# Product normalization pipeline: fetch → deterministic pass → LLM classify → write.
+# Uses router_classify for taxonomy classification.
+#
+# Interconnection Boundary (Commerce Plan Phase 2-3):
+#   When commerce migrates to manifest, gardener/normalize delegates
+#   its LLM call to router_classify. Federated tools (export_products,
+#   run_deterministic_pass, update_normalized) execute on the consumer side.
+
+name: gardener
+version: "1.0"
+description: >
+  Product normalization pipeline with deterministic + LLM two-pass classification.
+  Composes router_classify with federated domain tools.
+
+defaults:
+  model: openai/gpt-4o
+
+nodes:
+  - name: fetch_products
+    type: tool
+    tool_binding: federated:export_products_for_normalization
+    config:
+      output_mode: direct
+
+  - name: deterministic_pass
+    type: tool
+    tool_binding: federated:run_deterministic_pass
+    config:
+      output_mode: direct
+
+  - name: classify
+    type: tool
+    tool_binding: router_classify
+    config:
+      output_mode: direct
+      tool_config:
+        taxonomy_key: taxonomy
+        response_format: json
+
+  - name: write_results
+    type: tool
+    tool_binding: federated:update_normalized_products
+    config:
+      output_mode: direct
+
+edges:
+  - from_node: __start__
+    to_node: fetch_products
+  - from_node: fetch_products
+    to_node: deterministic_pass
+  - from_node: deterministic_pass
+    to_node: classify
+  - from_node: classify
+    to_node: write_results
+  - from_node: write_results
+    to_node: __end__
+
+config:
+  max_retries: 0
+  timeout: 300

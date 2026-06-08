@@ -1,4 +1,4 @@
-"""Reranker factory."""
+"""Reranker factory -- selects and instantiates the configured reranker backend (Vertex, none)."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from .vertex import VertexReranker
 
 
 def get_reranker(*, cfg: RagRetrievalSettings, provider: str) -> BaseReranker:
+    """Instantiate the reranker backend selected by *cfg*; fall back to ``NoopReranker`` when disabled or unknown."""
     if not cfg.reranking_enabled:
         return NoopReranker()
 

@@ -1,15 +1,18 @@
 """Postgres provider (storage + retrieval).
-
 Uses ContextUnit protocol for data transport.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import override
 
-from contextunity.core import ContextToken, ContextUnit
+from contextunity.core import ContextUnit
+from contextunity.core.exceptions import ConfigurationError
+from contextunity.core.sdk.payload import get_optional_str, get_str
+from contextunity.core.types import JsonDict, JsonValue
 
 from contextunity.router.core import get_core_config
+from contextunity.router.core.exceptions import RouterStorageError
 from contextunity.router.core.interfaces import BaseProvider, IRead, IWrite
 from contextunity.router.core.types import coerce_struct_data
 from contextunity.router.modules.models import model_registry
@@ -20,7 +23,8 @@ from .models import GraphNode
 from .store import PostgresKnowledgeStore
 
 
-def _flatten_keywords(metadata: dict[str, Any]) -> str | None:
+def _flatten_keywords(metadata: JsonDict) -> str | None:
+    """Merge ``keywords`` and ``keyphrase_texts`` from metadata into a single deduplicated string."""
     keywords = metadata.get("keywords")
     keyphrases = metadata.get("keyphrase_texts")
     parts: list[str] = []
@@ -44,34 +48,47 @@ def _flatten_keywords(metadata: dict[str, Any]) -> str | None:
 
 
 class PostgresProvider(BaseProvider, IRead, IWrite):
+    """ContextUnit facade over ``PostgresKnowledgeStore`` for hybrid search and ingestion."""
+
+    _store: PostgresKnowledgeStore
+
     def __init__(self, *, store: PostgresKnowledgeStore | None = None) -> None:
+        """Accept an existing store or create one from ``RouterConfig.postgres``."""
         cfg = get_core_config()
         if store is not None:
             self._store = store
         else:
             if not getattr(cfg, "postgres", None):
-                raise RuntimeError("Postgres config is missing from core config")
+                raise ConfigurationError("Postgres config is missing from core config")
             self._store = PostgresKnowledgeStore(
                 dsn=cfg.postgres.dsn,
                 pool_min_size=cfg.postgres.pool_min_size,
                 pool_max_size=cfg.postgres.pool_max_size,
             )
 
+    @override
     async def read(
         self,
         query: str,
         *,
         limit: int = 5,
-        filters: dict[str, Any] | None = None,
-        token: ContextToken,
+        filters: JsonDict | None = None,
     ) -> list[ContextUnit]:
+        """Read."""
         cfg = get_core_config()
         rag_cfg = get_rag_retrieval_settings()
 
-        tenant_id = (filters or {}).get("tenant_id")
-        user_id = (filters or {}).get("user_id")
-        if not tenant_id:
-            raise PermissionError("tenant_id is required for Postgres retrieval")
+        tenant_raw = (filters or {}).get("tenant_id")
+        if not isinstance(tenant_raw, str) or not tenant_raw.strip():
+            from contextunity.core.exceptions import SecurityError
+
+            raise SecurityError("tenant_id is required for Postgres retrieval")
+        tenant_id = tenant_raw
+
+        user_id: str | None = None
+        user_raw = (filters or {}).get("user_id")
+        if isinstance(user_raw, str) and user_raw.strip():
+            user_id = user_raw
 
         source_types: list[str] | None = None
         if filters and (st := filters.get("source_type")):
@@ -79,7 +96,7 @@ class PostgresProvider(BaseProvider, IRead, IWrite):
 
         embeddings_key = rag_cfg.embeddings_model or cfg.models.default_embeddings
         embedder = model_registry.get_embeddings(embeddings_key, config=cfg)
-        query_vec = await embedder.embed_query(query, token=token)
+        query_vec = await embedder.embed_query(query)
 
         candidate_k = max(rag_cfg.candidate_k, int(limit))
         results = await self._store.hybrid_search(
@@ -93,8 +110,8 @@ class PostgresProvider(BaseProvider, IRead, IWrite):
             rrf_k=rag_cfg.rrf_k,
             vector_weight=rag_cfg.hybrid_vector_weight,
             text_weight=rag_cfg.hybrid_text_weight,
-            tenant_id=str(tenant_id),
-            user_id=str(user_id) if user_id else None,
+            tenant_id=tenant_id,
+            user_id=user_id,
         )
         units: list[ContextUnit] = []
         for res in results:
@@ -106,7 +123,14 @@ class PostgresProvider(BaseProvider, IRead, IWrite):
             units.append(unit)
         return units
 
-    async def write(self, data: ContextUnit, *, token: ContextToken) -> None:
+    @override
+    async def write(self, data: ContextUnit) -> None:
+        """Upsert a ``RetrievedDoc`` (from ``payload.content``) as a graph node.
+
+        Raises:
+            SecurityError: If ``tenant_id`` is missing from the payload.
+            ValueError: If the payload content is not a ``RetrievedDoc``.
+        """
         payload = data.payload or {}
         content = payload.get("content")
 
@@ -115,16 +139,20 @@ class PostgresProvider(BaseProvider, IRead, IWrite):
         elif isinstance(content, dict):
             doc = RetrievedDoc.model_validate(content)
         else:
-            raise ValueError("PostgresProvider.write expects RetrievedDoc content in payload")
+            raise RouterStorageError(
+                "PostgresProvider.write expects RetrievedDoc content in payload"
+            )
 
-        tenant_id = payload.get("tenant_id")
+        tenant_id = get_str(payload, "tenant_id")
         if not tenant_id:
-            raise PermissionError("tenant_id is required for Postgres write")
-        user_id = payload.get("user_id")
+            from contextunity.core.exceptions import SecurityError
+
+            raise SecurityError("tenant_id is required for Postgres write")
+        user_id = get_optional_str(payload, "user_id")
 
         node_id = str(payload.get("id", "")).strip()
         if not node_id:
-            raise ValueError("PostgresProvider.write requires payload.id")
+            raise RouterStorageError("PostgresProvider.write requires payload.id")
         metadata = coerce_struct_data(doc.metadata or {})
         if not isinstance(metadata, dict):
             metadata = {}
@@ -143,15 +171,18 @@ class PostgresProvider(BaseProvider, IRead, IWrite):
         )
         await self._store.upsert_graph([node], [], tenant_id=str(tenant_id), user_id=user_id)
 
-    async def sink(self, unit: ContextUnit, *, token: ContextToken) -> Any:
-        await self.write(unit, token=token)
+    @override
+    async def sink(self, unit: ContextUnit) -> None:
+        """Sink."""
+        await self.write(unit)
         return None
 
     def _to_retrieved_doc(self, node: GraphNode, *, score: float) -> RetrievedDoc:
+        """Map a ``GraphNode`` and its search score to a ``RetrievedDoc``, extracting known fields from metadata."""
         metadata = coerce_struct_data(node.metadata or {})
         if not isinstance(metadata, dict):
             metadata = {}
-        doc_data = {
+        doc_data: dict[str, JsonValue] = {
             "source_type": node.source_type or "unknown",
             "content": node.content,
             "title": node.title,
@@ -181,7 +212,11 @@ class PostgresProvider(BaseProvider, IRead, IWrite):
             "description",
         ):
             if key in metadata:
-                doc_data[key] = metadata[key]
+                value = metadata[key]
+                if isinstance(value, (str, int, float, bool)) or value is None:
+                    doc_data[key] = value
+                elif isinstance(value, list):
+                    doc_data[key] = [str(v) for v in value]
         return RetrievedDoc.model_validate(doc_data)
 
 

@@ -1,6 +1,6 @@
 # Models (Multimodal LLMs + Embeddings)
 
-This package defines the **multimodal model registry contract** used by the cortex and other modules. The interface supports text, image, and audio inputs with **strict capability-based fallback**.
+This package defines the **multimodal model registry contract** used by the cortex and other modules. The interface supports text, image, and audio inputs with **strict capability-based fallback**, automatic retry with backoff, and per-node cost budgeting.
 
 ## Multimodal Interface
 
@@ -65,6 +65,68 @@ model = model_registry.get_llm_with_fallback(
 - **`cost-priority`**: same mechanics as `fallback`; you must order your `fallback` list cheapest → most expensive.
 
 **Streaming rule:** streaming always behaves like **sequential fallback** — we never switch providers mid-stream.
+
+## Type Hierarchy
+
+```
+BaseModel (Identity: provider, model_name, model_key, _provider_info)
+├── BaseLLM (Text generation: generate(), stream(), retry loop)
+│   ├── OpenAILLM, AnthropicLLM, VertexLLM, GroqLLM, ...
+│   └── FallbackModel (orchestrator: budget_usd, candidate sequencing)
+└── BaseEmbeddings (Vector: embed_text(), embed_batch())
+```
+
+- **`BaseModel`** — identity (provider, model_name, model_key, _provider_info)
+- **`BaseLLM`** — text generation with retry loop, cost estimation, ProviderInfo auto-attach
+- **`FallbackModel`** — orchestrates candidate sequencing + cumulative budget_usd tracking
+
+## Retry & Cost Governance
+
+### Three-tier retry hierarchy
+
+```yaml
+policy:
+  models:
+    retry:                    # Tier 1: Global defaults
+      max_attempts: 2
+      backoff: exponential
+      timeout_sec: 30
+    llm:
+      retry:                  # Tier 2: Per-type override
+        retry_on: [rate_limit, timeout, network, response_format]
+
+# Per-node (Tier 3: highest priority):
+nodes:
+  - name: planner
+    config:
+      retry:
+        max_attempts: 3
+        retry_on: [rate_limit, timeout, network, response_format]
+```
+
+### Error taxonomy
+
+| Error | Retryable | Fallbackable | Trigger |
+|-------|-----------|--------------|------|
+| `ConnectionError` / 5xx | ✅ | ✅ | `network` |
+| `ModelTimeoutError` | ✅ | ✅ | `timeout` |
+| `ModelRateLimitError` | ✅ | ✅ | `rate_limit` |
+| `ModelResponseFormatError` | ✅ (opt-in) | ✅ | `response_format` |
+| `ModelQuotaExhaustedError` | ❌ | ✅ | — |
+| `ModelBudgetExceededError` | ❌ | ❌ (hard stop) | — |
+
+### Per-node cost budget
+
+`budget_usd` in `ModelsPolicy` caps total cost across all model candidates (primary + fallbacks + retries). When exceeded → `ModelBudgetExceededError` (hard stop, no fallback).
+
+```yaml
+policy:
+  models:
+    budget_usd: 0.50
+    llm:
+      default: openai/gpt-5-mini
+      fallback: [vertex/gemini-2.5-flash]
+```
 
 ## Providers
 
@@ -242,14 +304,19 @@ API keys are **never stored in config**, only via environment:
 
 ### Adding New Providers
 
-1. Implement `BaseModel` subclass with proper `capabilities`
-2. Register with `@model_registry.register_llm("provider", "name")`
-3. Add optional dependencies to `pyproject.toml`
-4. Update this README
+1. Subclass `BaseLLM` with proper `_generate()` and `_stream()` implementations
+2. Call `super().__init__(provider="newprovider", model_name=name)` — auto-wires identity, cost estimation, ProviderInfo
+3. Register with `@model_registry.register_llm("provider", "name")`
+4. Convert SDK errors to typed exceptions (`ModelRateLimitError`, `ModelQuotaExhaustedError`)
+5. Set `max_retries=0` in SDK — `BaseLLM.generate()` handles retries natively
+6. Add optional dependencies to `pyproject.toml`
+7. Update this README
 
-### Testing Multimodal Features
+### Testing
 
-Use the test utilities in `tests/unit/` for:
+Use the test utilities in `tests/` for:
 - Capability filtering validation
 - Fallback strategy testing
+- Retry loop behavior
+- Budget enforcement
 - Stream safety verification

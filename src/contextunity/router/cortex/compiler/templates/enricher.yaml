@@ -1,0 +1,60 @@
+# Enricher Graph Template v1.0
+#
+# Product enrichment pipeline: prepare → generate → review.
+# Uses router_generate_content + router_review_content.
+#
+# Interconnection Boundary (Commerce Plan Phase 2-3):
+#   When commerce migrates to manifest, enricher/enrich delegates
+#   its LLM call to router_generate_content. enricher/review delegates
+#   to router_review_content. Federated tool (export_product) executes
+#   on the consumer side.
+
+name: enricher
+version: "1.0"
+description: >
+  Product enrichment pipeline with content generation and quality review.
+  Composes router_generate_content + router_review_content with federated export.
+
+defaults:
+  model: openai/gpt-4o
+
+nodes:
+  - name: prepare
+    type: tool
+    tool_binding: federated:export_product_for_enrichment
+    config:
+      output_mode: direct
+
+  - name: enrich
+    type: tool
+    tool_binding: router_generate_content
+    config:
+      output_mode: direct
+      tool_config:
+        input_key: product_context
+        output_key: enriched_content
+        response_format: json
+
+  - name: review
+    type: tool
+    tool_binding: router_review_content
+    config:
+      output_mode: direct
+      tool_config:
+        input_key: enriched_content
+        output_key: reviewed_content
+        strict_mode: true
+
+edges:
+  - from_node: __start__
+    to_node: prepare
+  - from_node: prepare
+    to_node: enrich
+  - from_node: enrich
+    to_node: review
+  - from_node: review
+    to_node: __end__
+
+config:
+  max_retries: 1
+  timeout: 180

@@ -54,9 +54,13 @@ run = "mise run lint && mise run security && mise run test-unit"
 description = "Start Router gRPC service"
 run = "uv run contextrouter serve"
 
+[tasks.router-debug]
+description = "Start Router gRPC service with DEBUG logging"
+run = "CU_ROUTER_LOG_LEVEL=DEBUG uv run contextrouter serve"
+
 [tasks.dev]
-description = "Start Router gRPC service in development mode"
-run = "uv run contextrouter serve"
+description = "Start Router gRPC service in development mode with autoreload"
+run = "uv run watchfiles --filter python 'uv run contextrouter serve' src/"
 
 [tasks.clean-redis]
 description = "Clean project registrations from Redis. Usage: `mise run clean-redis` (all) or `mise run clean-redis -- <project_id>`"

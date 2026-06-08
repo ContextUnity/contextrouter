@@ -1,5 +1,4 @@
 """Retrieval pipeline (pure orchestration).
-
 - coordinates registered retrieval sources (providers + connectors)
 - reranks, deduplicates, builds citations, attaches graph facts
 """
@@ -10,13 +9,11 @@ import time
 from dataclasses import dataclass
 
 from contextunity.core import get_contextunit_logger
+from contextunity.core.types import is_object_list
 
-from contextunity.router.core import (
-    ContextToken,
-    get_core_config,
-)
-from contextunity.router.cortex.state import AgentState, get_last_user_query
-from contextunity.router.modules.retrieval import BaseRetrievalPipeline
+from contextunity.router.core import RouterConfig, get_core_config
+from contextunity.router.cortex.core_state import get_last_user_query
+from contextunity.router.cortex.types import GraphState
 
 from .citations import build_citations
 from .mmr import mmr_select
@@ -48,32 +45,34 @@ class RetrievalPipeline(RetrievalMixin):
     """Orchestrates retrieval from multiple sources and builds citations."""
 
     def __init__(self) -> None:
-        self.core_cfg = get_core_config()
-        self._base = BaseRetrievalPipeline()
+        """Load core config and create the base provider retrieval pipeline."""
+        super().__init__()
+        self.core_cfg: RouterConfig = get_core_config()
 
-    def _token_from_state(self, state: AgentState) -> ContextToken:
-        """Resolve access token from agent state."""
-        tok = state.get("access_token")
-        if isinstance(tok, ContextToken):
-            return tok
-
-        # Security is always enforced — missing token is an error.
-        raise PermissionError("Access token missing from AgentState")
-
-    async def execute(self, state: AgentState) -> RetrievalResult:
+    async def execute(self, state: GraphState) -> RetrievalResult:
         """Execute retrieval pipeline and return results."""
         pipeline_start = time.perf_counter()
         cfg = get_rag_retrieval_settings()
-        user_query = (
-            state.get("user_query") or get_last_user_query(state.get("messages", [])) or ""
-        ).strip()
+        dyn = state.get("dynamic", {})
+        user_query_raw = (
+            dyn.get("user_query")
+            or state.get("user_query")
+            or get_last_user_query(state.get("messages", []))
+            or ""
+        )
+        user_query = user_query_raw.strip() if isinstance(user_query_raw, str) else ""
         if not user_query:
             return RetrievalResult(retrieved_docs=[], citations=[], graph_facts=[])
 
         retrieval_queries = normalize_queries(state, user_query)
 
         # Log taxonomy_concepts availability
-        taxonomy_concepts = state.get("taxonomy_concepts") or []
+        taxonomy_raw: object = state.get("taxonomy_concepts") or []
+        taxonomy_concepts = (
+            [concept for concept in taxonomy_raw if isinstance(concept, str)]
+            if is_object_list(taxonomy_raw)
+            else []
+        )
         logger.debug(
             "RAG Pipeline: taxonomy_concepts in state: count=%d concepts=%s",
             len(taxonomy_concepts),
@@ -94,21 +93,12 @@ class RetrievalPipeline(RetrievalMixin):
             cfg.general_retrieval_enabled,
         )
 
-        try:
-            token = self._token_from_state(state)
-        except Exception as e:
-            from contextunity.core.exceptions import RetrievalError
-
-            raise RetrievalError(
-                f"Failed to resolve access token: {str(e)}", code="AUTH_ERROR"
-            ) from e
-
         all_docs: list[RetrievedDoc] = []
 
         # 1) Provider retrieval
         provider_start = time.perf_counter()
         try:
-            provider_docs = await self._retrieve_from_providers(retrieval_queries, token, cfg)
+            provider_docs = await self._retrieve_from_providers(retrieval_queries, cfg)
             provider_elapsed_ms = (time.perf_counter() - provider_start) * 1000
             logger.debug(
                 "Provider retrieval COMPLETE: provider=%s docs=%d elapsed_ms=%.1f",
@@ -120,7 +110,6 @@ class RetrievalPipeline(RetrievalMixin):
             self._run_dual_read(
                 cfg=cfg,
                 query=user_query,
-                token=token,
                 primary_docs=provider_docs,
                 primary_elapsed_ms=provider_elapsed_ms,
             )

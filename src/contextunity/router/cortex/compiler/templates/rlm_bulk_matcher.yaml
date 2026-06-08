@@ -1,0 +1,69 @@
+# RLM Bulk Matcher Graph Template v1.0
+#
+# Deep product matching pipeline: fetch brands → RLM iterate → aggregate.
+# Uses router_rlm_process for massive-context LLM processing (50k+ items).
+#
+# Architecture:
+#   - fetch_brands: BiDi federated — exports matchable brands from commerce
+#   - iterate_brands: Platform node — per-brand RLM deep matching
+#     (deterministic stages + LLM run in federated handler, only LLM
+#     execution delegates to router_rlm_process)
+#   - aggregate_results: BiDi federated — reports final match stats
+#
+# Model Resolution:
+#   Per-node model → Graph defaults.model → CU_ROUTER_DEFAULT_LLM
+#   Default: rlm/gpt-5-mini (RLM wrapper around GPT-5-mini)
+#
+# Interconnection Boundary (Commerce Plan Phase 5d):
+#   Commerce keeps all domain logic (BiDi client, deterministic stages,
+#   matching prompts, response parsing). Only LLM execution delegates
+#   to the platform layer via router_rlm_process.
+
+name: rlm_bulk_matcher
+version: "1.0"
+description: >
+  Deep product matching using Recursive Language Models (RLM).
+  Processes 50k+ supplier products against site catalog in recursive
+  passes with multi-factor comparison. Data passed as REPL variables,
+  not prompt text, to avoid context degradation.
+
+defaults:
+  model: rlm/gpt-5-mini
+
+nodes:
+  - name: fetch_brands
+    type: tool
+    tool_binding: federated:export_matcher_brands
+    config:
+      output_mode: direct
+
+  - name: iterate_brands
+    type: tool
+    tool_binding: router_rlm_process
+    config:
+      output_mode: direct
+      tool_config:
+        max_output_tokens: 50000
+        temperature: 0.3
+        confidence_threshold: 0.7
+        reasoning_effort: none
+
+  - name: aggregate_results
+    type: tool
+    tool_binding: federated:report_final_stats
+    config:
+      output_mode: direct
+
+edges:
+  - from_node: __start__
+    to_node: fetch_brands
+  - from_node: fetch_brands
+    to_node: iterate_brands
+  - from_node: iterate_brands
+    to_node: aggregate_results
+  - from_node: aggregate_results
+    to_node: __end__
+
+config:
+  max_retries: 0
+  timeout: 600

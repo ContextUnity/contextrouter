@@ -1,10 +1,14 @@
 """Provider configurations for external services."""
 
+from typing import ClassVar
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class VertexConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    """Google Cloud Vertex AI configuration (LLM and Discovery Engine)."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     project_id: str = ""
     location: str = "us-central1"
@@ -29,14 +33,16 @@ class GeminiConfig(BaseModel):
     Get a key at https://aistudio.google.com/apikey
     """
 
-    model_config = ConfigDict(extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     api_key: str = ""
     default_model: str = "gemini-2.5-flash"
 
 
 class PostgresConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    """PostgreSQL connection and vector storage configuration."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     dsn: str = ""
     pool_min_size: int = 2
@@ -46,7 +52,9 @@ class PostgresConfig(BaseModel):
 
 
 class OpenAIConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    """OpenAI API configuration (GPT and reasoning models)."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     api_key: str = ""
     organization: str | None = None
@@ -57,7 +65,9 @@ class OpenAIConfig(BaseModel):
 
 
 class AnthropicConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    """Anthropic API configuration (Claude models)."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     api_key: str = ""
 
@@ -65,7 +75,7 @@ class AnthropicConfig(BaseModel):
 class PerplexityConfig(BaseModel):
     """Perplexity API configuration (LLM with search)."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     api_key: str = ""
     default_model: str = "sonar"
@@ -74,13 +84,15 @@ class PerplexityConfig(BaseModel):
 class SerperConfig(BaseModel):
     """Serper API configuration (Google Search)."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     api_key: str = ""
 
 
 class OpenRouterConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    """OpenRouter API configuration (multi-provider gateway)."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     api_key: str = ""
     base_url: str = "https://openrouter.ai/api/v1"
@@ -89,14 +101,16 @@ class OpenRouterConfig(BaseModel):
 class LocalOpenAIConfig(BaseModel):
     """Base URLs for local OpenAI-compatible servers."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     ollama_base_url: str = "http://localhost:11434/v1"
     vllm_base_url: str = "http://localhost:8000/v1"
 
 
 class GroqConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    """Groq API configuration (LPU-accelerated inference)."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     api_key: str = ""
     base_url: str = "https://api.groq.com/openai/v1"
@@ -108,7 +122,7 @@ class InceptionConfig(BaseModel):
     Docs: https://docs.inceptionlabs.ai/get-started/models
     """
 
-    model_config = ConfigDict(extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     api_key: str = ""
     base_url: str = "https://api.inceptionlabs.ai/v1"
@@ -117,7 +131,9 @@ class InceptionConfig(BaseModel):
 
 
 class RunPodConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    """RunPod serverless endpoint configuration."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     api_key: str = ""
     # Usually: https://api.runpod.ai/v2/<endpoint_id>/openai/v1
@@ -125,15 +141,19 @@ class RunPodConfig(BaseModel):
 
 
 class HuggingFaceHubConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    """Hugging Face Inference API configuration."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     api_key: str = ""  # HF_TOKEN
     base_url: str = "https://api-inference.huggingface.co/v1"
 
 
 class GoogleCSEConfig(BaseModel):
+    """Google Programmable Search Engine (CSE) configuration."""
+
     # Support `cx` key in TOML (`google_cse.cx`) while keeping a more descriptive field name internally.
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore", populate_by_name=True)
 
     enabled: bool = False
     api_key: str = ""
@@ -141,16 +161,27 @@ class GoogleCSEConfig(BaseModel):
 
     @property
     def cx(self) -> str:
-        """Compatibility alias for Google CSE search engine id (cx)."""
+        """Compatibility alias for ``search_engine_id``.
+
+        Returns:
+            The configured search engine ID.
+        """
         return self.search_engine_id
 
     @cx.setter
     def cx(self, v: str) -> None:
+        """Set ``search_engine_id`` via the ``cx`` alias.
+
+        Args:
+            v: New search engine ID value.
+        """
         self.search_engine_id = v
 
 
 class LangfuseConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    """Langfuse observability platform configuration."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     secret_key: str = ""
     public_key: str = ""
@@ -160,42 +191,8 @@ class LangfuseConfig(BaseModel):
     service_name: str = "contextunity.router"
 
 
-class RedisConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    url_override: str | None = Field(default=None, alias="url")
-    host: str = "localhost"
-    port: int = 6379
-    db: int = 0
-    password: str | None = None
-
-    @property
-    def url(self) -> str:
-        """Generate Redis URL from config."""
-        if self.url_override:
-            return self.url_override
-        if self.password:
-            return f"redis://:{self.password}@{self.host}:{self.port}/{self.db}"
-        return f"redis://{self.host}:{self.port}/{self.db}"
-
-    @url.setter
-    def url(self, v: str) -> None:
-        self.url_override = v
-
-
 class PluginsConfig(BaseModel):
     """User plugin directories to scan eagerly (explicit opt-in)."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
     paths: list[str] = Field(default_factory=list)
-
-
-class BrainConfig(BaseModel):
-    """Configuration for contextunity.brain delegation."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    # "local" (direct library import) or "grpc" (network call)
-    mode: str = "local"
-    # gRPC endpoint for mode="grpc"
-    grpc_endpoint: str = "localhost:50051"

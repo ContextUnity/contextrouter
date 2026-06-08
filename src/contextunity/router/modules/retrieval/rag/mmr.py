@@ -2,18 +2,31 @@
 
 from __future__ import annotations
 
-import re
-
 from .models import RetrievedDoc
-
-_token_re = re.compile(r"[a-zA-Z0-9_]+")
 
 
 def _tokens(text: str) -> set[str]:
-    return {t.lower() for t in _token_re.findall(text or "") if len(t) > 2}
+    """Tokenise *text* into a lowercase set of alphanumeric words (len > 2)."""
+    tokens: set[str] = set()
+    current: list[str] = []
+    for ch in (text or "").lower():
+        if ch.isalnum() or ch == "_":
+            current.append(ch)
+            continue
+        if current:
+            token = "".join(current)
+            if len(token) > 2:
+                tokens.add(token)
+            current = []
+    if current:
+        token = "".join(current)
+        if len(token) > 2:
+            tokens.add(token)
+    return tokens
 
 
 def _jaccard(a: set[str], b: set[str]) -> float:
+    """Return the Jaccard similarity coefficient between token sets *a* and *b*."""
     if not a or not b:
         return 0.0
     return len(a & b) / max(1, len(a | b))
@@ -26,6 +39,7 @@ def mmr_select(
     k: int,
     lambda_mult: float,
 ) -> list[RetrievedDoc]:
+    """Greedily select up to *k* documents by Maximal Marginal Relevance using Jaccard token overlap."""
     if k <= 0 or not candidates:
         return []
     if k >= len(candidates):

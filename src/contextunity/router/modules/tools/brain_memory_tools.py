@@ -6,25 +6,51 @@ These tools expose episodic memory and entity (fact) storage to LLM agents.
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from contextunity.core.sdk import BrainClient
 
 from contextunity.core import get_contextunit_logger
-from langchain_core.tools import tool
+from contextunity.core.types import JsonDict, is_json_dict, is_json_value, is_object_dict
 
+from contextunity.router.langchain_boundaries import tool
 from contextunity.router.modules.tools.schemas import MemoryRecallResult, MemoryStoreResult
 
 logger = get_contextunit_logger(__name__)
 
+
+def _episode_json_rows(episodes: Sequence[object]) -> list[JsonDict]:
+    rows: list[JsonDict] = []
+    for episode in episodes:
+        if is_json_dict(episode):
+            rows.append(episode)
+            continue
+        if not is_object_dict(episode):
+            continue
+        row: JsonDict = {}
+        valid = True
+        for key, value in episode.items():
+            if is_json_value(value):
+                row[str(key)] = value
+            else:
+                valid = False
+                break
+        if valid:
+            rows.append(row)
+    return rows
+
+
 # Per-tenant BrainClient cache — each tenant gets a properly scoped client
-_brain_clients: dict[str, object] = {}
+_brain_clients: dict[str, BrainClient] = {}
 
 
-def _get_brain_client(tenant_id: str):
+def _get_brain_client(tenant_id: str) -> BrainClient:
     """Get or create BrainClient for a specific tenant.
 
-    Uses the client's **pre-serialized token string** from the current
-    auth context. The token is already signed by the project's backend
-    (HMAC or Shield) — no Router-level signing backend needed.
+    Uses the verified ``ContextToken`` from the current gRPC auth context.
+    The token is already verified by the interceptor — no re-signing needed.
 
     Memory operations require ``memory:write``, which is granted to
     the primary client token.
@@ -34,18 +60,18 @@ def _get_brain_client(tenant_id: str):
 
         _brain_clients[tenant_id] = BrainClient(
             tenant_id=tenant_id,
-            token=lambda: _get_auth_token_string(),
+            token=_get_auth_token(),
         )
     return _brain_clients[tenant_id]
 
 
-def _get_auth_token_string() -> str | None:
-    """Extract the pre-serialized token string from the current gRPC auth context."""
+def _get_auth_token():
+    """Extract the verified ContextToken from the current gRPC auth context."""
     try:
         from contextunity.core.authz.context import get_auth_context
 
         ctx = get_auth_context()
-        return ctx.token_string if ctx else None
+        return ctx.token if ctx else None
     except Exception:
         return None
 
@@ -61,7 +87,7 @@ async def remember_episode(
     user_id: str,
     session_id: str,
     tenant_id: str = "default",
-    metadata: dict[str, Any] | None = None,
+    metadata: JsonDict | None = None,
 ) -> MemoryStoreResult:
     """Store a conversation episode in long-term memory.
 
@@ -92,14 +118,14 @@ async def remember_episode(
             metadata=metadata,
         )
         logger.info("Stored episode %s for user %s", episode_id, user_id)
-        return {
-            "success": True,
-            "episode_id": episode_id,
-            "user_id": user_id,
-        }
+        return MemoryStoreResult(
+            success=True,
+            episode_id=episode_id,
+            user_id=user_id,
+        )
     except Exception as e:
         logger.error("Failed to store episode: %s", e)
-        return {"success": False, "error": str(e)}
+        return MemoryStoreResult(success=False, error=str(e))
 
 
 @tool
@@ -129,15 +155,15 @@ async def recall_episodes(
             limit=limit,
         )
         logger.info("Retrieved %d episodes for user %s", len(episodes), user_id)
-        return {
-            "success": True,
-            "episodes": episodes,
-            "count": len(episodes),
-            "user_id": user_id,
-        }
+        return MemoryStoreResult(
+            success=True,
+            episodes=_episode_json_rows(episodes),
+            count=len(episodes),
+            user_id=user_id,
+        )
     except Exception as e:
         logger.error("Failed to recall episodes: %s", e)
-        return {"success": False, "error": str(e), "episodes": []}
+        return MemoryStoreResult(success=False, error=str(e), episodes=[])
 
 
 # ============================================================================
@@ -185,15 +211,15 @@ async def learn_user_fact(
             confidence=confidence,
         )
         logger.info("Stored fact %s=%s for user %s", key, value, user_id)
-        return {
-            "success": True,
-            "key": key,
-            "value": value,
-            "user_id": user_id,
-        }
+        return MemoryRecallResult(
+            success=True,
+            key=key,
+            value=value,
+            user_id=user_id,
+        )
     except Exception as e:
         logger.error("Failed to store fact: %s", e)
-        return {"success": False, "error": str(e)}
+        return MemoryRecallResult(success=False, error=str(e))
 
 
 @tool
@@ -221,15 +247,15 @@ async def recall_user_facts(
             user_id=user_id,
         )
         logger.info("Retrieved %d facts for user %s", len(facts), user_id)
-        return {
-            "success": True,
-            "facts": facts,
-            "count": len(facts),
-            "user_id": user_id,
-        }
+        return MemoryRecallResult(
+            success=True,
+            facts={str(k): str(v) for k, v in facts.items()},
+            count=len(facts),
+            user_id=user_id,
+        )
     except Exception as e:
         logger.error("Failed to recall facts: %s", e)
-        return {"success": False, "error": str(e), "facts": {}}
+        return MemoryRecallResult(success=False, error=str(e), facts={})
 
 
 __all__ = [

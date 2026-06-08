@@ -1,15 +1,17 @@
 """Cognee graph building tool for local knowledge graph extraction.
-
 This tool provides LLM-free graph building capabilities using cognee library.
 """
 
 from __future__ import annotations
 
-from typing import Any
+import importlib
+from types import ModuleType
 
 from contextunity.core import get_contextunit_logger
+from contextunity.core.exceptions import ConfigurationError
+from contextunity.core.types import JsonDict
 
-from contextunity.router.modules.tools.schemas import DataToolResult
+from contextunity.router.modules.tools.schemas import CogneeResult
 
 logger = get_contextunit_logger(__name__)
 
@@ -17,14 +19,14 @@ logger = get_contextunit_logger(__name__)
 class CogneeGraphBuilder:
     """Local graph builder using cognee (no LLM calls required)."""
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self, **kwargs: object) -> None:
         """Initialize cognee graph builder."""
-        self._cognee_available = False
-        self._cognee = None
+        self._cognee_available: bool = False
+        self._cognee: ModuleType | None = None
 
         try:
             # Try to import cognee
-            import cognee  # type: ignore
+            cognee = importlib.import_module("cognee")
 
             self._cognee = cognee
             self._cognee_available = True
@@ -37,14 +39,11 @@ class CogneeGraphBuilder:
         """Check if cognee is available."""
         return self._cognee_available
 
-    def build_graph(
-        self, content: str, **kwargs: Any
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    def build_graph(self, content: str) -> tuple[list[JsonDict], list[JsonDict]]:
         """Build knowledge graph from text content using cognee.
 
         Args:
             content: Text content to extract graph from
-            **kwargs: Additional configuration options
 
         Returns:
             Tuple of (entities, relations) where:
@@ -52,7 +51,7 @@ class CogneeGraphBuilder:
             - relations: List of dicts with relationship information
         """
         if not self._cognee_available or not self._cognee:
-            raise RuntimeError("Cognee is not available")
+            raise ConfigurationError("Cognee is not available")
 
         try:
             # Use cognee for local graph extraction
@@ -60,8 +59,8 @@ class CogneeGraphBuilder:
             logger.info("Building graph from content (%s chars) using cognee", len(content))
 
             # Placeholder implementation - would integrate with actual cognee API
-            entities = []
-            relations = []
+            entities: list[JsonDict] = []
+            relations: list[JsonDict] = []
 
             # Example structure that cognee might return:
             # entities = [
@@ -83,9 +82,10 @@ class CogneeGraphTool:
     """Tool wrapper for cognee graph building."""
 
     def __init__(self) -> None:
-        self.builder = CogneeGraphBuilder()
+        """Create the underlying ``CogneeGraphBuilder`` instance."""
+        self.builder: CogneeGraphBuilder = CogneeGraphBuilder()
 
-    def run(self, content: str) -> DataToolResult:
+    def run(self, content: str) -> CogneeResult:
         """Run cognee graph extraction on content.
 
         Args:
@@ -95,11 +95,13 @@ class CogneeGraphTool:
             Dict with entities and relations
         """
         if not self.builder.is_available():
-            raise RuntimeError("Cognee graph builder is not available")
+            raise ConfigurationError("Cognee graph builder is not available")
 
         entities, relations = self.builder.build_graph(content)
 
-        return {"entities": entities, "relations": relations, "method": "cognee_local"}
+        return CogneeResult(
+            success=True, entities=entities, relations=relations, method="cognee_local"
+        )
 
 
 __all__ = ["CogneeGraphBuilder", "CogneeGraphTool"]

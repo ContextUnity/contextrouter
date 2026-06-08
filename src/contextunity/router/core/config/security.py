@@ -1,5 +1,8 @@
 """Security configuration for contextunity.router."""
 
+from typing import ClassVar
+
+from contextunity.core.config.models import SharedSecurityConfig
 from contextunity.core.permissions import Permissions
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -10,7 +13,7 @@ class SecurityPoliciesConfig(BaseModel):
     Uses canonical Permissions.* constants from contextunity.core.
     """
 
-    model_config = ConfigDict(extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     read_permission: str = Permissions.ROUTER_EXECUTE
     write_permission: str = Permissions.ROUTER_EXECUTE
@@ -28,7 +31,7 @@ class SecurityPoliciesConfig(BaseModel):
     )
 
 
-class SecurityConfig(BaseModel):
+class SecurityConfig(SharedSecurityConfig):
     """Security settings for contextunity.router.
 
     Security is always enforced — there is no toggle.
@@ -36,6 +39,6 @@ class SecurityConfig(BaseModel):
     (auto-detected: HmacBackend or SessionTokenBackend).
     """
 
-    model_config = ConfigDict(extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     policies: SecurityPoliciesConfig = Field(default_factory=SecurityPoliciesConfig)

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
+
+from contextunity.router.core.exceptions import RouterStorageError
 
 
 def build_schema_sql(*, vector_dim: int) -> Sequence[str]:
+    """Build schema sql."""
     if vector_dim <= 0:
-        raise ValueError("vector_dim must be positive")
+        raise RouterStorageError("vector_dim must be positive")
 
     return [
         # Extensions

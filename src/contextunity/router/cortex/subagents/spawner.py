@@ -1,65 +1,29 @@
-"""Sub-Agent Spawner for Router."""
+"""Sub-agent spawner -- instantiates child agent graphs with scoped tokens and tool subsets."""
 
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, Optional
 
-from contextunity.core import ContextToken, ContextUnit, get_contextunit_logger
+from contextunity.core import ContextToken, WorkerClient, get_contextunit_logger
 
 from contextunity.router.modules.grpc import get_worker_client
 
 from .prompt_generator import SubAgentPromptGenerator
+from .types import IsolationContext, SpawnTask, SubAgentConfig
 
 logger = get_contextunit_logger(__name__)
 
 
-class IsolationContext:
-    """Isolation context for sub-agents."""
-
-    def __init__(
-        self,
-        tenant_id: str | None = None,
-        session_id: str | None = None,
-        trace_id: str | None = None,
-        parent_agent_id: str = "",
-        subagent_id: str = "",
-    ):
-        self.tenant_id = tenant_id
-        self.session_id = session_id
-        self.trace_id = trace_id or self._generate_trace_id()
-        self.parent_agent_id = parent_agent_id
-        self.subagent_id = subagent_id
-
-    @staticmethod
-    def _generate_trace_id() -> str:
-        """Generate a unique trace ID."""
-        return uuid.uuid4().hex
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "tenant_id": self.tenant_id,
-            "session_id": self.session_id,
-            "trace_id": self.trace_id,
-            "parent_agent_id": self.parent_agent_id,
-            "subagent_id": self.subagent_id,
-        }
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> IsolationContext:
-        """Create from dictionary."""
-        return cls(
-            tenant_id=data.get("tenant_id"),
-            session_id=data.get("session_id"),
-            trace_id=data.get("trace_id"),
-            parent_agent_id=data.get("parent_agent_id", ""),
-            subagent_id=data.get("subagent_id", ""),
-        )
-
-
 class SubAgentSpawner:
-    """Spawns sub-agents for task execution."""
+    """Instantiates child agent graphs with scoped tokens and tool subsets.
+
+    Generates system prompts via Brain semantic/procedural memory, then
+    delegates execution to the Worker service via gRPC ``StartWorkflow``.
+    """
+
+    _worker_client: WorkerClient | None
+    _worker_token: ContextToken | None
+    prompt_generator: SubAgentPromptGenerator
 
     def __init__(self, brain_endpoint: str = "brain.contextunity.ts.net:50051"):
         """Initialize spawner.
@@ -68,29 +32,37 @@ class SubAgentSpawner:
             brain_endpoint: Brain gRPC endpoint for prompt generation
         """
         self._worker_client = None
+        self._worker_token = None
         self.prompt_generator = SubAgentPromptGenerator(brain_endpoint=brain_endpoint)
 
-    async def _get_worker_client(self, token: Optional[ContextToken] = None):
+    async def _get_worker_client(self, token: ContextToken | None = None) -> WorkerClient:
         """Get Worker gRPC client.
 
         Args:
-            token: Optional ContextToken for authorization
+            token: ContextToken for authorization
         """
-        if self._worker_client is None or (token and self._worker_client.token != token):
-            self._worker_client = await get_worker_client(token=token)
+        if token is not None:
+            if self._worker_client is None or self._worker_token != token:
+                self._worker_client = await get_worker_client(token=token)
+                self._worker_token = token
+            return self._worker_client
+
+        if self._worker_client is None or self._worker_token is not None:
+            self._worker_client = await get_worker_client()
+            self._worker_token = None
         return self._worker_client
 
     async def spawn_subagent(
         self,
         parent_agent_id: str,
-        task: Dict[str, Any],
+        task: SpawnTask,
         tenant_id: str | None = None,
         session_id: str | None = None,
         trace_id: str | None = None,
         agent_type: str = "task_executor",
-        config: Dict[str, Any] | None = None,
-        parent_trace_id: str | None = None,  # Trace ID from parent agent
-        token: Optional[ContextToken] = None,  # ContextToken for authorization
+        config: SubAgentConfig | None = None,
+        parent_trace_id: str | None = None,
+        token: ContextToken | None = None,
     ) -> str:
         """Spawn a new sub-agent.
 
@@ -157,11 +129,11 @@ class SubAgentSpawner:
     async def _send_to_worker(
         self,
         subagent_id: str,
-        task: Dict[str, Any],
+        task: SpawnTask,
         agent_type: str,
         isolation_context: IsolationContext,
-        config: Dict[str, Any],
-        token: Optional[ContextToken] = None,
+        config: SubAgentConfig,
+        token: ContextToken | None = None,
     ) -> None:
         """Send spawn request to Worker.
 
@@ -175,15 +147,15 @@ class SubAgentSpawner:
         """
         try:
             if token is None:
-                from contextunity.router.cortex.runtime_context import get_current_access_token
+                from contextunity.router.core.context import get_current_access_token
 
                 token = get_current_access_token()
 
             client = await self._get_worker_client(token=token)
 
-            # Create ContextUnit for spawn request
-            unit = ContextUnit(
-                payload={
+            response = await client.start_workflow(
+                workflow_type="subagent",
+                wire={
                     "subagent_id": subagent_id,
                     "task": task,
                     "agent_type": agent_type,
@@ -191,18 +163,13 @@ class SubAgentSpawner:
                     "config": config,
                 },
                 provenance=[f"router:spawn:{subagent_id}"],
-                trace_id=isolation_context.trace_id,
+                trace_id=uuid.UUID(isolation_context.trace_id),
             )
-
-            # Call Worker StartWorkflow with workflow_type="subagent"
-            # Note: This uses StartWorkflow as a generic spawn mechanism
-            unit.payload["workflow_type"] = "subagent"
-            response = await client.start_workflow(unit)
 
             logger.info(
                 "Spawned sub-agent %s via Worker: %s",
                 subagent_id,
-                response.payload.get("workflow_id"),
+                response.get("workflow_id"),
             )
 
         except Exception as e:

@@ -1,4 +1,4 @@
-"""LLM providers."""
+"""LLM providers -- OpenAI, Anthropic, Google, Mistral, and custom model adapters."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Model registry for LLMs and embeddings."""
+"""Model registry -- unified provider resolution, fallback chains, and cost tracking for LLMs and embeddings."""
 
 from __future__ import annotations
 

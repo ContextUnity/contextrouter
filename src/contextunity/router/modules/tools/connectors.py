@@ -1,5 +1,4 @@
 """Connector tool wrappers.
-
 These wrappers allow agents to treat connectors as standard callable tools.
 """
 
@@ -20,10 +19,8 @@ class ConnectorTool:
     connector: BaseConnector
 
     async def run(self) -> list[ContextUnit]:
-        out: list[ContextUnit] = []
-        async for env in self.connector.connect():
-            out.append(env)
-        return out
+        """Run the core execution loop."""
+        return [env async for env in self.connector.connect()]
 
 
 __all__ = ["ConnectorTool"]

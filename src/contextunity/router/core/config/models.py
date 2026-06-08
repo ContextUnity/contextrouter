@@ -1,9 +1,8 @@
-"""Model and LLM configuration."""
+"""Model and LLM configuration — Pydantic schemas for provider selection, fallback chains, and response formats."""
 
 from __future__ import annotations
 
-from functools import partial
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -13,26 +12,18 @@ ModelSelectionStrategy = Literal["fallback", "parallel", "cost-priority"]
 class ModelSelector(BaseModel):
     """Model selection + fallback for a single RAG component."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     model: str
     fallback: list[str] = Field(default_factory=list)
     strategy: ModelSelectionStrategy = "fallback"
 
 
-def _selector(model: str) -> ModelSelector:
-    # Used only for type inference/documentation; do not call directly as a default_factory.
-    return ModelSelector(model=model)
-
-
-def _selector_factory(model: str):
-    # `default_factory` must be a zero-arg callable; `partial` is perfect for this.
-    return partial(ModelSelector, model=model)
-
-
 class ModelsConfig(BaseModel):
+    """Default model and embedding selection with optional fallback chain."""
+
     # Accept both `default_llm` and canonical `default` from TOML/env.
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore", populate_by_name=True)
 
     default_llm: str = Field(default="openai/gpt-5-mini", alias="default")
     default_embeddings: str = "hf/sentence-transformers"
@@ -50,7 +41,7 @@ class LLMConfig(BaseModel):
     Model selection is controlled by `models.default_llm`.
     """
 
-    model_config = ConfigDict(extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     temperature: float = 0.2
     max_output_tokens: int = 1024
@@ -59,41 +50,28 @@ class LLMConfig(BaseModel):
     merge_system_prompt: bool = False
 
 
-class RouterConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+class PrivacyConfig(BaseModel):
+    """Router-local privacy controls (PII session, encryption TTL)."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore", frozen=True)
+
+    # Ephemeral AES key rotation for in-process PII mapping store (seconds).
+    pii_encryption_ttl_seconds: int = Field(default=60, ge=10, le=86400)
+
+
+class RouterSection(BaseModel):
+    """Router service instance configuration (tenants, feature flags, graph)."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     # ── Server settings ───────────────────────────────────────────
-    port: str = "50050"
     instance_name: str = "default"
     tenants: list[str] = Field(default_factory=list)
 
-    # ── External service endpoints ────────────────────────────────
-    worker_grpc_endpoint: str = "localhost:50052"
-    zero_grpc_host: str = ""
-    shield_grpc_host: str = ""
+    # ── Feature flags ─────────────────────────────────────────────
     gcs_default_bucket: str = ""
     brain_index_tools: bool = False
 
-
-class NewsEngineConfig(BaseModel):
-    """Configuration for News Engine graph.
-
-    Controls news harvesting, generation, and post-processing.
-    Set via NEWS_ENGINE_* environment variables.
-    """
-
-    model_config = ConfigDict(extra="ignore")
-
-    # LanguageTool grammar/spell checking
-    # Set via NEWS_ENGINE_LANGUAGE_TOOL_LANG=uk (or en, de, etc.)
-    language_tool_enabled: bool = False
-    language_tool_lang: str = "uk"  # Ukrainian by default
-    language_tool_auto_correct: bool = True  # Auto-apply corrections
-
-    # Generation settings
-    max_posts_per_run: int = 10
-    min_article_chars: int = 1100
-    max_article_chars: int = 1800
-
-    # Deduplication
-    dedupe_similarity_threshold: float = 0.85
+    # ── Graph Selection ───────────────────────────────────────────
+    graph: str | None = None
+    override_path: str | None = None

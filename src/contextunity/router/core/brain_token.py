@@ -13,11 +13,14 @@ Usage::
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
+from contextunity.core import ContextToken
 from contextunity.core.tokens import get_brain_service_token as _get_brain_service_token
 
 __all__ = ["get_brain_service_token"]
 
 
-def get_brain_service_token():
+def get_brain_service_token(*, allowed_tenants: Iterable[str] = ()) -> ContextToken:
     """Return a cached ContextToken for Router → Brain calls."""
-    return _get_brain_service_token("router")
+    return _get_brain_service_token("router", allowed_tenants=allowed_tenants)

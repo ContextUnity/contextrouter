@@ -1,4 +1,4 @@
-"""Cortex utilities package."""
+"""Cortex utilities -- JSON helpers, formatting, and shared constants for graph nodes."""
 
 from .json import safe_json_loads, strip_json_fence
 from .messages import get_last_human_text

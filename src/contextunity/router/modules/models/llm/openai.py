@@ -1,23 +1,30 @@
 """OpenAI LLM provider (OpenAI API).
-
 This implementation is a thin adapter from the multimodal `BaseModel` contract to
 `langchain-openai`'s `ChatOpenAI` so LangGraph can still stream tokens when used
 inside a LangChain/LangGraph runnable pipeline.
-
 When `enable_web_search=True`, uses OpenAI's Responses API with web_search_preview
 tool for real-time web search capabilities.
 """
 
 from __future__ import annotations
 
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
+from typing import override
 
 from contextunity.core import get_contextunit_logger
-from contextunity.core.tokens import ContextToken
+from contextunity.core.exceptions import ConfigurationError
 
-from contextunity.router.core import Config
+from contextunity.router.core import RouterConfig
 
-from ..base import BaseModel
+from ..base import BaseLLM as BaseModel
+from ..boundary_common import (
+    ensure_json_hint_in_openai_messages,
+    iter_openai_stream_text,
+    openai_first_choice_text,
+    resolve_json_object_mode,
+    resolve_max_output_tokens,
+    resolve_temperature,
+)
 from ..registry import model_registry
 from ..types import (
     AudioPart,
@@ -28,11 +35,44 @@ from ..types import (
     ModelStreamEvent,
     ProviderInfo,
     TextDeltaEvent,
+    TextPart,
     UsageStats,
 )
-from ._openai_compat import build_native_openai_messages, generate_asr_openai_compat
+from .openai_boundary import (
+    await_call,
+    choice_finish_reason,
+    invoke_openai_chat_create,
+    load_async_openai_client,
+    responses_output_text,
+)
+from .openai_compat import build_native_openai_messages, generate_asr_openai_compat
+from .types import OpenAIProviderConfig, ReasoningEffort, parse_reasoning_effort
 
 logger = get_contextunit_logger(__name__)
+
+
+def _raise_typed_openai_error(exc: Exception, provider_info: ProviderInfo) -> None:
+    """Re-raise OpenAI SDK exceptions as typed model errors.
+
+    Raises:
+        ModelQuotaExhaustedError: On authentication/billing failures.
+        ModelRateLimitError: On rate-limit responses.
+    """
+    from ..types import ModelQuotaExhaustedError, ModelRateLimitError
+
+    try:
+        from openai import AuthenticationError, RateLimitError
+    except ImportError:
+        return  # SDK not available — let caller re-raise original
+
+    if isinstance(exc, RateLimitError):
+        raise ModelRateLimitError(
+            "OpenAI rate limit exceeded", provider_info=provider_info
+        ) from exc
+    if isinstance(exc, AuthenticationError):
+        raise ModelQuotaExhaustedError(
+            "OpenAI authentication failed (quota or billing)", provider_info=provider_info
+        ) from exc
 
 
 @model_registry.register_llm("openai", "*")
@@ -50,42 +90,43 @@ class OpenAILLM(BaseModel):
 
     def __init__(
         self,
-        config: Config,
+        config: RouterConfig,
         model_name: str | None = None,
         enable_web_search: bool = False,
         **kwargs: object,
     ) -> None:
-        self._cfg = config
-        self._model_name = (model_name or "gpt-5.1").strip() or "gpt-5.1"
-        self._enable_web_search = enable_web_search
-        self._openai_client = None
+        """Create an ``AsyncOpenAI`` client using the direct OpenAI API key and org settings."""
+        resolved_name = (model_name or "gpt-5.1").strip() or "gpt-5.1"
+        super().__init__(provider="openai", model_name=resolved_name)
+        self._cfg: RouterConfig = config
+        self._enable_web_search: bool = enable_web_search
+        self._openai_client: object | None = None
 
         self._init_openai_client(**kwargs)
 
-        self._capabilities = ModelCapabilities(
+        self._capabilities: ModelCapabilities = ModelCapabilities(
             supports_text=True, supports_image=True, supports_audio=True
         )
 
     @property
+    @override
     def capabilities(self) -> ModelCapabilities:
+        """Declare modality support for the OpenAI backend."""
         return self._capabilities
 
-    async def generate(
-        self, request: ModelRequest, *, token: ContextToken | None = None
-    ) -> ModelResponse:
-        """Generate response using Chat Completions or Responses API."""
+    @override
+    async def _generate(self, request: ModelRequest) -> ModelResponse:
+        """Call the openai SDK and return a complete response."""
         if self._enable_web_search:
-            return await self._generate_with_web_search(request, token=token)
+            return await self._generate_with_web_search(request)
         else:
-            return await self._generate_chat_completions(request, token=token)
+            return await self._generate_chat_completions(request)
 
     async def _generate_with_web_search(
-        self, request: ModelRequest, *, token: ContextToken | None = None
+        self,
+        request: ModelRequest,
     ) -> ModelResponse:
-        """Generate using OpenAI Responses API with web_search_preview tool."""
-        from ..types import ModelQuotaExhaustedError, ModelRateLimitError
-
-        _ = token
+        """Use the OpenAI Responses API with the ``web_search_preview`` tool."""
 
         provider_info = ProviderInfo(
             provider="openai",
@@ -96,49 +137,49 @@ class OpenAILLM(BaseModel):
         # Build input from request
         input_text = request.system or ""
         for part in request.parts:
-            if hasattr(part, "text"):
+            if isinstance(part, TextPart):
                 input_text += "\n" + part.text
 
-        logger.info("OpenAI Responses API request with web_search (model=%s)", self._model_name)
+        logger.debug("OpenAI Responses API request with web_search (model=%s)", self._model_name)
 
         try:
-            response = await self._openai_client.responses.create(
+            if self._openai_client is None:
+                raise ConfigurationError("OpenAI client is not initialized")
+            responses_api: object = getattr(self._openai_client, "responses", None)
+            if responses_api is None:
+                raise ConfigurationError(
+                    "OpenAI client does not expose responses API",
+                    provider="openai",
+                )
+            create_responses = getattr(responses_api, "create", None)
+            if not callable(create_responses):
+                raise ConfigurationError(
+                    "OpenAI responses API is unavailable",
+                    provider="openai",
+                )
+            response = await await_call(
+                create_responses,
                 model=self._model_name,
                 tools=[{"type": "web_search_preview"}],
                 input=input_text,
             )
         except Exception as e:
-            error_str = str(e).lower()
-            if "insufficient_quota" in error_str or "billing" in error_str:
-                raise ModelQuotaExhaustedError(
-                    f"OpenAI quota exhausted: {e}",
-                    provider_info=provider_info,
-                ) from e
-            elif "rate_limit" in error_str or "too many requests" in error_str:
-                raise ModelRateLimitError(
-                    f"OpenAI rate limited: {e}",
-                    provider_info=provider_info,
-                ) from e
+            _raise_typed_openai_error(e, provider_info)
             raise
 
         # Extract text from response
-        text = ""
-        for item in response.output:
-            if item.type == "message":
-                for content in item.content:
-                    if content.type == "output_text":
-                        text = content.text
-                        break
+        text = responses_output_text(response)
 
-        logger.info("OpenAI Responses API returned %s chars", len(text))
+        logger.debug("OpenAI Responses API returned %s chars", len(text))
 
         # Extract usage if available
         usage = None
-        if hasattr(response, "usage") and response.usage:
+        usage_obj: object = getattr(response, "usage", None)
+        if usage_obj is not None:
             usage = UsageStats(
-                input_tokens=getattr(response.usage, "input_tokens", 0),
-                output_tokens=getattr(response.usage, "output_tokens", 0),
-                total_tokens=getattr(response.usage, "total_tokens", 0),
+                input_tokens=getattr(usage_obj, "input_tokens", 0),
+                output_tokens=getattr(usage_obj, "output_tokens", 0),
+                total_tokens=getattr(usage_obj, "total_tokens", 0),
             )
 
         return ModelResponse(
@@ -149,33 +190,36 @@ class OpenAILLM(BaseModel):
 
     def _init_openai_client(self, **kwargs: object) -> None:
         """Initialize native OpenAI client."""
-        try:
-            from langfuse.openai import AsyncOpenAI
-        except ImportError:
-            try:
-                from openai import AsyncOpenAI
-            except ImportError as e:
-                raise ImportError(
-                    "OpenAILLM requires `openai` package. Install with `pip install openai`."
-                ) from e
-
         api_key = kwargs.pop("api_key", self._cfg.openai.api_key or None)
         base_url = kwargs.pop("base_url", None)
+        api_key_str = api_key if isinstance(api_key, str) else self._cfg.openai.api_key
+        base_url_str = base_url if isinstance(base_url, str) else None
 
-        self._openai_client = AsyncOpenAI(
-            api_key=api_key,
+        if kwargs:
+            raise ConfigurationError(
+                "Unsupported OpenAI model init kwargs",
+                provider="openai",
+                invalid_kwargs=sorted(kwargs.keys()),
+            )
+
+        self._openai_client = load_async_openai_client(
+            api_key=api_key_str,
             organization=self._cfg.openai.organization,
-            base_url=base_url,
+            base_url=base_url_str,
             max_retries=0,
-            **kwargs,
         )
 
-    async def _generate_chat_completions(
-        self, request: ModelRequest, *, token: ContextToken | None = None
-    ) -> ModelResponse:
-        from ..types import ModelQuotaExhaustedError, ModelRateLimitError
+    def _get_client(self) -> object:
+        """Return the async OpenAI SDK client."""
+        if self._openai_client is None:
+            raise ConfigurationError("OpenAI client is not initialized", provider="openai")
+        return self._openai_client
 
-        _ = token
+    async def _generate_chat_completions(
+        self,
+        request: ModelRequest,
+    ) -> ModelResponse:
+        """Dispatch to ASR (for audio parts) or standard chat completions."""
         if any(isinstance(p, AudioPart) for p in request.parts):
             return await generate_asr_openai_compat(
                 request,
@@ -184,6 +228,9 @@ class OpenAILLM(BaseModel):
                 provider="openai",
                 whisper_model="whisper-1",
             )
+
+        # Validate provider config from manifest
+        pc = OpenAIProviderConfig.model_validate(request.provider_config)
 
         # o1/o3: dedicated reasoning models — need developer role + max_completion_tokens + reasoning_effort
         # gpt-5: reasoning model — uses system role + max_completion_tokens + reasoning_effort
@@ -194,37 +241,30 @@ class OpenAILLM(BaseModel):
 
         messages = build_native_openai_messages(request, is_reasoning_model=uses_developer_role)
 
-        kwargs = {
-            "model": self._model_name,
-            "messages": messages,
-            "timeout": request.timeout_sec,
-        }
-
+        _max_tok = resolve_max_output_tokens(
+            request_max_output_tokens=request.max_output_tokens,
+            provider_max_tokens=pc.get_max_tokens(),
+        )
+        max_tokens = _max_tok if not uses_completion_tokens else None
+        max_completion_tokens = _max_tok if uses_completion_tokens else None
+        temperature = resolve_temperature(
+            request_temperature=request.temperature,
+            provider_temperature=pc.temperature,
+        )
         if uses_completion_tokens:
-            if request.max_output_tokens:
-                kwargs["max_completion_tokens"] = request.max_output_tokens
+            temperature = None
+        reasoning_effort: ReasoningEffort | None = None
+        if uses_completion_tokens:
             # Use per-request reasoning_effort if provided, else config, else omit (API defaults to medium)
-            re_value = (
-                getattr(request, "reasoning_effort", None) or self._cfg.openai.reasoning_effort
-            )
-            if re_value:
-                kwargs["reasoning_effort"] = re_value
-        else:
-            if request.max_output_tokens:
-                kwargs["max_tokens"] = request.max_output_tokens
-            kwargs["temperature"] = request.temperature
+            raw_re_value = pc.reasoning_effort or self._cfg.openai.reasoning_effort
+            reasoning_effort = parse_reasoning_effort(raw_re_value)
 
-        if request.response_format == "json_object":
-            kwargs["response_format"] = {"type": "json_object"}
-            # OpenAI requires the word "json" in messages when using json_object format
-            all_text = " ".join(
-                m.get("content", "") for m in messages if isinstance(m.get("content"), str)
-            )
-            if "json" not in all_text.lower():
-                for m in reversed(messages):
-                    if m.get("role") == "user" and isinstance(m.get("content"), str):
-                        m["content"] += "\nRespond in JSON."
-                        break
+        wants_json_object = resolve_json_object_mode(
+            request_response_format=request.response_format,
+            provider_response_format=pc.response_format,
+        )
+        if wants_json_object:
+            ensure_json_hint_in_openai_messages(messages)
 
         provider_info = ProviderInfo(
             provider="openai",
@@ -236,43 +276,57 @@ class OpenAILLM(BaseModel):
             "OpenAI Chat API call: model=%s, msgs=[%s], reasoning_effort=%s, response_format=%s",
             self._model_name,
             ", ".join(f"{m.get('role')}({len(str(m.get('content', '')))!s}ch)" for m in messages),
-            kwargs.get("reasoning_effort", "N/A"),
-            kwargs.get("response_format", "N/A"),
+            reasoning_effort if reasoning_effort is not None else "N/A",
+            "json_object" if wants_json_object else "N/A",
         )
 
         try:
-            response = await self._openai_client.chat.completions.create(**kwargs)
+            response_obj = await invoke_openai_chat_create(
+                self._get_client(),
+                model=self._model_name,
+                messages=messages,
+                timeout=request.timeout_sec,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                max_completion_tokens=max_completion_tokens,
+                reasoning_effort=reasoning_effort,
+                response_format={"type": "json_object"} if wants_json_object else None,
+            )
         except Exception as e:
-            error_str = str(e).lower()
-            if "insufficient_quota" in error_str or "billing" in error_str:
-                raise ModelQuotaExhaustedError(
-                    f"OpenAI quota exhausted: {e}", provider_info=provider_info
-                ) from e
-            elif "rate_limit" in error_str or "too many requests" in error_str:
-                raise ModelRateLimitError(
-                    f"OpenAI rate limited: {e}", provider_info=provider_info
-                ) from e
+            _raise_typed_openai_error(e, provider_info)
             raise
 
-        choice = response.choices[0]
-        text = str(choice.message.content or "")
+        choices_obj: object = getattr(response_obj, "choices", None)
+        from contextunity.core.types import is_object_list
 
-        finish_reason = getattr(choice, "finish_reason", None)
+        from contextunity.router.modules.models.boundary_common import first_list_item
+
+        if not is_object_list(choices_obj) or not choices_obj:
+            raise ConfigurationError("OpenAI response missing choices", provider="openai")
+        choice = first_list_item(choices_obj)
+        if choice is None:
+            raise ConfigurationError("OpenAI response missing choices", provider="openai")
+        text = openai_first_choice_text(response_obj)
+
+        finish_reason = choice_finish_reason(choice)
         if finish_reason and finish_reason != "stop":
             logger.warning(
-                "OpenAI response finish_reason=%s (model=%s, text_len=%d). "
-                "If 'length', response was truncated — increase max_completion_tokens.",
+                (
+                    "OpenAI response finish_reason=%s (model=%s, text_len=%d). "
+                    "If 'length', response was truncated — increase max_completion_tokens."
+                ),
                 finish_reason,
                 self._model_name,
                 len(text),
             )
 
         usage_val = None
-        if hasattr(response, "usage") and response.usage:
+        usage_obj: object = getattr(response_obj, "usage", None)
+        if usage_obj is not None:
             usage_val = UsageStats(
-                input_tokens=getattr(response.usage, "prompt_tokens", 0),
-                output_tokens=getattr(response.usage, "completion_tokens", 0),
-                total_tokens=getattr(response.usage, "total_tokens", 0),
+                input_tokens=getattr(usage_obj, "prompt_tokens", 0),
+                output_tokens=getattr(usage_obj, "completion_tokens", 0),
+                total_tokens=getattr(usage_obj, "total_tokens", 0),
             ).estimate_cost(self._model_name)
 
         return ModelResponse(
@@ -281,55 +335,75 @@ class OpenAILLM(BaseModel):
             raw_provider=provider_info,
         )
 
-    async def stream(
-        self, request: ModelRequest, *, token: ContextToken | None = None
+    @override
+    def _stream(
+        self,
+        request: ModelRequest,
     ) -> AsyncIterator[ModelStreamEvent]:
+        """Stream token deltas from the openai SDK."""
         if self._enable_web_search:
-            response = await self.generate(request, token=token)
-            yield FinalTextEvent(text=response.text)
-            return
 
+            async def _web_search_stream() -> AsyncIterator[ModelStreamEvent]:
+                """Fallback stream via full Responses API call."""
+                response = await self._generate(request)
+                yield FinalTextEvent(text=response.text)
+
+            return _web_search_stream()
+
+        pc = OpenAIProviderConfig.model_validate(request.provider_config)
         name_lower = self._model_name.lower()
         uses_developer_role = any(x in name_lower for x in ["o1-", "o1_", "o3-", "o3_"])
         uses_completion_tokens = any(x in name_lower for x in ["gpt-5", "o1-", "o1_", "o3-", "o3_"])
         messages = build_native_openai_messages(request, is_reasoning_model=uses_developer_role)
 
-        kwargs = {
-            "model": self._model_name,
-            "messages": messages,
-            "timeout": request.timeout_sec,
-            "stream": True,
-        }
-
+        _max_tok = resolve_max_output_tokens(
+            request_max_output_tokens=request.max_output_tokens,
+            provider_max_tokens=pc.get_max_tokens(),
+        )
+        max_tokens = _max_tok if not uses_completion_tokens else None
+        max_completion_tokens = _max_tok if uses_completion_tokens else None
+        temperature = resolve_temperature(
+            request_temperature=request.temperature,
+            provider_temperature=pc.temperature,
+        )
         if uses_completion_tokens:
-            if request.max_output_tokens:
-                kwargs["max_completion_tokens"] = request.max_output_tokens
-            kwargs["reasoning_effort"] = self._cfg.openai.reasoning_effort or "minimal"
-        else:
-            if request.max_output_tokens:
-                kwargs["max_tokens"] = request.max_output_tokens
-            kwargs["temperature"] = request.temperature
+            temperature = None
+        reasoning_effort: ReasoningEffort | None = None
+        if uses_completion_tokens:
+            raw_re_value = pc.reasoning_effort or self._cfg.openai.reasoning_effort
+            reasoning_effort = parse_reasoning_effort(raw_re_value) or "minimal"
+        wants_json_object = resolve_json_object_mode(
+            request_response_format=request.response_format,
+            provider_response_format=pc.response_format,
+        )
+        if wants_json_object:
+            ensure_json_hint_in_openai_messages(messages)
 
-        if request.response_format == "json_object":
-            kwargs["response_format"] = {"type": "json_object"}
+        async def _event_stream() -> AsyncIterator[ModelStreamEvent]:
+            """Yield ``TextDelta`` / ``UsageEvent`` from the openai SDK stream."""
+            full = ""
+            stream_obj = await invoke_openai_chat_create(
+                self._get_client(),
+                model=self._model_name,
+                messages=messages,
+                timeout=request.timeout_sec,
+                stream=True,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                max_completion_tokens=max_completion_tokens,
+                reasoning_effort=reasoning_effort,
+                response_format={"type": "json_object"} if wants_json_object else None,
+            )
+            async for delta in iter_openai_stream_text(stream_obj):
+                full += delta
+                yield TextDeltaEvent(delta=delta)
+            yield FinalTextEvent(text=full)
 
-        full = ""
-        try:
-            stream = await self._openai_client.chat.completions.create(**kwargs)
-            async for chunk in stream:
-                if chunk.choices and len(chunk.choices) > 0:
-                    delta = chunk.choices[0].delta.content
-                    if delta:
-                        full += delta
-                        yield TextDeltaEvent(delta=delta)
-        except Exception:
-            # handle gracefully or re-raise based on logic
-            raise
+        return _event_stream()
 
-        yield FinalTextEvent(text=full)
-
-    def _extract_usage(self, msg: object):
-        pass
+    def _extract_usage(self, _msg: object) -> None:
+        """Extract token usage from the raw provider response (no-op)."""
+        return None
 
 
 __all__ = ["OpenAILLM"]

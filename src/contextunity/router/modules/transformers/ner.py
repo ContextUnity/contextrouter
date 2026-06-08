@@ -1,8 +1,6 @@
 """Named Entity Recognition (NER) transformer.
-
 Extracts named entities (persons, organizations, locations, dates, etc.) from text
 and enriches document metadata with structured entity information.
-
 Supports multiple backends:
 - LLM-based extraction (high quality, uses existing model registry)
 - Local models (spaCy, transformers) for fast, offline processing
@@ -11,16 +9,28 @@ Supports multiple backends:
 from __future__ import annotations
 
 import importlib
-import json
-from typing import NotRequired, TypedDict
+from collections.abc import Callable, Sequence
+from typing import (
+    ClassVar,
+    NotRequired,
+    Protocol,
+    TypedDict,
+    TypeGuard,
+    override,
+    runtime_checkable,
+)
 
 from contextunity.core import ContextUnit, get_contextunit_logger
+from contextunity.core.exceptions import ConfigurationError
+from contextunity.core.parsing import json_loads
+from contextunity.core.types import ContextUnitPayload, is_json_dict, is_object_list
 from pydantic import BaseModel, ConfigDict
 
-from contextunity.router.core import Config
+from contextunity.router.core import RouterConfig
 from contextunity.router.core.registry import register_transformer
 from contextunity.router.modules.models import model_registry
 from contextunity.router.modules.models.types import ModelRequest, TextPart
+from contextunity.router.modules.transformers._ingestion_helpers import payload_metadata
 
 from .base import Transformer
 
@@ -80,7 +90,81 @@ class NEREntity(TypedDict):
     source: NotRequired[str]
 
 
+@runtime_checkable
+class _ObjectIterator(Protocol):
+    def __next__(self) -> object: ...
+
+
+class _SpacyDoc(Protocol):
+    @property
+    def ents(self) -> Sequence[object]: ...
+
+
+class _SpacyLanguage(Protocol):
+    def __call__(self, text: str) -> _SpacyDoc: ...
+
+
+class _TransformersPipeline(Protocol):
+    def __call__(self, text: str) -> object: ...
+
+
+_SpacyLoad = Callable[[str], object]
+_TransformersPipelineFactory = Callable[..., object]
+
+
+def _is_spacy_load(value: object) -> TypeGuard[_SpacyLoad]:
+    return callable(value)
+
+
+def _is_transformers_factory(value: object) -> TypeGuard[_TransformersPipelineFactory]:
+    return callable(value)
+
+
+def _call_text_processor(value: object, text: str) -> object:
+    if not callable(value):
+        raise TypeError("Expected callable text processor")
+    return value(text)
+
+
+def _wrap_spacy_model(inner: object) -> _SpacyLanguage:
+    class _DocAdapter:
+        def __init__(self, inner_doc: object) -> None:
+            self._inner: object = inner_doc
+
+        @property
+        def ents(self) -> Sequence[object]:
+            raw = getattr(self._inner, "ents", ())
+            if is_object_list(raw):
+                return raw
+            collected: list[object] = []
+            iter_fn = getattr(raw, "__iter__", None)
+            if callable(iter_fn):
+                iterator_obj: object = iter_fn()
+                if isinstance(iterator_obj, _ObjectIterator):
+                    while True:
+                        try:
+                            collected.append(iterator_obj.__next__())
+                        except StopIteration:
+                            break
+            return collected
+
+    class _SpacyAdapter:
+        def __call__(self, text: str) -> _DocAdapter:
+            return _DocAdapter(_call_text_processor(inner, text))
+
+    return _SpacyAdapter()
+
+
+def _wrap_transformers_pipeline(inner: object) -> _TransformersPipeline:
+    class _PipelineAdapter:
+        def __call__(self, text: str) -> object:
+            return _call_text_processor(inner, text)
+
+    return _PipelineAdapter()
+
+
 def _normalize_entity_type(raw: object) -> str:
+    """Map a raw entity type label (CoNLL03 / spaCy style) to a canonical ``STANDARD_ENTITY_TYPES`` key."""
     t = str(raw or "").strip().upper()
     return _ENTITY_TYPE_ALIASES.get(t, t)
 
@@ -88,13 +172,13 @@ def _normalize_entity_type(raw: object) -> str:
 class NERConfig(BaseModel):
     """Configuration for NERTransformer."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     mode: str = "llm"
     model: str = ""
     entity_types: list[str] | None = None
     min_confidence: float = 0.5
-    core_cfg: Config | None = None
+    core_cfg: RouterConfig | None = None
 
 
 @register_transformer("ner")
@@ -111,25 +195,28 @@ class NERTransformer(Transformer):
         enriched_envelope = await transformer.transform(envelope)
     """
 
-    name = "ner"
+    name: str = "ner"
 
     def __init__(self) -> None:
+        """Initialize default ``NERConfig`` and lazy-load slots for spaCy / transformers models."""
         super().__init__()
-        self.config = NERConfig()
-        # External models/pipelines are intentionally typed as object (SDK-owned types).
-        self._spacy_model: object | None = None
-        self._transformers_pipeline: object | None = None
+        self.config: NERConfig = NERConfig()
+        self._spacy_model: _SpacyLanguage | None = None
+        self._transformers_pipeline: _TransformersPipeline | None = None
 
     @property
     def mode(self) -> str:
+        """Active extraction backend: ``llm``, ``spacy``, or ``transformers``."""
         return self.config.mode
 
     @property
     def model(self) -> str:
+        """Explicit model override (empty string = use default from registry)."""
         return self.config.model
 
     @property
     def entity_types(self) -> set[str] | None:
+        """Normalized whitelist of entity types to keep, or ``None`` for all."""
         if not self.config.entity_types:
             return None
         parsed = {_normalize_entity_type(x) for x in self.config.entity_types if str(x).strip()}
@@ -137,36 +224,43 @@ class NERTransformer(Transformer):
 
     @property
     def min_confidence(self) -> float:
+        """Confidence threshold below which local-model entities are dropped."""
         return self.config.min_confidence
 
     @property
-    def _core_cfg(self) -> Config | None:
+    def _core_cfg(self) -> RouterConfig | None:
+        """Optional ``RouterConfig`` override; resolved lazily if not set."""
         return self.config.core_cfg
 
     @_core_cfg.setter
-    def _core_cfg(self, value: Config | None) -> None:
+    def _core_cfg(self, value: RouterConfig | None) -> None:
+        """Store a ``RouterConfig`` override in the underlying ``NERConfig``."""
         self.config.core_cfg = value
 
+    @override
     def configure(self, params: dict[str, object] | None) -> None:
-        """Configure NER transformer."""
+        """Configure ner transformer."""
         super().configure(params)
         if params:
             # Pydantic handles type coercion safely
             self.config = NERConfig.model_validate(params)
 
-    def _load_spacy_model(self) -> object:
-        """Lazy-load spaCy model."""
+    def _load_spacy_model(self) -> _SpacyLanguage:
+        """Lazy-load a spaCy model: try Ukrainian (``uk_core_news_sm``) first, fall back to English."""
         if self._spacy_model is None:
             try:
                 spacy = importlib.import_module("spacy")
+                load_attr = getattr(spacy, "load", None)
+                if not _is_spacy_load(load_attr):
+                    raise ImportError("spaCy module does not expose callable load()")
 
                 # Try to load Ukrainian model first, fallback to English
                 try:
-                    self._spacy_model = spacy.load("uk_core_news_sm")
+                    self._spacy_model = _wrap_spacy_model(load_attr("uk_core_news_sm"))
                     logger.info("Loaded spaCy Ukrainian model")
                 except OSError:
                     try:
-                        self._spacy_model = spacy.load("en_core_web_sm")
+                        self._spacy_model = _wrap_spacy_model(load_attr("en_core_web_sm"))
                         logger.info("Loaded spaCy English model")
                     except OSError:
                         logger.warning(
@@ -178,18 +272,22 @@ class NERTransformer(Transformer):
                 raise
         return self._spacy_model
 
-    def _load_transformers_pipeline(self) -> object:
-        """Lazy-load transformers pipeline."""
+    def _load_transformers_pipeline(self) -> _TransformersPipeline:
+        """Lazy-load the ``xlm-roberta-large`` NER pipeline with simple aggregation."""
         if self._transformers_pipeline is None:
             try:
                 transformers = importlib.import_module("transformers")
-                pipeline = getattr(transformers, "pipeline")
+                pipeline_attr = getattr(transformers, "pipeline", None)
+                if not _is_transformers_factory(pipeline_attr):
+                    raise ImportError("transformers module does not expose callable pipeline()")
 
                 # Use a multilingual model that supports Ukrainian
-                self._transformers_pipeline = pipeline(
-                    "ner",
-                    model="xlm-roberta-large-finetuned-conll03-english",
-                    aggregation_strategy="simple",
+                self._transformers_pipeline = _wrap_transformers_pipeline(
+                    pipeline_attr(
+                        "ner",
+                        model="xlm-roberta-large-finetuned-conll03-english",
+                        aggregation_strategy="simple",
+                    )
                 )
                 logger.info("Loaded transformers NER pipeline")
             except ImportError:
@@ -200,7 +298,7 @@ class NERTransformer(Transformer):
         return self._transformers_pipeline
 
     def _extract_with_spacy(self, text: str) -> list[NEREntity]:
-        """Extract entities using spaCy."""
+        """Extract entities using spacy."""
         try:
             nlp = self._load_spacy_model()
             doc = nlp(text)
@@ -231,26 +329,33 @@ class NERTransformer(Transformer):
         """Extract entities using transformers library."""
         try:
             pipe = self._load_transformers_pipeline()
-            results = pipe(text)  # type: ignore[operator]
+            results = pipe(text)
 
             entities: list[NEREntity] = []
+            if not is_object_list(results):
+                return []
             for item in results:
+                if not is_json_dict(item):
+                    continue
                 entity_type = _normalize_entity_type(
                     item.get("entity_group", item.get("label", "UNKNOWN"))
                 )
-                confidence = float(item.get("score", 1.0))
+                score_raw = item.get("score", 1.0)
+                confidence = float(score_raw) if isinstance(score_raw, (int, float)) else 1.0
 
                 if confidence < self.min_confidence:
                     continue
                 if self.entity_types and entity_type not in self.entity_types:
                     continue
 
+                start_raw = item.get("start", 0)
+                end_raw = item.get("end", 0)
                 entities.append(
                     {
                         "text": str(item.get("word", "")),
                         "entity_type": entity_type,
-                        "start": int(item.get("start", 0)),
-                        "end": int(item.get("end", 0)),
+                        "start": int(start_raw) if isinstance(start_raw, (int, float)) else 0,
+                        "end": int(end_raw) if isinstance(end_raw, (int, float)) else 0,
                         "confidence": confidence,
                         "source": "transformers",
                     }
@@ -262,11 +367,20 @@ class NERTransformer(Transformer):
             return []
 
     async def _extract_with_llm(self, text: str) -> list[NEREntity]:
-        """Extract entities using LLM (via model registry)."""
+        """Prompt the default LLM to extract entities as a JSON array.
+
+        Truncates input beyond 8 000 chars. Parses the response, validates each
+        entity against ``STANDARD_ENTITY_TYPES`` and the configured whitelist,
+        and returns only valid entries.
+        """
         if not self._core_cfg:
             from contextunity.router.core import get_core_config
 
             self._core_cfg = get_core_config()
+
+        cfg = self._core_cfg
+        if not cfg:
+            raise ConfigurationError("Failed to obtain core config.")
 
         # Truncate very long text
         if len(text) > 8000:
@@ -284,12 +398,12 @@ Text:
 Return only valid JSON array, no markdown formatting."""
 
         try:
-            model_key = self.model or self._core_cfg.models.default_llm
+            model_key = self.model or cfg.models.default_llm
             llm = model_registry.get_llm_with_fallback(
                 key=model_key,
                 fallback_keys=[],
                 strategy="fallback",
-                config=self._core_cfg,
+                config=cfg,
             )
 
             request = ModelRequest(
@@ -306,28 +420,33 @@ Return only valid JSON array, no markdown formatting."""
                 lines = response_text.split("\n")
                 response_text = "\n".join(lines[1:-1]) if len(lines) > 2 else response_text
 
-            entities = json.loads(response_text)
-            if not isinstance(entities, list):
+            parsed = json_loads(response_text)
+            if not is_object_list(parsed):
                 return []
 
-            # Validate and filter entities
             validated: list[NEREntity] = []
-            for ent in entities:
-                if not isinstance(ent, dict):
+            for ent_obj in parsed:
+                if not is_json_dict(ent_obj):
                     continue
+                ent = ent_obj
                 entity_type = _normalize_entity_type(ent.get("entity_type", ent.get("type", "")))
                 if self.entity_types and entity_type not in self.entity_types:
                     continue
                 if entity_type not in STANDARD_ENTITY_TYPES:
                     continue
 
+                start_raw = ent.get("start", 0)
+                end_raw = ent.get("end", 0)
+                conf_raw = ent.get("confidence", 1.0)
                 validated.append(
                     {
                         "text": str(ent.get("text", "")),
                         "entity_type": entity_type,
-                        "start": int(ent.get("start", 0)),
-                        "end": int(ent.get("end", 0)),
-                        "confidence": float(ent.get("confidence", 1.0)),
+                        "start": int(start_raw) if isinstance(start_raw, (int, float)) else 0,
+                        "end": int(end_raw) if isinstance(end_raw, (int, float)) else 0,
+                        "confidence": float(conf_raw)
+                        if isinstance(conf_raw, (int, float))
+                        else 1.0,
                         "source": "llm",
                     }
                 )
@@ -337,19 +456,19 @@ Return only valid JSON array, no markdown formatting."""
             logger.error("LLM NER extraction failed: %s", e)
             return []
 
+    @override
     async def transform(self, unit: ContextUnit) -> ContextUnit:
         """Extract named entities from unit content and enrich metadata."""
-        payload = unit.payload or {}
-        if not isinstance(payload, dict):
-            payload = {}
-        metadata = payload.get("metadata", {}) if isinstance(payload.get("metadata"), dict) else {}
+        payload, metadata = payload_metadata(unit.payload)
 
-        unit = self._with_provenance(unit, self.name)
+        unit = self.with_provenance(unit, self.name)
 
         # Extract text from unit
         content = payload.get("content")
-        if isinstance(content, dict):
-            text = content.get("content") or content.get("text") or ""
+        text: str
+        if is_json_dict(content):
+            inner = content.get("content") or content.get("text") or ""
+            text = str(inner)
         elif isinstance(content, str):
             text = content
         else:
@@ -382,18 +501,22 @@ Return only valid JSON array, no markdown formatting."""
             entities_by_type[entity_type].append(ent)
 
         # Store in metadata
-        metadata["ner_entities"] = entities
-        metadata["ner_entities_by_type"] = entities_by_type
-        metadata["ner_entity_count"] = len(entities)
-        metadata["ner_mode"] = self.mode
+        metadata_payload: ContextUnitPayload = dict(metadata)
+        metadata_payload["ner_entities"] = [dict(ent) for ent in entities]
+        metadata_payload["ner_entities_by_type"] = {
+            k: [dict(ent) for ent in v] for k, v in entities_by_type.items()
+        }
+        metadata_payload["ner_entity_count"] = len(entities)
+        metadata_payload["ner_mode"] = self.mode
 
-        # Also add to struct_data if available (for ingestion pipeline)
-        if "struct_data" in metadata:
-            struct_data = dict(metadata["struct_data"])
-            struct_data["ner_entities"] = entities
-            metadata["struct_data"] = struct_data
+        if "struct_data" in metadata_payload:
+            struct_raw = metadata_payload["struct_data"]
+            if is_json_dict(struct_raw):
+                struct_data: ContextUnitPayload = dict(struct_raw)
+                struct_data["ner_entities"] = [dict(ent) for ent in entities]
+                metadata_payload["struct_data"] = struct_data
 
-        payload["metadata"] = metadata
+        payload["metadata"] = metadata_payload
         unit.payload = payload
 
         logger.debug(

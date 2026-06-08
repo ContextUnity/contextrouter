@@ -1,5 +1,4 @@
 """RetrievalOrchestrator: coordinate search across registered providers.
-
 This is a thin orchestration layer (deep modules stay in providers/storage/retrieval).
 It coordinates `IRead` implementations registered in `provider_registry`.
 """
@@ -7,21 +6,30 @@ It coordinates `IRead` implementations registered in `provider_registry`.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable
 from dataclasses import dataclass
-from typing import Any
+from typing import TypeGuard
 
 from contextunity.core import ContextUnit, get_contextunit_logger
+from contextunity.core.types import JsonDict, is_object_list
 
 from contextunity.router.core import (
-    ContextToken,
     IRead,
 )
 from contextunity.router.core.registry import ComponentFactory
 from contextunity.router.core.types import QueryLike, normalize_query
 
 
+def _is_context_unit_list(value: object) -> TypeGuard[list[ContextUnit]]:
+    if not is_object_list(value):
+        return False
+    return all(isinstance(item, ContextUnit) for item in value)
+
+
 @dataclass(frozen=True)
 class RetrievalResult:
+    """Immutable result of a fan-out retrieval across multiple IRead providers."""
+
     units: list[ContextUnit]
 
 
@@ -29,6 +37,7 @@ class RetrievalOrchestrator:
     """Fan-out retrieval across IRead providers and merge results."""
 
     def __init__(self) -> None:
+        """No-op — the orchestrator is stateless; providers are resolved at search time."""
         pass
 
     async def search(
@@ -36,21 +45,21 @@ class RetrievalOrchestrator:
         query: QueryLike,
         *,
         limit: int = 5,
-        filters: dict[str, Any] | None = None,
-        token: ContextToken,
+        filters: JsonDict | None = None,
         providers: list[str] | None = None,
     ) -> RetrievalResult:
+        """Search."""
         query_text, extra = normalize_query(query)
-        merged_filters: dict[str, Any] | None
+        merged_filters: JsonDict | None
         if filters is None and extra is None:
             merged_filters = None
         else:
             merged_filters = dict(filters or {})
-            if isinstance(extra, dict):
+            if extra is not None:
                 merged_filters.update(extra)
 
         keys = providers or ["vertex"]  # Default to vertex provider
-        calls: list[tuple[str, object]] = []
+        calls: list[tuple[str, Awaitable[list[ContextUnit]]]] = []
         for key in keys:
             try:
                 inst = ComponentFactory.create_provider(key)
@@ -61,7 +70,7 @@ class RetrievalOrchestrator:
                 calls.append(
                     (
                         key,
-                        inst.read(query_text, limit=limit, filters=merged_filters, token=token),
+                        inst.read(query_text, limit=limit, filters=merged_filters),
                     )
                 )
 
@@ -79,12 +88,11 @@ class RetrievalOrchestrator:
                 # Here we keep the orchestrator message short and actionable.
                 # Example: Vertex config/serving_config/resource errors.
                 # pylint/ruff: ignore nosec - message is controlled.
-                # type: ignore[reportGeneralTypeIssues]
 
                 get_contextunit_logger(__name__).warning("Provider '%s' failed: %s", key, r)
                 continue
-            if isinstance(r, list):
-                merged.extend([x for x in r if isinstance(x, ContextUnit)])
+            if _is_context_unit_list(r):
+                merged.extend(r)
         return RetrievalResult(units=merged)
 
 

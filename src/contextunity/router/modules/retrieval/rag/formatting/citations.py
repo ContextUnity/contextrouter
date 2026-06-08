@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import html
 import re
-from typing import Iterable
+from collections.abc import Iterable
 
 from ..models import Citation
 from ..types import UICitation
@@ -77,16 +77,13 @@ def format_citations_to_ui(
     """
     allowed = None
     if allowed_types is not None:
-        allowed = {x.strip() for x in allowed_types if isinstance(x, str) and x.strip()}
+        allowed = {x.strip() for x in allowed_types if x.strip()}
         if not allowed:
             allowed = None
 
     out: list[UICitation] = []
 
     for c in raw_citations:
-        if c is None:
-            continue
-
         source_type = c.source_type
         relevance = c.relevance
 

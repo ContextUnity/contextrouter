@@ -1,16 +1,46 @@
 """Strongly-typed Pydantic models for multimodal model contracts.
-
 This module defines the runtime entities used by the multimodal model interface.
 All types are Pydantic for validation and runtime type safety.
 """
 
 from __future__ import annotations
 
-from typing import Literal
+from enum import Enum
+from typing import ClassVar, Literal
 
+from contextunity.core.exceptions import ContextUnityError, register_error
+from contextunity.core.types import WireValue
 from pydantic import BaseModel, ConfigDict, Field
 
 from contextunity.router.core.types import StructDataValue
+
+# ---- Model Type Discriminator ----
+
+
+class ModelType(str, Enum):
+    """Discriminator for model registry variants."""
+
+    LLM = "llm"  # Text generation (chat, completion, reasoning)
+    EMBEDDINGS = "embeddings"  # Vector embeddings
+    # Future: CLASSIFIER = "classifier", ASR = "asr", VISION = "vision"
+
+
+# ---- Response Format ----
+
+
+class ResponseFormat(str, Enum):
+    """Strict output contract for LLM nodes.
+
+    When ``json_object`` is requested but the model returns invalid JSON,
+    ``ModelResponseFormatError`` is raised.  If ``response_format`` is listed
+    in the active ``RetryPolicy.retry_on``, the same model is retried first.
+    After retry exhaustion the error propagates to ``FallbackModel`` which
+    tries the next candidate.
+    """
+
+    TEXT = "text"
+    JSON_OBJECT = "json_object"
+
 
 # ---- Part Types (Discriminated Union) ----
 
@@ -18,7 +48,7 @@ from contextunity.router.core.types import StructDataValue
 class ModelPart(BaseModel):
     """Base class for model input parts (text, image, audio)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
     kind: str
 
@@ -26,14 +56,14 @@ class ModelPart(BaseModel):
 class TextPart(ModelPart):
     """Text input part."""
 
-    kind: Literal["text"] = "text"
+    kind: str = "text"
     text: str
 
 
 class ImagePart(ModelPart):
     """Image input part."""
 
-    kind: Literal["image"] = "image"
+    kind: str = "image"
     mime: str
     data_b64: str | None = None
     uri: str | None = None
@@ -42,7 +72,7 @@ class ImagePart(ModelPart):
 class AudioPart(ModelPart):
     """Audio input part."""
 
-    kind: Literal["audio"] = "audio"
+    kind: str = "audio"
     mime: str
     data_b64: str | None = None
     uri: str | None = None
@@ -52,7 +82,7 @@ class AudioPart(ModelPart):
 class VideoPart(ModelPart):
     """Video input part."""
 
-    kind: Literal["video"] = "video"
+    kind: str = "video"
     mime: str
     data_b64: str | None = None
     uri: str | None = None
@@ -64,7 +94,7 @@ class VideoPart(ModelPart):
 class ModelCapabilities(BaseModel):
     """Model capabilities declaration."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
     supports_text: bool = True
     supports_image: bool = False
@@ -85,13 +115,13 @@ class ModelCapabilities(BaseModel):
 class ModelRequest(BaseModel):
     """Multimodal model request."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
     parts: list[ModelPart] = Field(default_factory=list, min_length=1)
     system: str | None = None
     metadata: dict[str, StructDataValue] = Field(default_factory=dict)
 
-    # Generation controls
+    # Generation controls (legacy — prefer provider_config)
     temperature: float | None = None
     max_output_tokens: int | None = None  # None = use model default
     timeout_sec: float | None = None
@@ -100,17 +130,17 @@ class ModelRequest(BaseModel):
     # Response format (for JSON mode)
     response_format: Literal["text", "json_object"] | None = None
 
+    # Provider-specific config passed through from manifest node config.
+    # Each provider validates this dict via its own Pydantic model
+    # (see modules/models/llm/types.py).
+    provider_config: dict[str, WireValue] = Field(default_factory=dict)
+
     def required_modalities(self) -> set[str]:
         """Extract the set of required modalities from parts."""
         return {part.kind for part in self.parts}
 
     def to_text_prompt(self, *, include_system: bool = False) -> str:
-        """Best-effort conversion into a plain text prompt (text-only).
-
-        Default behavior excludes `system` because providers that support system prompts
-        should pass it separately. Use `include_system=True` only for providers that
-        do not support a separate system prompt and need a merged prompt.
-        """
+        """Concatenate text-only parts (and optionally the system prompt) into a single plain string."""
         text_parts: list[str] = []
         if include_system and isinstance(self.system, str) and self.system.strip():
             text_parts.append(self.system.strip())
@@ -123,7 +153,7 @@ class ModelRequest(BaseModel):
 class UsageStats(BaseModel):
     """Token usage statistics."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
     input_tokens: int | None = None
     output_tokens: int | None = None
@@ -161,11 +191,7 @@ class UsageStats(BaseModel):
     }
 
     def estimate_cost(self, model_name: str) -> "UsageStats":
-        """Fill in cost fields from token counts and model price table.
-
-        Mutates self and returns self for chaining:
-            usage = UsageStats(input_tokens=100, ...).estimate_cost("gpt-4o")
-        """
+        """Fill in cost fields from token counts and model price table."""
         if self.total_cost is not None:
             return self  # Already set by provider
 
@@ -193,7 +219,7 @@ class UsageStats(BaseModel):
 class ProviderInfo(BaseModel):
     """Normalized provider information."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
     provider: str
     model_name: str
@@ -201,9 +227,9 @@ class ProviderInfo(BaseModel):
 
 
 class ModelResponse(BaseModel):
-    """Model response."""
+    """Complete generation result returned by a provider’s ``_generate()`` method."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
     text: str
     usage: UsageStats | None = None
@@ -216,7 +242,7 @@ class ModelResponse(BaseModel):
 class ModelStreamEvent(BaseModel):
     """Base class for streaming events."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
     event_type: str
 
@@ -224,28 +250,28 @@ class ModelStreamEvent(BaseModel):
 class TextDeltaEvent(ModelStreamEvent):
     """Incremental text delta."""
 
-    event_type: Literal["text_delta"] = "text_delta"
+    event_type: str = "text_delta"
     delta: str
 
 
 class FinalTextEvent(ModelStreamEvent):
     """Final complete text."""
 
-    event_type: Literal["final_text"] = "final_text"
+    event_type: str = "final_text"
     text: str
 
 
 class UsageEvent(ModelStreamEvent):
-    """Usage statistics."""
+    """Trailing stream event carrying token usage and cost data."""
 
-    event_type: Literal["usage"] = "usage"
+    event_type: str = "usage"
     usage: UsageStats
 
 
 class ErrorEvent(ModelStreamEvent):
     """Error during generation."""
 
-    event_type: Literal["error"] = "error"
+    event_type: str = "error"
     error: str
     provider_info: ProviderInfo | None = None
 
@@ -253,45 +279,93 @@ class ErrorEvent(ModelStreamEvent):
 # ---- Error Types ----
 
 
-class ModelError(Exception):
+@register_error("ROUTER_MODEL_ERROR")
+class ModelError(ContextUnityError):
     """Base exception for model-related errors."""
 
-    def __init__(self, message: str, provider_info: ProviderInfo | None = None) -> None:
-        super().__init__(message)
-        self.provider_info = provider_info
+    code: str = "ROUTER_MODEL_ERROR"
+    message: str = "Model invocation failed"
+
+    def __init__(
+        self,
+        message: str,
+        provider_info: ProviderInfo | None = None,
+        code: str | None = None,
+        **kwargs: object,
+    ) -> None:
+        """Store the error *message* and optional *provider_info* for diagnostics."""
+        super().__init__(message=message, code=code, **kwargs)
+        self.provider_info: ProviderInfo | None = provider_info
 
 
+@register_error("ROUTER_MODEL_CAPABILITY")
 class ModelCapabilityError(ModelError):
     """Raised when a model doesn't support required modalities."""
 
-    pass
+    code: str = "ROUTER_MODEL_CAPABILITY"
+    message: str = "Model does not support required modalities"
 
 
+@register_error("ROUTER_MODEL_EXHAUSTED")
 class ModelExhaustedError(ModelError):
     """Raised when all candidate models fail for reasons other than capability mismatch."""
 
+    code: str = "ROUTER_MODEL_EXHAUSTED"
+    message: str = "All candidate models failed"
 
+
+@register_error("ROUTER_MODEL_TIMEOUT")
 class ModelTimeoutError(ModelError):
     """Raised on generation timeout."""
 
-    pass
+    code: str = "ROUTER_MODEL_TIMEOUT"
+    message: str = "Model generation timed out"
 
 
+@register_error("ROUTER_MODEL_RATE_LIMIT")
 class ModelRateLimitError(ModelError):
     """Raised on rate limiting (transient, can retry after delay)."""
 
-    pass
+    code: str = "ROUTER_MODEL_RATE_LIMIT"
+    message: str = "Model rate limited, retry later"
 
 
+@register_error("ROUTER_MODEL_QUOTA_EXHAUSTED")
 class ModelQuotaExhaustedError(ModelError):
     """Raised when API quota/billing is exhausted (NOT transient, should fallback immediately)."""
 
-    pass
+    code: str = "ROUTER_MODEL_QUOTA_EXHAUSTED"
+    message: str = "Model API quota exhausted"
+
+
+@register_error("ROUTER_MODEL_RESPONSE_FORMAT")
+class ModelResponseFormatError(ModelError):
+    """Raised when the model returns a response that violates the requested format.
+
+    E.g. ``response_format=json_object`` was requested but the output is not valid JSON.
+    Extends ``ModelError`` so ``FallbackModel`` catches it and tries the next candidate.
+    """
+
+    code: str = "ROUTER_MODEL_RESPONSE_FORMAT"
+    message: str = "Model response format violation"
+
+
+@register_error("ROUTER_MODEL_BUDGET_EXCEEDED")
+class ModelBudgetExceededError(ModelError):
+    """Raised when cumulative cost exceeds the per-request ``budget_usd`` cap.
+
+    Non-retryable — immediately propagates to ``FallbackModel``.
+    """
+
+    code: str = "ROUTER_MODEL_BUDGET_EXCEEDED"
+    message: str = "Model budget exceeded"
 
 
 # ---- Type Exports ----
 
 __all__ = [
+    "ModelType",
+    "ResponseFormat",
     "ModelPart",
     "TextPart",
     "ImagePart",
@@ -313,4 +387,6 @@ __all__ = [
     "ModelTimeoutError",
     "ModelRateLimitError",
     "ModelQuotaExhaustedError",
+    "ModelResponseFormatError",
+    "ModelBudgetExceededError",
 ]

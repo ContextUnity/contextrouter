@@ -15,10 +15,16 @@ Security model:
 
 from __future__ import annotations
 
-from typing import Any
+import asyncio
+from typing import TYPE_CHECKING
 
 from contextunity.core import get_contextunit_logger
+from contextunity.core.sdk.payload import get_int, get_str, get_str_list
+from contextunity.core.types import JsonDict, WireValue, is_json_dict, is_object_dict
 from langchain_core.tools import BaseTool
+
+if TYPE_CHECKING:
+    import asyncio as _asyncio
 
 logger = get_contextunit_logger(__name__)
 
@@ -27,7 +33,7 @@ def create_tool_from_config(
     name: str,
     tool_type: str,
     description: str,
-    config: dict[str, Any],
+    config: dict[str, WireValue],
 ) -> list[BaseTool]:
     """Create BaseTool instance(s) from registration config.
 
@@ -45,16 +51,17 @@ def create_tool_from_config(
     """
     if tool_type == "sql":
         return _create_sql_tools(name, description, config)
-    elif tool_type in ("bidi", "commerce"):
+    if tool_type in ("bidi", "commerce"):
         return _create_bidi_tool(name, description, config)
-    else:
-        raise ValueError(f"Unknown tool type: {tool_type}. Supported: sql, bidi")
+    from contextunity.core.exceptions import ConfigurationError
+
+    raise ConfigurationError(f"Unsupported tool type: '{tool_type}'.")
 
 
 def _create_sql_tools(
     name: str,
     description: str,
-    config: dict[str, Any],
+    config: dict[str, WireValue],
 ) -> list[BaseTool]:
     """Create SQL tools that delegate execution via BiDi stream.
 
@@ -71,25 +78,23 @@ def _create_sql_tools(
         statement_timeout_ms: int (default 5000)
         forbidden_keywords: list[str]
     """
-    schema_description = config.get("schema_description", "")
-    max_rows = config.get("max_rows", 500)
-    statement_timeout_ms = config.get("statement_timeout_ms", 5000)
-    forbidden_keywords = config.get("forbidden_keywords", [])
-    project_id = config.get("project_id", config.get("tenant_id", ""))
+    schema_description = get_str(config, "schema_description")
+    max_rows = get_int(config, "max_rows", 500)
+    statement_timeout_ms = get_int(config, "statement_timeout_ms", 5000)
+    forbidden_keywords = get_str_list(config, "forbidden_keywords")
+    project_id = get_str(config, "project_id") or get_str(config, "tenant_id")
 
     # _main_loop is captured lazily on first call (nonlocal in db_executor).
     # db_executor runs in a thread-pool thread (LangChain ainvoke → run_in_executor),
     # so it must schedule async work on the MAIN event loop via run_coroutine_threadsafe.
-    _main_loop: "_asyncio.AbstractEventLoop | None" = None
+    _main_loop: _asyncio.AbstractEventLoop | None = None
     try:
-        import asyncio as _asyncio
-
-        _main_loop = _asyncio.get_running_loop()
+        _main_loop = asyncio.get_running_loop()
     except RuntimeError:
         pass
 
     # db_executor — always delegates to BiDi stream
-    def db_executor(sql: str) -> dict[str, Any]:
+    def db_executor(sql: str) -> JsonDict:
         """Execute SQL via BiDi stream in the project's process.
 
         DSN never enters the Router process.
@@ -101,8 +106,6 @@ def _create_sql_tools(
         manager = get_stream_executor_manager()
 
         if manager.is_available(project_id, name):
-            import asyncio
-
             if _main_loop is None:
                 try:
                     _main_loop = asyncio.get_running_loop()
@@ -114,9 +117,15 @@ def _create_sql_tools(
                     manager.execute(project_id, name, {"sql": sql}),
                     _main_loop,
                 )
-                return future.result(timeout=35)
-            else:
-                return asyncio.run(manager.execute(project_id, name, {"sql": sql}))
+                result = future.result(timeout=35)
+                if is_json_dict(result):
+                    return result
+                return {"error": "Stream executor returned non-object SQL payload"}
+
+            result = asyncio.run(manager.execute(project_id, name, {"sql": sql}))
+            if is_json_dict(result):
+                return result
+            return {"error": "Stream executor returned non-object SQL payload"}
 
         return {
             "error": (
@@ -143,7 +152,7 @@ def _create_sql_tools(
         if "execute" in tool.name:
             tool.name = name
             if description:
-                tool.description = description
+                object.__setattr__(tool, "description", description)
         elif "validate" in tool.name:
             tool.name = f"{name}_validate"
 
@@ -164,7 +173,7 @@ def _create_sql_tools(
 def _create_bidi_tool(
     name: str,
     description: str,
-    config: dict[str, Any],
+    config: dict[str, WireValue],
 ) -> list[BaseTool]:
     """Create a BiDi tool that delegates execution via ToolExecutorStream.
 
@@ -174,17 +183,15 @@ def _create_bidi_tool(
     Config keys:
         project_id: Project ID for stream routing
     """
-    project_id = config.get("project_id", config.get("tenant_id", ""))
+    project_id = get_str(config, "project_id") or get_str(config, "tenant_id")
 
-    _main_loop: "Any" = None
+    _main_loop: _asyncio.AbstractEventLoop | None = None
     try:
-        import asyncio as _asyncio
-
-        _main_loop = _asyncio.get_running_loop()
+        _main_loop = asyncio.get_running_loop()
     except RuntimeError:
         pass
 
-    def bidi_executor(**kwargs: Any) -> dict[str, Any]:
+    def bidi_executor(**kwargs: object) -> dict[str, object]:
         """Execute tool via BiDi stream in the project's process."""
         nonlocal _main_loop
         from contextunity.router.service.stream_executors import get_stream_executor_manager
@@ -195,11 +202,11 @@ def _create_bidi_tool(
             from langchain_core.tools import ToolException
 
             raise ToolException(
-                f"No stream executor for project '{project_id}', tool '{name}'. "
-                f"Project must open ToolExecutorStream."
+                (
+                    f"No stream executor for project '{project_id}', tool '{name}'. "
+                    "Project must open ToolExecutorStream."
+                )
             )
-
-        import asyncio
 
         if _main_loop is None:
             try:
@@ -207,24 +214,31 @@ def _create_bidi_tool(
             except RuntimeError:
                 pass
 
+        payload: dict[str, object] = {str(key): value for key, value in kwargs.items()}
+
         if _main_loop is not None and _main_loop.is_running():
             future = asyncio.run_coroutine_threadsafe(
-                manager.execute(project_id, name, kwargs),
+                manager.execute(project_id, name, payload),
                 _main_loop,
             )
             res = future.result(timeout=120)
         else:
-            res = asyncio.run(manager.execute(project_id, name, kwargs))
+            res = asyncio.run(manager.execute(project_id, name, payload))
 
-        if isinstance(res, dict) and "error" in res:
+        if not is_object_dict(res):
             from langchain_core.tools import ToolException
 
-            raise ToolException(res["error"])
-        return res
+            raise ToolException(f"Tool '{name}' returned non-object result")
 
-    from langchain_core.tools import StructuredTool
+        if "error" in res:
+            from langchain_core.tools import ToolException
 
-    tool = StructuredTool.from_function(
+            raise ToolException(str(res["error"]))
+        return {str(key): value for key, value in res.items()}
+
+    from contextunity.router.langchain_boundaries import structured_tool_from_function
+
+    tool = structured_tool_from_function(
         func=bidi_executor,
         name=name,
         description=description or f"BiDi tool: {name}",

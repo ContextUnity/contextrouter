@@ -23,6 +23,7 @@ from contextunity.router.core import get_core_config, get_env
 
 from .local import GraphService
 from .postgres import PostgresGraphService
+from .tenant_context import set_request_tenant_id
 
 logger = get_contextunit_logger(__name__)
 
@@ -50,61 +51,59 @@ def get_graph_service(
     """
     global _graph_service
 
-    if _graph_service is not None:
-        return _graph_service
+    def _current_tenant_id() -> str:
+        from contextunity.core.sdk.identity import get_tenant_id
+
+        return str(get_tenant_id() or "public")
 
     with _graph_lock:
-        # Double-check after acquiring lock
-        if _graph_service is not None:
-            return _graph_service
+        if _graph_service is None:
+            # Determine default paths if not provided
+            if graph_path is None or taxonomy_path is None or ontology_path is None:
+                try:
+                    from contextunity.brain.ingestion.rag.config import (
+                        get_assets_paths,
+                        load_config,
+                    )
 
-        # Determine default paths if not provided
-        if graph_path is None or taxonomy_path is None or ontology_path is None:
-            try:
-                from contextunity.brain.ingestion.rag import (
-                    get_assets_paths,
-                    load_config,
+                    config = load_config()
+                    paths = get_assets_paths(config)
+                    if graph_path is None:
+                        graph_path = paths.get("graph")
+                    if taxonomy_path is None:
+                        taxonomy_path = paths.get("taxonomy")
+                    if ontology_path is None:
+                        ontology_path = paths.get("ontology")
+                except ImportError:
+                    logger.warning(
+                        "Could not load config for default paths (contextunity.brain not available)"
+                    )
+
+            # Back-compat: some repos store graph as knowledge_graph.gpickle
+            if graph_path is not None and not graph_path.exists():
+                alt = graph_path.with_name("knowledge_graph.gpickle")
+                if alt.exists():
+                    graph_path = alt
+
+            cfg = get_core_config()
+            kg_backend = (get_env("RAG_KG_BACKEND") or "").strip().lower()
+            if kg_backend == "postgres" and cfg.postgres.dsn:
+                _graph_service = PostgresGraphService(
+                    dsn=cfg.postgres.dsn,
+                    tenant_id=_current_tenant_id(),
+                    taxonomy_path=taxonomy_path,
+                    ontology_path=ontology_path,
+                )
+            else:
+                _graph_service = GraphService(
+                    graph_path=graph_path,
+                    taxonomy_path=taxonomy_path,
+                    ontology_path=ontology_path,
                 )
 
-                config = load_config()
-                paths = get_assets_paths(config)
-                if graph_path is None:
-                    graph_path = paths.get("graph")
-                if taxonomy_path is None:
-                    taxonomy_path = paths.get("taxonomy")
-                if ontology_path is None:
-                    ontology_path = paths.get("ontology")
-            except ImportError:
-                logger.warning(
-                    "Could not load config for default paths (contextunity.brain not available)"
-                )
-
-        # Back-compat: some repos store graph as knowledge_graph.gpickle
-        if graph_path is not None and not graph_path.exists():
-            alt = graph_path.with_name("knowledge_graph.gpickle")
-            if alt.exists():
-                graph_path = alt
-
-        cfg = get_core_config()
-        kg_backend = (get_env("RAG_KG_BACKEND") or "").strip().lower()
-        if kg_backend == "postgres" and cfg.postgres.dsn:
-            from contextunity.core.sdk.identity import get_tenant_id
-
-            tenant_id = get_tenant_id() or "public"
-            _graph_service = PostgresGraphService(
-                dsn=cfg.postgres.dsn,
-                tenant_id=str(tenant_id),
-                taxonomy_path=taxonomy_path,
-                ontology_path=ontology_path,
-            )
-        else:
-            _graph_service = GraphService(
-                graph_path=graph_path,
-                taxonomy_path=taxonomy_path,
-                ontology_path=ontology_path,
-            )
-
-    return _graph_service
+        if isinstance(_graph_service, PostgresGraphService):
+            set_request_tenant_id(_current_tenant_id())
+        return _graph_service
 
 
 def reset_graph_service() -> None:

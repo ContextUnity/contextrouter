@@ -17,11 +17,16 @@ Uses the same BrainClient singleton as brain_memory_tools.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
+
+from contextunity.core.types import ContextUnitPayload, JsonDict, JsonValue, is_json_dict
+
+if TYPE_CHECKING:
+    from contextunity.core.sdk import BrainClient
 
 from contextunity.core import get_contextunit_logger
-from langchain_core.tools import tool
 
+from contextunity.router.langchain_boundaries import tool
 from contextunity.router.modules.tools import register_tool
 from contextunity.router.modules.tools.schemas import (
     EpisodeResult,
@@ -33,36 +38,46 @@ from contextunity.router.modules.tools.schemas import (
 logger = get_contextunit_logger(__name__)
 
 # Per-tenant BrainClient cache — each tenant gets a properly scoped client
-_brain_clients: dict[str, object] = {}
+_brain_clients: dict[str, BrainClient] = {}
+_brain_client_token_ids: dict[str, str] = {}
 
 
-def _get_brain_client(tenant_id: str):
+def _auth_token_id(token: object | None) -> str:
+    if token is None:
+        return ""
+    token_id = getattr(token, "token_id", None)
+    return token_id if isinstance(token_id, str) else ""
+
+
+def _get_brain_client(tenant_id: str) -> BrainClient:
     """Get or create BrainClient for a specific tenant.
 
-    Uses the client's **pre-serialized token string** from the current
-    auth context. The token is already signed by the project's backend
-    (HMAC or Shield) — no Router-level signing backend needed.
-
-    Requires ``trace:write`` (LogTrace) and ``memory:write`` (AddEpisode),
-    both of which are granted to the primary client token representing the user.
+    Uses the verified ``ContextToken`` from the current gRPC auth context.
+    Recreates the client when the active token changes (rotation / new user).
     """
-    if tenant_id not in _brain_clients:
-        from contextunity.core.sdk import BrainClient
+    auth_token = _get_auth_token()
+    token_key = _auth_token_id(auth_token)
+    cached_key = _brain_client_token_ids.get(tenant_id)
+    if tenant_id in _brain_clients and cached_key == token_key:
+        return _brain_clients[tenant_id]
 
-        _brain_clients[tenant_id] = BrainClient(
-            tenant_id=tenant_id,
-            token=lambda: _get_auth_token_string(),
-        )
+    from contextunity.core.sdk import BrainClient
+
+    _brain_clients[tenant_id] = BrainClient(
+        tenant_id=tenant_id,
+        token=auth_token,
+    )
+    _brain_client_token_ids[tenant_id] = token_key
     return _brain_clients[tenant_id]
 
 
-def _get_auth_token_string() -> str | None:
-    """Extract the pre-serialized token string from the current gRPC auth context."""
+def _get_auth_token():
+    """Extract the verified ContextToken from the current gRPC auth context."""
     try:
         from contextunity.core.authz.context import get_auth_context
 
         ctx = get_auth_context()
-        return ctx.token_string if ctx else None
+        return ctx.token if ctx else None
     except Exception:
         return None
 
@@ -72,28 +87,139 @@ def _get_auth_token_string() -> str | None:
 # ============================================================================
 
 
+def _tool_calls_wire(calls: list[ToolCallSummary]) -> list[dict[str, object]]:
+    return [dict(tc) for tc in calls]
+
+
+def _steps_wire(steps: list[JsonDict] | None) -> list[dict[str, object]]:
+    """Serialize Graph Journey steps for Brain/view (UUID/datetime safe)."""
+    if not steps:
+        return []
+
+    from contextunity.core.types import is_object_dict, is_object_list
+
+    from contextunity.router.service.security import sanitize_for_struct
+
+    def _walk(span: object) -> dict[str, object] | None:
+        if not is_object_dict(span):
+            return None
+        out: dict[str, object] = {}
+        for key, value in span.items():
+            if key == "children" and is_object_list(value):
+                children = [child for item in value if (child := _walk(item)) is not None]
+                out[key] = children
+            else:
+                out[key] = sanitize_for_struct(value)
+        return out
+
+    wired: list[dict[str, object]] = []
+    for step in steps:
+        item = _walk(dict(step))
+        if item is not None:
+            wired.append(item)
+    return wired
+
+
+def _trace_metadata(
+    *,
+    metadata: JsonDict | None,
+    model_key: str,
+    platform: str,
+    iterations: int,
+    message_count: int,
+    steps: list[JsonDict] | None,
+) -> JsonDict:
+    from contextunity.core.types import is_json_value
+
+    from contextunity.router.service.security import sanitize_for_struct
+
+    wire: JsonDict = {}
+    if metadata:
+        for key, value in metadata.items():
+            # Heavy runtime manifest — not needed in view; breaks json validation.
+            if key in {"project_config", "steps"}:
+                continue
+            sanitized = sanitize_for_struct(value)
+            if is_json_value(sanitized):
+                wire[key] = sanitized
+
+    if "model_key" not in wire:
+        wire["model_key"] = model_key
+    if "platform" not in wire:
+        wire["platform"] = platform
+    if "iterations" not in wire:
+        wire["iterations"] = iterations
+    if "message_count" not in wire:
+        wire["message_count"] = message_count
+
+    step_wire = _steps_wire(steps)
+    if step_wire:
+        steps_wire: list[JsonValue] = []
+        for step in step_wire:
+            if is_json_dict(step):
+                steps_wire.append(step)
+        if steps_wire:
+            wire["steps"] = steps_wire
+
+    return wire
+
+
+def _token_usage_json(usage: TotalTokenUsage) -> JsonDict:
+    raw = dict(usage)
+    return raw if is_json_dict(raw) else {}
+
+
+def _episode_metadata(
+    *,
+    agent_id: str,
+    trace_id: str,
+    user_query: str,
+    final_answer: str,
+    tool_calls: list[ToolCallSummary],
+    token_usage: TotalTokenUsage,
+    timing_ms: int,
+    platform: str,
+    iterations: int,
+) -> JsonDict:
+    tc = tool_calls or []
+    total_tokens = token_usage.get("input_tokens", 0) + token_usage.get("output_tokens", 0)
+    wire: ContextUnitPayload = {
+        "event_type": "agent_execution",
+        "agent_id": agent_id,
+        "trace_id": trace_id,
+        "status": "completed",
+        "user_query": user_query[:2000],
+        "final_answer": final_answer[:2000],
+        "tool_calls": _tool_calls_wire(tc),
+        "token_usage": _token_usage_json(token_usage),
+        "duration_ms": timing_ms,
+        "tokens_used": total_tokens,
+        "platform": platform,
+        "iterations": iterations,
+    }
+    return wire if is_json_dict(wire) else {}
+
+
 @tool
 async def log_execution_trace(
     tenant_id: str,
     agent_id: str,
     session_id: str,
-    user_id: str,
+    user_id: str | None,
     graph_name: str,
     tool_calls: list[ToolCallSummary],
     token_usage: TotalTokenUsage,
     timing_ms: int,
-    # ── Rich trace fields (used by contextunity.view dashboard) ──
-    steps: list[dict[str, Any]] | None = None,
+    steps: list[JsonDict] | None = None,
     platform: str = "",
     model_key: str = "",
     iterations: int = 0,
     message_count: int = 0,
     user_query: str = "",
     final_answer: str = "",
-    # ── Standard fields ──
-    metadata: dict[str, Any] | None = None,
+    metadata: JsonDict | None = None,
     provenance: list[str] | None = None,
-    security_flags: dict[str, Any] | None = None,
+    security_flags: JsonDict | None = None,
     record_episode: bool = True,
 ) -> TraceResult:
     """Log a full execution trace to contextunity.brain for observability.
@@ -132,25 +258,25 @@ async def log_execution_trace(
     try:
         # ── Build rich metadata ──
         # Merge caller-provided metadata with dashboard-required fields
-        full_metadata = dict(metadata or {})
-        full_metadata.setdefault("model_key", model_key)
-        full_metadata.setdefault("platform", platform)
-        full_metadata.setdefault("iterations", iterations)
-        full_metadata.setdefault("message_count", message_count)
-
-        # Steps are the key field for contextunity.view's Graph Journey
-        if steps:
-            full_metadata["steps"] = steps
+        full_metadata = _trace_metadata(
+            metadata=metadata,
+            model_key=model_key,
+            platform=platform,
+            iterations=iterations,
+            message_count=message_count,
+            steps=steps,
+        )
 
         brain = _get_brain_client(tenant_id)
+
         trace_id = await brain.log_trace(
             tenant_id=tenant_id,
             agent_id=agent_id,
             session_id=session_id,
             user_id=user_id,
             graph_name=graph_name,
-            tool_calls=tool_calls,
-            token_usage=token_usage,
+            tool_calls=_tool_calls_wire(tool_calls) if tool_calls else None,
+            token_usage=_token_usage_json(token_usage),
             timing_ms=timing_ms,
             security_flags=security_flags or {},
             metadata=full_metadata,
@@ -182,29 +308,22 @@ async def log_execution_trace(
                     f"Stats: {len(tc)} tool calls, {timing_ms}ms"
                 )
 
-                total_tokens = token_usage.get("input_tokens", 0) + token_usage.get(
-                    "output_tokens", 0
-                )
-
-                await brain.add_episode(
+                _ = await brain.add_episode(
                     tenant_id=tenant_id,
                     user_id=user_id,
                     content=episode_content,
                     session_id=session_id,
-                    metadata={
-                        "event_type": "agent_execution",
-                        "agent_id": agent_id,
-                        "trace_id": trace_id,
-                        "status": "completed",
-                        "user_query": user_query[:2000],
-                        "final_answer": final_answer[:2000],
-                        "tool_calls": tc,
-                        "token_usage": token_usage,
-                        "duration_ms": timing_ms,
-                        "tokens_used": total_tokens,
-                        "platform": platform,
-                        "iterations": iterations,
-                    },
+                    metadata=_episode_metadata(
+                        agent_id=agent_id,
+                        trace_id=trace_id,
+                        user_query=user_query,
+                        final_answer=final_answer,
+                        tool_calls=tc,
+                        token_usage=token_usage,
+                        timing_ms=timing_ms,
+                        platform=platform,
+                        iterations=iterations,
+                    ),
                 )
                 logger.info("Recorded episode for trace %s", trace_id)
             except Exception as ep_err:
@@ -218,9 +337,9 @@ async def log_execution_trace(
         }
     except Exception as e:
         detail_attr = getattr(e, "details", None)
-        detail = detail_attr() if callable(detail_attr) else str(detail_attr or e)
+        detail = str(detail_attr() if callable(detail_attr) else (detail_attr or e))
         code_attr = getattr(e, "code", None)
-        code = code_attr() if callable(code_attr) else str(code_attr or type(e).__name__)
+        code = str(code_attr() if callable(code_attr) else (code_attr or type(e).__name__))
         logger.error("Brain trace failed [%s]: %s", code, detail)
         return {"success": False, "error": detail}
 
@@ -233,14 +352,14 @@ async def log_execution_trace(
 @tool
 async def record_execution_episode(
     tenant_id: str,
-    user_id: str,
+    user_id: str | None,
     session_id: str,
     agent_id: str,
     user_query: str,
     final_answer: str,
     trace_id: str = "",
     tool_calls: list[ToolCallSummary] | None = None,
-    token_usage: dict[str, int | float] | None = None,
+    token_usage: TotalTokenUsage | None = None,
     timing_ms: int = 0,
     platform: str = "",
 ) -> EpisodeResult:
@@ -273,31 +392,30 @@ async def record_execution_episode(
         brain = _get_brain_client(tenant_id)
         task_summary = (user_query[:500] + "...") if len(user_query) > 500 else user_query
         outcome_summary = (final_answer[:500] + "...") if len(final_answer) > 500 else final_answer
-        tc = tool_calls or []
 
         episode_content = (
             f"User Task: {task_summary or 'No human query found'}\n\n"
             f"Outcome: {outcome_summary or 'Agent completed with tool calls only'}\n\n"
-            f"Stats: {len(tc)} tool calls, {timing_ms}ms"
+            f"Stats: {len(tool_calls or [])} tool calls, {timing_ms}ms"
         )
 
+        usage: TotalTokenUsage = token_usage or TotalTokenUsage()
         episode_id = await brain.add_episode(
             tenant_id=tenant_id,
             user_id=user_id,
             content=episode_content,
             session_id=session_id,
-            metadata={
-                "event_type": "agent_execution",
-                "agent_id": agent_id,
-                "trace_id": trace_id,
-                "status": "completed",
-                "user_query": user_query[:2000],
-                "final_answer": final_answer[:2000],
-                "tool_calls": tc,
-                "token_usage": token_usage or {},
-                "duration_ms": timing_ms,
-                "platform": platform,
-            },
+            metadata=_episode_metadata(
+                agent_id=agent_id,
+                trace_id=trace_id,
+                user_query=user_query,
+                final_answer=final_answer,
+                tool_calls=tool_calls or [],
+                token_usage=usage,
+                timing_ms=timing_ms,
+                platform=platform,
+                iterations=0,
+            ),
         )
 
         logger.info("Recorded episode %s for session %s", episode_id, session_id)
@@ -307,9 +425,9 @@ async def record_execution_episode(
         }
     except Exception as e:
         detail_attr = getattr(e, "details", None)
-        detail = detail_attr() if callable(detail_attr) else str(detail_attr or e)
+        detail = str(detail_attr() if callable(detail_attr) else (detail_attr or e))
         code_attr = getattr(e, "code", None)
-        code = code_attr() if callable(code_attr) else str(code_attr or type(e).__name__)
+        code = str(code_attr() if callable(code_attr) else (code_attr or type(e).__name__))
         logger.error("Brain episode failed [%s]: %s", code, detail)
         return {"success": False, "error": detail}
 

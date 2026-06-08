@@ -7,9 +7,7 @@ from contextunity.router.modules.retrieval.rag.models import Citation, Retrieved
 
 
 def test_retrieval_pipeline_returns_empty_on_empty_query(monkeypatch) -> None:
-    from contextunity.router.cortex.state import AgentState
-
-    state: AgentState = {"user_query": ""}
+    state: dict = {"user_query": ""}
     res = asyncio.run(RagPipeline().execute(state))
     assert res.retrieved_docs == []
     assert res.citations == []
@@ -63,9 +61,7 @@ def test_retrieval_pipeline_calls_vertex_and_builds_citations(monkeypatch) -> No
 
     from contextunity.core.tokens import ContextToken
 
-    from contextunity.router.cortex.state import AgentState
-
-    state: AgentState = {
+    state: dict = {
         "user_query": "hello",
         "retrieval_queries": ["hello"],
         "access_token": ContextToken(token_id="test-token", permissions=("RAG_READ",)),

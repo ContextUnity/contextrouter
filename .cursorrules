@@ -4,7 +4,7 @@ ContextRouter is a modular, LangGraph-powered AI Gateway designed for high-perfo
 
 ## Core Philosophy
 
-- **ContextUnit Protocol**: All data passing through the pipeline uses `ContextUnit` from `cu.core` for provenance and security. Authorization is handled via `ContextToken` which integrates with `ContextUnit.security` scopes.
+- **ContextUnit Protocol**: All data passing through the pipeline uses `ContextUnit` from `contextunity.core` for provenance and security. Authorization is handled via `ContextToken` which integrates with `ContextUnit.security` scopes.
 - **Platform Agnostic**: The router should not know about HTTP, Telegram, or Web. It consumes messages and emits events.
 - **Strict Separation**: Logic (cortex) vs. Infrastructure (modules/providers) vs. Raw Data (modules/connectors).
 - **Registry-First**: Components are registered via decorators and loaded lazily.
@@ -36,7 +36,7 @@ src/cu/router/
 All LLM usage MUST go through `model_registry`:
 
 ```python
-from cu.router.modules.models import model_registry
+from contextunity.router.modules.models import model_registry
 
 # Configuration-driven with fallback
 model = model_registry.get_llm_with_fallback(
@@ -84,7 +84,7 @@ else:
 All data crossing module boundaries MUST use ContextUnit:
 
 ```python
-from cu.core import ContextUnit, ContextToken
+from contextunity.core import ContextUnit, ContextToken
 
 # Create with provenance tracking
 unit = ContextUnit(
@@ -126,7 +126,7 @@ Domain-specific graphs live in their own packages and connect via:
 export CU_ROUTER_OVERRIDE_PATH="contextcommerce.graphs:build_gardener"
 
 # Option 2: Registry (programmatic)
-from cu.router.core.registry import register_graph
+from contextunity.router.core.registry import register_graph
 
 @register_graph("gardener")
 def build_gardener_graph():

@@ -1,4 +1,4 @@
-"""Providers (sinks)."""
+"""Data providers (sinks) -- storage backends, rate limiters, and external service adapters."""
 
 from __future__ import annotations
 

@@ -19,21 +19,35 @@ from contextunity.router.core import get_core_config
 from contextunity.router.cortex import RetrievedDoc
 from contextunity.router.utils.retry import retry_with_backoff_async
 
+from ._ranking_vendor import (
+    RankingRecord,
+    RankRequest,
+    RankServiceAsyncClient,
+    load_rank_client,
+    load_rank_request_factory,
+    load_ranking_record_factory,
+)
 from .settings import get_rag_retrieval_settings
 
 logger = get_contextunit_logger(__name__)
 
-_rank_client = None
+_rank_client: RankServiceAsyncClient | None = None
 
 
-def _get_rank_client():
+def _get_rank_client() -> RankServiceAsyncClient:
     """Singleton async RankServiceAsyncClient (reuses gRPC channel)."""
     global _rank_client
     if _rank_client is None:
-        from google.cloud import discoveryengine_v1 as discoveryengine
-
-        _rank_client = discoveryengine.RankServiceAsyncClient()
+        _rank_client = load_rank_client()
     return _rank_client
+
+
+def _get_ranking_record_factory() -> type[RankingRecord]:
+    return load_ranking_record_factory()
+
+
+def _get_rank_request_factory() -> type[RankRequest]:
+    return load_rank_request_factory()
 
 
 def _is_reranking_enabled() -> bool:
@@ -52,18 +66,7 @@ async def rerank_documents(
     top_n: int | None = None,
     source_type: str | None = None,
 ) -> list[RetrievedDoc]:
-    """Rerank documents using Vertex AI Ranking API (async).
-
-    Args:
-        query: The user query to rank documents against.
-        documents: List of documents to rerank. Each doc should have content.
-        top_n: Maximum number of documents to return. If None, returns all.
-        source_type: Optional filter to only rerank docs of this type.
-
-    Returns:
-        Documents sorted by relevance score (highest first), with score added.
-        If reranking fails or is disabled, returns original documents unchanged.
-    """
+    """Rerank documents using Vertex AI Ranking API (async)."""
     from contextunity.router.modules.observability.langfuse import retrieval_span
 
     if not _is_reranking_enabled():
@@ -76,14 +79,12 @@ async def rerank_documents(
     if not query or not query.strip():
         return documents[:top_n] if top_n else documents
 
-    # Filter by source_type if specified
     docs_to_rank = documents
     if source_type:
         docs_to_rank = [d for d in documents if d.source_type == source_type]
         if not docs_to_rank:
             return []
 
-    # Vertex AI Ranking API limit: 1000 records per request
     MAX_RANK_RECORDS = 1000
     if len(docs_to_rank) > MAX_RANK_RECORDS:
         logger.warning(
@@ -96,8 +97,6 @@ async def rerank_documents(
         input_data={"query": query, "source_type": source_type, "doc_count": len(docs_to_rank)},
     ) as span_ctx:
         try:
-            from google.cloud import discoveryengine_v1 as discoveryengine
-
             cfg = get_core_config()
             project_id = cfg.vertex.project_id
 
@@ -106,6 +105,8 @@ async def rerank_documents(
                 return docs_to_rank[:top_n] if top_n else docs_to_rank
 
             client = _get_rank_client()
+            ranking_record_factory = _get_ranking_record_factory()
+            rank_request_factory = _get_rank_request_factory()
 
             ranking_config = client.ranking_config_path(
                 project=project_id,
@@ -113,15 +114,13 @@ async def rerank_documents(
                 ranking_config="default_ranking_config",
             )
 
-            # Build ranking records from documents
-            records: list[discoveryengine.RankingRecord] = []
+            records: list[RankingRecord] = []
             doc_id_map: dict[str, RetrievedDoc] = {}
 
             for i, doc in enumerate(docs_to_rank):
                 doc_id = f"doc_{i}"
                 doc_id_map[doc_id] = doc
 
-                # Extract title and content based on source_type
                 st = doc.source_type
                 title = ""
                 content = ""
@@ -145,21 +144,21 @@ async def rerank_documents(
                     title = doc.title or ""
                     content = doc.content or ""
                 elif st == "knowledge":
-                    # For knowledge we still use getattr for fields not in Pydantic model if they exist in extra
-                    filename = getattr(doc, "filename", "")
-                    description = getattr(doc, "description", "")
+                    filename_raw = doc.metadata.get("filename")
+                    description_raw = doc.metadata.get("description")
+                    filename = str(filename_raw) if isinstance(filename_raw, str) else ""
+                    description = str(description_raw) if isinstance(description_raw, str) else ""
                     title = filename
                     content = f"{description}\n{doc.content or ''}"
                 else:
                     title = doc.title or ""
                     content = doc.content or ""
 
-                # Skip docs with no content
                 if not content and not title:
                     continue
 
                 records.append(
-                    discoveryengine.RankingRecord(
+                    ranking_record_factory(
                         id=doc_id,
                         title=title[:500] if title else "",
                         content=content[:1500] if content else "",
@@ -172,7 +171,7 @@ async def rerank_documents(
 
             t0 = time.perf_counter()
 
-            request = discoveryengine.RankRequest(
+            request = rank_request_factory(
                 ranking_config=ranking_config,
                 model=_get_ranker_model(),
                 top_n=top_n if top_n else len(records),
@@ -193,7 +192,6 @@ async def rerank_documents(
                 source_type or "all",
             )
 
-            # Build result list with scores
             ranked_docs: list[RetrievedDoc] = []
             for ranked_record in response.records:
                 doc_id = ranked_record.id

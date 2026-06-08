@@ -1,4 +1,4 @@
-"""Connectors (sources)."""
+"""Data connectors (sources) -- pluggable adapters for ingesting external data into the pipeline."""
 
 from __future__ import annotations
 

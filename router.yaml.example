@@ -1,0 +1,55 @@
+# =============================================================================
+# ContextRouter - router.yaml.example
+# =============================================================================
+# Place in .contextunity/router.yml (project) or /etc/contextunity/router.yml (system).
+# Values here OVERRIDE .env for non-secret settings.
+# SECRETS (api keys, passwords) MUST stay in .env or systemd-creds - never here.
+# See: packages/core/src/contextunity/core/config/loader.py
+# =============================================================================
+
+# -- Logging ------------------------------------------------------------------
+log_level: INFO
+# log_json: false
+
+# -- gRPC Server --------------------------------------------------------------
+# grpc_reuse_port: false
+# grpc_host: localhost
+
+# -- Service Endpoints --------------------------------------------------------
+# brain_url: localhost:50051
+# worker_url: localhost:50052
+# shield_url: localhost:50054
+
+# -- Router-Specific ----------------------------------------------------------
+# brain:
+#   grpc_endpoint: localhost:50051
+#   mode: grpc
+
+# llm:
+#   default_model: vertex/gemini-2.5-flash
+#   temperature: 0.7
+#   max_tokens: 4096
+
+# rag:
+#   max_results: 5
+#   general_retrieval_enabled: true
+#   general_retrieval_initial_count: 20
+#   general_retrieval_final_count: 5
+
+# -- Models ------------------------------------------------------------------
+models:
+  default_llm: vertex/gemini-2.5-flash
+  # allow_global_fallback: false
+  # fallback_llms:
+  #   - openai/gpt-4o
+  #   - anthropic/claude-sonnet-4-20250514
+
+# -- Router -------------------------------------------------------------------
+router: {}
+  # tenants: []
+
+# -- Observability ------------------------------------------------------------
+# otel_enabled: false
+# otel_endpoint: http://localhost:4317
+# langfuse_enabled: false
+# langfuse_host: https://cloud.langfuse.com

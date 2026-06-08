@@ -1,0 +1,80 @@
+# News Pipeline Graph Template v1.0
+#
+# News processing pipeline: harvest → filter → plan → generate → store.
+# Uses router_filter_content, router_plan_content, router_generate_content.
+#
+# Interconnection Boundary (News Engine Plan Phase 1-2):
+#   When news_engine migrates to manifest, archivist delegates to
+#   router_filter_content, showrunner to router_plan_content, agents to
+#   router_generate_content. harvest and store become federated tools
+#   executing on the consumer side.
+
+name: news_pipeline
+version: "1.0"
+description: >
+  News processing pipeline with content harvesting, filtering, planning, and generation.
+  Composes router_filter_content + router_plan_content + router_generate_content
+  with federated harvest and storage tools.
+
+defaults:
+  model: openai/gpt-4o
+
+nodes:
+  - name: harvest
+    type: tool
+    tool_binding: federated:harvest_news
+    config:
+      output_mode: direct
+
+  - name: filter
+    type: tool
+    tool_binding: router_filter_content
+    config:
+      output_mode: direct
+      tool_config:
+        input_key: raw_items
+        output_key: filtered_items
+        criteria_key: filter_criteria
+
+  - name: plan
+    type: tool
+    tool_binding: router_plan_content
+    config:
+      output_mode: direct
+      tool_config:
+        input_key: filtered_items
+        output_key: editorial_plan
+        strategy: editorial
+
+  - name: generate
+    type: tool
+    tool_binding: router_generate_content
+    config:
+      output_mode: direct
+      tool_config:
+        input_key: editorial_plan
+        output_key: generated_posts
+
+  - name: store
+    type: tool
+    tool_binding: federated:store_news_results
+    config:
+      output_mode: direct
+
+edges:
+  - from_node: __start__
+    to_node: harvest
+  - from_node: harvest
+    to_node: filter
+  - from_node: filter
+    to_node: plan
+  - from_node: plan
+    to_node: generate
+  - from_node: generate
+    to_node: store
+  - from_node: store
+    to_node: __end__
+
+config:
+  max_retries: 0
+  timeout: 600

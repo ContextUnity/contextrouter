@@ -104,7 +104,7 @@ def build_openai_messages(
 
     if has_images:
         # Build multimodal content array for vision models
-        content: list[dict[str, object]] = []
+        content: list[str | dict[str, object]] = []
 
         # Prepend system message to first text block if reasoning model
         if system_prefix:
@@ -167,23 +167,27 @@ async def generate_asr_openai_compat(
         ValueError: If no AudioPart found or AudioPart has no data.
         ImportError: If httpx is not installed.
     """
-    from ..types import AudioPart, ModelResponse, ProviderInfo
+    from contextunity.core.exceptions import ConfigurationError
+    from contextunity.core.parsing import json_loads
+    from contextunity.core.types import is_json_dict
+
+    from ..types import AudioPart, ModelError, ModelResponse, ProviderInfo
 
     audio_parts = [p for p in request.parts if isinstance(p, AudioPart)]
     if not audio_parts:
-        raise ValueError("ASR requires at least one AudioPart")
+        raise ModelError("ASR requires at least one AudioPart")
 
     part = audio_parts[0]
     if not (part.uri or part.data_b64):
-        raise ValueError("AudioPart requires either uri or data_b64")
+        raise ModelError("AudioPart requires either uri or data_b64")
 
     try:
         import httpx
     except ImportError as e:
-        raise ImportError("ASR requires `httpx`") from e
+        raise ConfigurationError("ASR requires `httpx`") from e
 
     url = f"{base_url.rstrip('/')}/audio/transcriptions"
-    headers = {}
+    headers: dict[str, str] = {}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
@@ -202,12 +206,16 @@ async def generate_asr_openai_compat(
     form = {"model": whisper_model}
     async with httpx.AsyncClient(timeout=request.timeout_sec) as client:
         resp = await client.post(url, headers=headers, data=form, files=files)
-        resp.raise_for_status()
-        payload = resp.json()
-        text = payload.get("text") if isinstance(payload, dict) else None
+        _ = resp.raise_for_status()
+        payload_obj: object = json_loads(resp.text)
+        text = ""
+        if is_json_dict(payload_obj):
+            text_val = payload_obj.get("text")
+            if isinstance(text_val, str):
+                text = text_val
 
     return ModelResponse(
-        text=str(text or ""),
+        text=text,
         raw_provider=ProviderInfo(
             provider=provider,
             model_name=whisper_model,

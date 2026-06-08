@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from contextunity.core import get_contextunit_logger
-from langchain_core.tools import tool
+from contextunity.core.types import JsonDict
 
 from contextunity.router.cortex.subagents.spawner import SubAgentSpawner
+from contextunity.router.langchain_boundaries import tool
 from contextunity.router.modules.tools import register_tool
-from contextunity.router.modules.tools.schemas import DataToolResult
+from contextunity.router.modules.tools.schemas import SubAgentResult
 
 logger = get_contextunit_logger(__name__)
 
@@ -27,12 +26,12 @@ def _get_spawner() -> SubAgentSpawner:
 
 @tool
 async def spawn_subagent(
-    task: dict[str, Any],
+    task: JsonDict,
     agent_type: str = "task_executor",
     strategy: str = "sequential",
     tenant_id: str | None = None,
     session_id: str | None = None,
-) -> DataToolResult:
+) -> SubAgentResult:
     """Spawn a sub-agent to handle a specific task.
 
     Use this tool when:
@@ -80,7 +79,7 @@ async def spawn_subagent(
         tenant_id = tenant_id or "default"
         from contextunity.core.tokens import TokenBuilder
 
-        from contextunity.router.cortex.runtime_context import get_current_access_token
+        from contextunity.router.core.context import get_current_access_token
 
         current_token = get_current_access_token()
         attenuated_token = None
@@ -91,37 +90,50 @@ async def spawn_subagent(
                 agent_id=f"subagent:{agent_type}",
             )
 
+        from contextunity.router.cortex.subagents.types import (
+            SpawnTask,
+        )
+        from contextunity.router.cortex.subagents.types import (
+            SubAgentConfig as SubAgentConfigSpec,
+        )
+
+        description_raw = task.get("description", "")
+        description = str(description_raw) if description_raw is not None else ""
+        context_raw = task.get("context", "")
+        context = str(context_raw) if context_raw is not None else ""
+
         subagent_id = await spawner.spawn_subagent(
             parent_agent_id="dispatcher",
-            task=task,
+            task=SpawnTask(description=description, context=context),
             tenant_id=tenant_id,
             session_id=session_id,
             trace_id=trace_id,
             agent_type=agent_type,
-            config={"strategy": strategy},
+            config=SubAgentConfigSpec(strategy=strategy),
             token=attenuated_token,
         )
 
-        logger.info(
-            "Spawned sub-agent %s for task: %s", subagent_id, task.get("description", "unknown")
-        )
+        task_label = description or "unknown"
+        logger.info("Spawned sub-agent %s for task: %s", subagent_id, task_label)
 
-        return {
-            "subagent_id": subagent_id,
-            "status": "spawned",
-            "message": f"Sub-agent {subagent_id} spawned successfully",
-            "agent_type": agent_type,
-            "strategy": strategy,
-        }
+        return SubAgentResult(
+            success=True,
+            subagent_id=subagent_id,
+            status="spawned",
+            message=f"Sub-agent {subagent_id} spawned successfully",
+            agent_type=agent_type,
+            strategy=strategy,
+        )
 
     except Exception as e:
         logger.exception("Failed to spawn sub-agent: %s", e)
-        return {
-            "subagent_id": None,
-            "status": "error",
-            "message": f"Failed to spawn sub-agent: {str(e)}",
-            "error": str(e),
-        }
+        return SubAgentResult(
+            success=False,
+            subagent_id=None,
+            status="error",
+            message=f"Failed to spawn sub-agent: {e!s}",
+            error=str(e),
+        )
 
 
 # Auto-register the tool when module is imported

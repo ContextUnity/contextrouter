@@ -6,23 +6,200 @@ Thread-safe with graceful degradation.
 
 from __future__ import annotations
 
-import json
+import importlib
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Protocol, runtime_checkable
 
 import joblib
+import networkx as nx
 from contextunity.core import get_contextunit_logger
+from contextunity.core.parsing import json_loads
+from contextunity.core.types import JsonDict, is_json_dict, is_object_dict
+
+from contextunity.router.cortex.types import (
+    OntologyData,
+    OntologyRelations,
+    TaxonomyCategoryData,
+    TaxonomyData,
+)
+
+
+class _JoblibLoadModule(Protocol):
+    """Typed boundary for joblib's untyped ``load`` helper."""
+
+    def load(self, filename: Path, /) -> object: ...
+
+
+class _BrainGraphLoader(Protocol):
+    """Typed boundary for the optional brain graph loader."""
+
+    def __call__(self, file_path: Path, hash_file_path: Path | None = None, /) -> object: ...
+
+
+@runtime_checkable
+class _GraphNodesMethod(Protocol):
+    def __call__(self) -> Iterable[object]: ...
+
+
+@runtime_checkable
+class _GraphEdgesMethod(Protocol):
+    def __call__(self, *, data: bool = False) -> Iterable[tuple[object, object, object]]: ...
+
+
+def _brain_load_graph_candidate(
+    loader: _BrainGraphLoader,
+    file_path: Path,
+    hash_file_path: Path | None,
+) -> object:
+    """Call the optional brain graph loader through a typed boundary."""
+    return loader(file_path, hash_file_path)
+
+
+def _load_brain_graph_loader() -> _BrainGraphLoader:
+    """Resolve the optional Brain loader through an object-typed boundary."""
+    module = importlib.import_module("contextunity.brain.ingestion.rag.graph.serialization")
+    candidate: object = getattr(module, "load_graph_secure", None)
+    if not callable(candidate):
+        raise ImportError("Brain graph loader is unavailable")
+
+    def loader(file_path: Path, hash_file_path: Path | None = None, /) -> object:
+        return candidate(file_path, hash_file_path)
+
+    return loader
+
+
+def _joblib_load_candidate(loader: _JoblibLoadModule, file_path: Path) -> object:
+    """Call joblib.load through a typed boundary."""
+    return loader.load(file_path)
+
+
+def _normalize_graph(graph_obj: object) -> nx.Graph[str]:
+    """Normalize an arbitrary NetworkX graph into ``nx.Graph[str]``."""
+    nodes_method = getattr(graph_obj, "nodes", None)
+    edges_method = getattr(graph_obj, "edges", None)
+    if not isinstance(nodes_method, _GraphNodesMethod) or not isinstance(
+        edges_method, _GraphEdgesMethod
+    ):
+        return nx.Graph[str]()
+
+    normalized = nx.Graph[str]()
+    for node in nodes_method():
+        normalized.add_node(str(node))
+    for source, target, edge_data in edges_method(data=True):
+        attrs: dict[str, object] = {}
+        if is_object_dict(edge_data):
+            relation = edge_data.get("relation")
+            if isinstance(relation, str) and relation.strip():
+                attrs["relation"] = relation.strip()
+        _ = normalized.add_edge(str(source), str(target), **attrs)
+    return normalized
+
+
+def _edge_data_object(graph: nx.Graph[str], source: str, target: str) -> object:
+    """Read edge data through an object-typed boundary."""
+    edge_data: object = graph.get_edge_data(source, target)
+    return edge_data
+
 
 try:
-    from contextunity.brain.ingestion.rag.graph.serialization import load_graph_secure
+    _brain_graph_loader = _load_brain_graph_loader()
+
+    def load_graph_secure(file_path: Path, hash_file_path: Path | None = None) -> nx.Graph[str]:
+        """Typed wrapper around the optional brain graph loader."""
+        loaded_graph = _brain_load_graph_candidate(_brain_graph_loader, file_path, hash_file_path)
+        return _normalize_graph(loaded_graph)
 except ImportError:
 
-    def load_graph_secure(file_path: Path, hash_file_path: Path | None = None) -> Any:
+    def load_graph_secure(file_path: Path, hash_file_path: Path | None = None) -> nx.Graph[str]:
         """Fallback implementation if contextunity.brain is not available."""
-        return joblib.load(file_path)
+        _ = hash_file_path
+        joblib_loader: _JoblibLoadModule = joblib
+        loaded = _joblib_load_candidate(joblib_loader, file_path)
+        return _normalize_graph(loaded)
 
 
 logger = get_contextunit_logger(__name__)
+
+# -- Type aliases --------------------------------------------------------------
+
+"""Keyword → taxonomy category mapping for fast lookup."""
+KeywordIndex = dict[str, str]
+
+"""Node label (lowered) → original node id for graph traversal."""
+NodeIndex = dict[str, str]
+
+
+def _load_json_object(path: Path) -> JsonDict | None:
+    """Read a JSON file and validate that it is an object."""
+    try:
+        raw_text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+    decoded = json_loads(raw_text)
+    if is_json_dict(decoded):
+        return decoded
+    return None
+
+
+def _taxonomy_from_json(data: JsonDict) -> TaxonomyData:
+    """Convert a validated JSON object into typed taxonomy data."""
+    taxonomy: TaxonomyData = {}
+
+    categories_raw = data.get("categories")
+    if isinstance(categories_raw, dict):
+        categories: dict[str, TaxonomyCategoryData] = {}
+        for name, raw_category in categories_raw.items():
+            if not isinstance(raw_category, dict):
+                continue
+            keywords_raw = raw_category.get("keywords")
+            keywords: list[str] = []
+            if isinstance(keywords_raw, list):
+                for keyword in keywords_raw:
+                    if isinstance(keyword, str) and keyword.strip():
+                        keywords.append(keyword.strip())
+            categories[name] = {"keywords": keywords}
+        taxonomy["categories"] = categories
+
+    canonical_map_raw = data.get("canonical_map")
+    if isinstance(canonical_map_raw, dict):
+        canonical_map: dict[str, str] = {}
+        for alias, canonical in canonical_map_raw.items():
+            if isinstance(canonical, str):
+                canonical_map[alias] = canonical
+        taxonomy["canonical_map"] = canonical_map
+
+    return taxonomy
+
+
+def _ontology_from_json(data: JsonDict) -> OntologyData:
+    """Convert a validated JSON object into typed ontology data."""
+    ontology: OntologyData = {}
+    relations_raw = data.get("relations")
+    if isinstance(relations_raw, dict):
+        runtime_fact_labels_raw = relations_raw.get("runtime_fact_labels")
+        runtime_fact_labels: list[str] = []
+        if isinstance(runtime_fact_labels_raw, list):
+            for label in runtime_fact_labels_raw:
+                if isinstance(label, str) and label.strip():
+                    runtime_fact_labels.append(label.strip())
+        relations: OntologyRelations = {"runtime_fact_labels": runtime_fact_labels}
+        ontology["relations"] = relations
+    return ontology
+
+
+def _edge_relation(graph: nx.Graph[str], source: str, target: str) -> str:
+    """Read an edge relation from NetworkX data without leaking untyped values."""
+    edge_data = _edge_data_object(graph, source, target)
+    if is_object_dict(edge_data):
+        relation = edge_data.get("relation")
+        if isinstance(relation, str) and relation.strip():
+            return relation.strip()
+    return "relates to"
+
+
+# -- Service -------------------------------------------------------------------
 
 
 class GraphService:
@@ -45,24 +222,30 @@ class GraphService:
             taxonomy_path: Path to taxonomy.json
             ontology_path: Path to ontology.json
         """
-        import networkx as nx
-
-        self.graph: nx.Graph = nx.Graph()
-        self.taxonomy: dict[str, object] = {}
-        self._keyword_to_category: dict[str, str] = {}
-        self._node_index: dict[str, object] = {}
-        self.ontology: dict[str, object] = {}
+        self.graph: nx.Graph[str] = nx.Graph()
+        self.taxonomy: TaxonomyData = {}
+        self._keyword_to_category: KeywordIndex = {}
+        self._node_index: NodeIndex = {}
+        self.ontology: OntologyData = {}
         self._fact_labels: set[str] = set()
-        self._graph_enabled = False
-        self._taxonomy_enabled = False
-        self._ontology_enabled = False
+        self._graph_enabled: bool = False
+        self._taxonomy_enabled: bool = False
+        self._ontology_enabled: bool = False
 
         self._load_graph(graph_path)
         self._load_taxonomy(taxonomy_path)
         self._load_ontology(ontology_path)
 
     def _load_graph(self, graph_path: Path | None) -> None:
-        """Load graph from pickle file."""
+        """Load a NetworkX graph from a pickle or joblib file.
+
+        Builds an internal node index (lowered label → original node ID)
+        for fast concept lookups. Disables graph features gracefully if
+        the file is missing or unreadable.
+
+        Args:
+            graph_path: Path to the serialized graph file, or None to skip.
+        """
         if graph_path and graph_path.exists():
             try:
                 self.graph = load_graph_secure(graph_path)
@@ -72,7 +255,14 @@ class GraphService:
                         k = str(node).strip().lower()
                         if k and k not in self._node_index:
                             self._node_index[k] = node
-                except Exception:
+                except Exception as e:  # graceful-degrade: index build is optional
+                    logger.warning(
+                        (
+                            "GraphService: node-index build failed: %s. "
+                            "Concept lookups will be unavailable."
+                        ),
+                        e,
+                    )
                     self._node_index = {}
                 logger.info(
                     "GraphService loaded graph: %d nodes, %d edges",
@@ -80,40 +270,37 @@ class GraphService:
                     self.graph.number_of_edges(),
                 )
                 self._graph_enabled = True
-            except Exception as e:
+            except Exception as e:  # graceful-degrade: missing graph file disables graph features
                 logger.warning("Failed to load graph: %s. Graph service disabled.", e)
                 self._graph_enabled = False
                 self._node_index = {}
-                self.graph = None
+                self.graph = nx.Graph()
         else:
             logger.warning("Graph file not found: %s. Graph service disabled.", graph_path)
             self._graph_enabled = False
             self._node_index = {}
 
     def _load_taxonomy(self, taxonomy_path: Path | None) -> None:
-        """Load taxonomy from JSON file."""
+        """Load taxonomy from a JSON file and build a keyword-to-category index.
+
+        Args:
+            taxonomy_path: Path to taxonomy.json, or None to skip.
+        """
         if taxonomy_path and taxonomy_path.exists():
             try:
-                with open(taxonomy_path, encoding="utf-8") as f:
-                    raw_taxonomy = json.load(f)
-                    self.taxonomy = raw_taxonomy if isinstance(raw_taxonomy, dict) else {}
-                cats = self.taxonomy.get("categories")
-                if isinstance(cats, dict):
-                    for cat_name, cat_data in cats.items():
-                        if not isinstance(cat_name, str) or not isinstance(cat_data, dict):
-                            continue
-                        keywords = cat_data.get("keywords")
-                        if isinstance(keywords, list):
-                            for keyword in keywords:
-                                if isinstance(keyword, str) and keyword.strip():
-                                    self._keyword_to_category[keyword.strip().lower()] = cat_name
+                taxonomy_data = _load_json_object(taxonomy_path)
+                self.taxonomy = _taxonomy_from_json(taxonomy_data) if taxonomy_data else {}
+                cats = self.taxonomy.get("categories", {})
+                for cat_name, cat_data in cats.items():
+                    for keyword in cat_data.get("keywords", []):
+                        self._keyword_to_category[keyword.lower()] = cat_name
                 logger.info(
                     "GraphService loaded taxonomy: %d categories, %d keywords",
-                    len(cats) if isinstance(cats, dict) else 0,
+                    len(cats),
                     len(self._keyword_to_category),
                 )
                 self._taxonomy_enabled = True
-            except Exception as e:
+            except Exception as e:  # graceful-degrade: missing taxonomy disables taxonomy features
                 logger.warning("Failed to load taxonomy: %s. Taxonomy features disabled.", e)
                 self._taxonomy_enabled = False
         else:
@@ -124,25 +311,26 @@ class GraphService:
             self._taxonomy_enabled = False
 
     def _load_ontology(self, ontology_path: Path | None) -> None:
-        """Load ontology from JSON file."""
+        """Load ontology from a JSON file and extract runtime fact labels.
+
+        Fact labels are used to filter graph edges during ``get_facts()`` calls.
+
+        Args:
+            ontology_path: Path to ontology.json, or None to skip.
+        """
         if ontology_path and ontology_path.exists():
             try:
-                with open(ontology_path, encoding="utf-8") as f:
-                    raw_ontology = json.load(f)
-                    self.ontology = raw_ontology if isinstance(raw_ontology, dict) else {}
-                rel = self.ontology.get("relations") if isinstance(self.ontology, dict) else None
-                rel = rel if isinstance(rel, dict) else {}
-                labels = rel.get("runtime_fact_labels") if isinstance(rel, dict) else None
-                if isinstance(labels, list):
-                    self._fact_labels = {
-                        str(x).strip() for x in labels if isinstance(x, str) and str(x).strip()
-                    }
+                ontology_data = _load_json_object(ontology_path)
+                self.ontology = _ontology_from_json(ontology_data) if ontology_data else {}
+                rel = self.ontology.get("relations", {})
+                labels = rel.get("runtime_fact_labels", [])
+                self._fact_labels = {label for label in labels if label}
                 self._ontology_enabled = True
                 logger.info(
                     "GraphService loaded ontology: fact_labels=%d",
                     len(self._fact_labels),
                 )
-            except Exception as e:
+            except Exception as e:  # graceful-degrade: missing ontology disables ontology features
                 logger.warning("Failed to load ontology: %s. Ontology features disabled.", e)
                 self._ontology_enabled = False
                 self._fact_labels = set()
@@ -151,9 +339,17 @@ class GraphService:
             self._fact_labels = set()
 
     def get_context(self, concept: str) -> str:
-        """Get graph context for a single concept.
+        """Get a compact graph context string for a single concept.
 
-        Returns a compact neighbor/edge summary suitable for model context.
+        Looks up the concept in the node index and returns a one-line summary
+        of its neighbors and edge relations, suitable for injecting into
+        an LLM prompt.
+
+        Args:
+            concept: The concept label to look up (case-insensitive).
+
+        Returns:
+            A human-readable neighbor summary, or an empty string if not found.
         """
         if not self._graph_enabled or not concept or self.graph.number_of_nodes() == 0:
             return ""
@@ -168,8 +364,7 @@ class GraphService:
 
         relations: list[str] = []
         for neighbor in neighbors[:5]:
-            edge_data = self.graph.get_edge_data(matching_node, neighbor)
-            relation = edge_data.get("relation", "relates to") if edge_data else "relates to"
+            relation = _edge_relation(self.graph, matching_node, neighbor)
             relations.append(f"'{neighbor}' ({relation})")
 
         if relations:
@@ -178,12 +373,22 @@ class GraphService:
         return ""
 
     def get_context_for_concepts(self, concepts: list[str]) -> str:
-        """Get graph context for multiple concepts (batch, de-duped)."""
+        """Get graph context for multiple concepts in a single call.
+
+        Deduplicates concepts (case-insensitive), processes up to 10, and
+        joins individual context strings with spaces.
+
+        Args:
+            concepts: List of concept labels to look up.
+
+        Returns:
+            A space-separated string of context summaries, or empty if none found.
+        """
         if not self._graph_enabled or not concepts:
             return ""
 
         seen: set[str] = set()
-        unique_concepts = []
+        unique_concepts: list[str] = []
         for c in concepts:
             c_lower = c.lower()
             if c_lower not in seen:
@@ -199,9 +404,18 @@ class GraphService:
         return " ".join(contexts)
 
     def get_facts(self, concepts: list[str]) -> list[str]:
-        """Get explicit relationship facts for a list of concepts.
+        """Extract explicit relationship facts for a list of concepts.
 
-        Format: "Fact: Fear causes Poverty"
+        Traverses graph edges for each concept (up to 10 concepts, 8 neighbors
+        each) and returns human-readable "Fact: A relation B" strings.
+        If ontology fact labels are loaded, only matching edge relations
+        are included.
+
+        Args:
+            concepts: List of concept strings to look up.
+
+        Returns:
+            A list of fact strings, capped at 30.
         """
         if not self._graph_enabled or not concepts:
             return []
@@ -209,8 +423,6 @@ class GraphService:
         seen_in: set[str] = set()
         unique: list[str] = []
         for c in concepts:
-            if not isinstance(c, str):
-                continue
             s = c.strip()
             if not s:
                 continue
@@ -229,8 +441,7 @@ class GraphService:
                 continue
 
             for neighbor in list(self.graph.neighbors(node_match))[:8]:
-                edge_data = self.graph.get_edge_data(node_match, neighbor) or {}
-                relation = str(edge_data.get("relation") or "relates to").strip()
+                relation = _edge_relation(self.graph, node_match, neighbor)
                 if (
                     self._ontology_enabled
                     and self._fact_labels
@@ -252,7 +463,17 @@ class GraphService:
         return facts
 
     def get_category_for_concept(self, concept: str) -> str | None:
-        """Get taxonomy category for a concept."""
+        """Resolve a concept to its taxonomy category.
+
+        Checks direct keyword matches first, then falls back to the
+        canonical synonym map.
+
+        Args:
+            concept: The concept label to classify (case-insensitive).
+
+        Returns:
+            The category name, or None if no match found.
+        """
         if not self._taxonomy_enabled or not concept:
             return None
 
@@ -263,19 +484,28 @@ class GraphService:
 
         canonical_map = self.taxonomy.get("canonical_map", {})
         canonical = canonical_map.get(concept_lower)
-        if canonical and canonical.lower() in self._keyword_to_category:
+        if canonical is not None and canonical.lower() in self._keyword_to_category:
             return self._keyword_to_category[canonical.lower()]
 
         return None
 
     def get_all_categories(self) -> list[str]:
-        """Get list of all taxonomy category names."""
+        """Return all taxonomy category names.
+
+        Returns:
+            A list of category name strings, or empty if taxonomy is not loaded.
+        """
         if not self._taxonomy_enabled:
             return []
-        return list(self.taxonomy.get("categories", {}).keys())
+        cats = self.taxonomy.get("categories", {})
+        return list(cats.keys())
 
     def get_canonical_map(self) -> dict[str, str]:
-        """Get synonym -> canonical term mapping."""
+        """Return the synonym-to-canonical-term mapping from the taxonomy.
+
+        Returns:
+            A dictionary mapping lowercase synonyms to their canonical term.
+        """
         if not self._taxonomy_enabled:
             return {}
         return self.taxonomy.get("canonical_map", {})

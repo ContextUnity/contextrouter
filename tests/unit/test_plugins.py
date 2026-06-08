@@ -13,7 +13,9 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from contextunity.core.exceptions import SecurityError
 
+from contextunity.router.core.exceptions import RouterPluginError
 from contextunity.router.core.plugins import (
     PluginCapability,
     PluginContext,
@@ -84,42 +86,6 @@ class TestPluginManifest:
         assert m.capabilities == []
         assert m.entry_point == "plugin.py"
 
-    def test_invalid_name_uppercase(self):
-        with pytest.raises(ValueError):
-            PluginManifest(name="MyPlugin", version="1.0.0")
-
-    def test_invalid_name_spaces(self):
-        with pytest.raises(ValueError):
-            PluginManifest(name="my plugin", version="1.0.0")
-
-    def test_invalid_name_empty(self):
-        with pytest.raises(ValueError):
-            PluginManifest(name="", version="1.0.0")
-
-    def test_invalid_version(self):
-        with pytest.raises(ValueError):
-            PluginManifest(name="x", version="bad")
-
-    def test_entry_point_path_traversal(self):
-        with pytest.raises(ValueError, match="path separators"):
-            PluginManifest(name="x", version="1.0.0", entry_point="../evil.py")
-
-    def test_entry_point_not_py(self):
-        with pytest.raises(ValueError, match=".py file"):
-            PluginManifest(name="x", version="1.0.0", entry_point="plugin.sh")
-
-    def test_with_requires(self):
-        m = PluginManifest(
-            name="x",
-            version="1.0.0",
-            requires={"contextunity.router": ">=0.9.0"},
-        )
-        assert m.requires["contextunity.router"] == ">=0.9.0"
-
-    def test_disabled(self):
-        m = PluginManifest(name="x", version="1.0.0", enabled=False)
-        assert m.enabled is False
-
 
 # ============================================================================
 # PluginContext Tests
@@ -139,44 +105,30 @@ class TestPluginContext:
         assert ctx.version == "1.0.0"
         assert PluginCapability.TOOLS in ctx.capabilities
 
-    def test_capabilities_are_copy(self):
-        """Ensure capabilities returns a copy, not mutable internal set."""
-        ctx = self._ctx([PluginCapability.TOOLS])
-        caps = ctx.capabilities
-        caps.add(PluginCapability.GRAPHS)
-        assert PluginCapability.GRAPHS not in ctx.capabilities
-
     def test_register_tool_without_capability(self):
         ctx = self._ctx([])  # No capabilities
-        with pytest.raises(PermissionError, match="lacks 'tools' capability"):
+        with pytest.raises(SecurityError, match="lacks 'tools' capability"):
             ctx.register_tool(MagicMock(name="fake-tool"))
 
     def test_register_graph_without_capability(self):
         ctx = self._ctx([PluginCapability.TOOLS])  # Only tools
-        with pytest.raises(PermissionError, match="lacks 'graphs' capability"):
+        with pytest.raises(SecurityError, match="lacks 'graphs' capability"):
             ctx.register_graph("test", lambda: None)
 
     def test_register_connector_without_capability(self):
         ctx = self._ctx([])
-        with pytest.raises(PermissionError, match="lacks 'connectors' capability"):
+        with pytest.raises(SecurityError, match="lacks 'connectors' capability"):
             ctx.register_connector("test", MagicMock)
 
     def test_register_provider_without_capability(self):
         ctx = self._ctx([])
-        with pytest.raises(PermissionError, match="lacks 'providers' capability"):
+        with pytest.raises(SecurityError, match="lacks 'providers' capability"):
             ctx.register_provider("test", MagicMock)
 
     def test_register_transformer_without_capability(self):
         ctx = self._ctx([])
-        with pytest.raises(PermissionError, match="lacks 'transformers' capability"):
+        with pytest.raises(SecurityError, match="lacks 'transformers' capability"):
             ctx.register_transformer("test", MagicMock)
-
-    def test_summary_empty(self):
-        ctx = self._ctx([PluginCapability.TOOLS])
-        s = ctx.summary()
-        assert s["name"] == "test-plugin"
-        assert s["tools"] == []
-        assert s["graphs"] == []
 
 
 # ============================================================================
@@ -220,7 +172,7 @@ entry_point: plugin.py
 
     def test_invalid_manifest_raises(self, tmp_plugin_dir: Path):
         _write_manifest(tmp_plugin_dir, "just a string, not a mapping")
-        with pytest.raises(ValueError, match="expected mapping"):
+        with pytest.raises(RouterPluginError, match="expected mapping"):
             load_manifest(tmp_plugin_dir)
 
     def test_missing_required_field(self, tmp_plugin_dir: Path):

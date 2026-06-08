@@ -11,11 +11,12 @@ Tools:
 
 from __future__ import annotations
 
-from contextunity.core import get_contextunit_logger
-from langchain_core.tools import tool
+from contextunity.core import ContextUnit, get_contextunit_logger
+from contextunity.core.sdk.payload import get_int, get_str
 
+from contextunity.router.langchain_boundaries import tool
 from contextunity.router.modules.tools import register_tool
-from contextunity.router.modules.tools.schemas import DataToolResult
+from contextunity.router.modules.tools.schemas import GCSResult
 
 logger = get_contextunit_logger(__name__)
 
@@ -33,7 +34,7 @@ async def gcs_upload(
     path: str,
     bucket: str = "",
     content_type: str = "text/plain",
-) -> DataToolResult:
+) -> GCSResult:
     """Upload content to Google Cloud Storage.
 
     Use this tool to save files, exports, reports, or any data to GCS.
@@ -47,25 +48,26 @@ async def gcs_upload(
     Returns:
         Dictionary with upload status and GCS URI.
     """
-    from contextunity.core import ContextUnit
 
     from contextunity.router.modules.providers.storage.gcs import GCSProvider
 
     _default = _get_default_bucket()
     if bucket and bucket != _default:
-        return {
-            "status": "error",
-            "error": f"Access denied: cannot upload to arbitrary bucket '{bucket}'.",
-        }
+        return GCSResult(
+            success=False,
+            status="error",
+            error=f"Access denied: cannot upload to arbitrary bucket '{bucket}'.",
+        )
     bucket = _default
 
     if not bucket:
-        return {"status": "error", "error": "No GCS bucket specified. Set GCS_DEFAULT_BUCKET env."}
+        return GCSResult(
+            success=False,
+            status="error",
+            error="No GCS bucket specified. Set GCS_DEFAULT_BUCKET env.",
+        )
 
     provider = GCSProvider(default_bucket=bucket)
-
-    # Token enforcement is handled by SecureTool wrapper (register_tool).
-    # No manual get_current_access_token() here — Secure by Default.
 
     unit = ContextUnit(
         payload={
@@ -80,23 +82,24 @@ async def gcs_upload(
     try:
         await provider.write(unit)
         gcs_uri = f"gs://{bucket}/{path}"
-        return {
-            "status": "uploaded",
-            "gcs_uri": gcs_uri,
-            "path": path,
-            "bucket": bucket,
-            "size": len(content),
-        }
+        return GCSResult(
+            success=True,
+            status="uploaded",
+            gcs_uri=gcs_uri,
+            path=path,
+            bucket=bucket,
+            size=len(content),
+        )
     except Exception as e:
         logger.error("GCS upload failed: %s", e)
-        return {"status": "error", "error": str(e)}
+        return GCSResult(success=False, status="error", error=str(e))
 
 
 @tool
 async def gcs_download(
     path: str,
     bucket: str = "",
-) -> DataToolResult:
+) -> GCSResult:
     """Download content from Google Cloud Storage.
 
     Use this tool to read files from GCS buckets.
@@ -113,38 +116,41 @@ async def gcs_download(
 
     _default = _get_default_bucket()
     if bucket and bucket != _default:
-        return {
-            "status": "error",
-            "error": f"Access denied: cannot download from arbitrary bucket '{bucket}'.",
-        }
+        return GCSResult(
+            success=False,
+            status="error",
+            error=f"Access denied: cannot download from arbitrary bucket '{bucket}'.",
+        )
     bucket = _default
 
     if not bucket:
-        return {"status": "error", "error": "No GCS bucket specified. Set GCS_DEFAULT_BUCKET env."}
+        return GCSResult(
+            success=False,
+            status="error",
+            error="No GCS bucket specified. Set GCS_DEFAULT_BUCKET env.",
+        )
 
     provider = GCSProvider(default_bucket=bucket)
-
-    # Token enforcement is handled by SecureTool wrapper (register_tool).
-    # No manual get_current_access_token() here — Secure by Default.
 
     try:
         results = await provider.read(path, filters={"bucket": bucket})
         if not results:
-            return {"status": "not_found", "path": path, "bucket": bucket}
+            return GCSResult(success=True, status="not_found", path=path, bucket=bucket)
 
         unit = results[0]
         payload = unit.payload or {}
-        return {
-            "status": "downloaded",
-            "content": payload.get("content", ""),
-            "path": path,
-            "bucket": bucket,
-            "content_type": payload.get("content_type", ""),
-            "size": payload.get("size", 0),
-        }
+        return GCSResult(
+            success=True,
+            status="downloaded",
+            content=get_str(payload, "content"),
+            path=path,
+            bucket=bucket,
+            content_type=get_str(payload, "content_type"),
+            size=get_int(payload, "size"),
+        )
     except Exception as e:
         logger.error("GCS download failed: %s", e)
-        return {"status": "error", "error": str(e)}
+        return GCSResult(success=False, status="error", error=str(e))
 
 
 @tool
@@ -152,7 +158,7 @@ async def gcs_list(
     prefix: str = "",
     bucket: str = "",
     max_results: int = 50,
-) -> DataToolResult:
+) -> GCSResult:
     """List blobs in a Google Cloud Storage bucket.
 
     Use this tool to browse available files in a GCS bucket.
@@ -167,49 +173,43 @@ async def gcs_list(
     """
     _default = _get_default_bucket()
     if bucket and bucket != _default:
-        return {
-            "status": "error",
-            "error": f"Access denied: cannot list arbitrary bucket '{bucket}'.",
-        }
+        return GCSResult(
+            success=False,
+            status="error",
+            error=f"Access denied: cannot list arbitrary bucket '{bucket}'.",
+        )
     bucket = _default
 
     if not bucket:
-        return {"status": "error", "error": "No GCS bucket specified. Set GCS_DEFAULT_BUCKET env."}
+        return GCSResult(
+            success=False,
+            status="error",
+            error="No GCS bucket specified. Set GCS_DEFAULT_BUCKET env.",
+        )
 
     try:
-        from google.cloud import storage  # type: ignore[import-not-found]
+        from contextunity.router.modules.providers.storage.gcs import list_gcs_blobs
 
-        # Token enforcement is handled by SecureTool wrapper (register_tool).
-        # No manual get_current_access_token() here — Secure by Default.
+        items = list_gcs_blobs(bucket, prefix=prefix, max_results=max_results)
 
-        client = storage.Client()
-        bucket_obj = client.bucket(bucket)
-        blobs = bucket_obj.list_blobs(prefix=prefix, max_results=max_results)
-
-        items = []
-        for blob in blobs:
-            items.append(
-                {
-                    "name": blob.name,
-                    "size": blob.size,
-                    "content_type": blob.content_type,
-                    "updated": str(blob.updated) if blob.updated else None,
-                }
-            )
-
-        return {
-            "status": "ok",
-            "bucket": bucket,
-            "prefix": prefix,
-            "count": len(items),
-            "blobs": items,
-        }
+        return GCSResult(
+            success=True,
+            status="ok",
+            bucket=bucket,
+            prefix=prefix,
+            count=len(items),
+            blobs=items,
+        )
 
     except ImportError:
-        return {"status": "error", "error": "google-cloud-storage is not installed"}
+        return GCSResult(
+            success=False,
+            status="error",
+            error="google-cloud-storage is not installed",
+        )
     except Exception as e:
         logger.error("GCS list failed: %s", e)
-        return {"status": "error", "error": str(e)}
+        return GCSResult(success=False, status="error", error=str(e))
 
 
 # ── Auto-register tools ──────────────────────────────────────────

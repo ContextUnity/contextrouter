@@ -23,12 +23,17 @@ from __future__ import annotations
 
 import re
 import time
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Callable, ClassVar
+
+if TYPE_CHECKING:
+    from langchain_core.tools import BaseTool
 
 from contextunity.core import get_contextunit_logger
+from contextunity.core.types import JsonDict, JsonValue, is_json_dict, is_json_value
 from pydantic import BaseModel, ConfigDict, Field
 
-from contextunity.router.modules.tools.schemas import DataToolResult
+from contextunity.router.langchain_boundaries import tool
+from contextunity.router.modules.tools.schemas import SQLResult
 
 logger = get_contextunit_logger(__name__)
 
@@ -50,13 +55,13 @@ class SQLToolConfig(BaseModel):
     """
 
     schema_description: str = ""
-    db_executor: Callable[..., dict[str, Any]] | None = None
+    db_executor: Callable[[str], JsonDict] | None = None
     dialect: str = "postgresql"
     max_rows: int = 500
     statement_timeout_ms: int = 5000
     forbidden_keywords: list[str] = Field(default_factory=list)
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(arbitrary_types_allowed=True)
 
 
 # ── Validation (deterministic, no LLM) ──────────────────────────────
@@ -67,17 +72,19 @@ _BUILTIN_FORBIDDEN = re.compile(
 )
 
 _FORBIDDEN_FUNCTIONS = re.compile(
-    r"\b(pg_read_file|pg_read_binary_file|pg_ls_dir|pg_stat_file"
-    r"|lo_import|lo_export|lo_get|lo_put"
-    r"|dblink|dblink_exec|dblink_connect"
-    r"|pg_sleep|set_config"
-    r"|current_setting\s*\(\s*['\"]superuser)",
+    (
+        r"\b(pg_read_file|pg_read_binary_file|pg_ls_dir|pg_stat_file"
+        r"|lo_import|lo_export|lo_get|lo_put"
+        r"|dblink|dblink_exec|dblink_connect"
+        r"|pg_sleep|set_config"
+        r"|current_setting\s*\(\s*['\"]superuser)"
+    ),
     re.IGNORECASE,
 )
 
 
 def _split_statements(sql: str) -> list[str]:
-    """Split SQL into statements on `;`, respecting quoted strings.
+    """Split SQL into statements on ``;``, respecting quoted strings.
 
     Handles single-quotes, double-quotes, and doubled-quote escapes
     (e.g. ``'it''s'``).  Does NOT split on ``;`` inside string literals.
@@ -114,7 +121,7 @@ def _split_statements(sql: str) -> list[str]:
     return statements
 
 
-def validate_sql(sql: str, *, config: SQLToolConfig | None = None) -> DataToolResult:
+def validate_sql(sql: str, *, config: SQLToolConfig | None = None) -> SQLResult:
     """Validate and sanitize SQL.  Return ``{"valid": True, "sql": cleaned}``
     or ``{"valid": False, "error": reason}``.
 
@@ -123,7 +130,7 @@ def validate_sql(sql: str, *, config: SQLToolConfig | None = None) -> DataToolRe
     cfg = config or SQLToolConfig()
     raw = (sql or "").strip()
     if not raw:
-        return {"valid": False, "error": "Empty SQL"}
+        return SQLResult(success=False, valid=False, error="Empty SQL")
 
     # Strip comments
     clean = re.sub(r"/\*.*?\*/", " ", raw, flags=re.DOTALL)
@@ -131,7 +138,7 @@ def validate_sql(sql: str, *, config: SQLToolConfig | None = None) -> DataToolRe
     clean = re.sub(r"\s+", " ", clean).strip().rstrip(";").strip()
 
     if not clean:
-        return {"valid": False, "error": "Empty SQL after stripping comments"}
+        return SQLResult(success=False, valid=False, error="Empty SQL after stripping comments")
 
     # Multiple statements → take last (quote-aware: don't split on ';' inside strings)
     statements = _split_statements(clean)
@@ -141,24 +148,27 @@ def validate_sql(sql: str, *, config: SQLToolConfig | None = None) -> DataToolRe
     # Must start with SELECT / WITH
     first_word = clean.split()[0].upper()
     if first_word not in ("SELECT", "WITH"):
-        return {
-            "valid": False,
-            "error": f"Query must start with SELECT or WITH, got: {first_word}",
-        }
+        return SQLResult(
+            success=False,
+            valid=False,
+            error=f"Query must start with SELECT or WITH, got: {first_word}",
+        )
 
     # Forbidden keywords
     match = _BUILTIN_FORBIDDEN.search(clean)
     if match:
-        return {"valid": False, "error": f"Forbidden keyword: {match.group()}"}
+        return SQLResult(success=False, valid=False, error=f"Forbidden keyword: {match.group()}")
 
     # Forbidden functions
     func_match = _FORBIDDEN_FUNCTIONS.search(clean)
     if func_match:
-        return {"valid": False, "error": f"Forbidden function: {func_match.group()}"}
+        return SQLResult(
+            success=False, valid=False, error=f"Forbidden function: {func_match.group()}"
+        )
 
     for kw in cfg.forbidden_keywords:
         if re.search(rf"\b{re.escape(kw)}\b", clean, re.IGNORECASE):
-            return {"valid": False, "error": f"Forbidden keyword: {kw}"}
+            return SQLResult(success=False, valid=False, error=f"Forbidden keyword: {kw}")
 
     # Fix LIMIT 0
     clean = re.sub(r"\bLIMIT\s+0\b", f"LIMIT {cfg.max_rows}", clean, flags=re.IGNORECASE)
@@ -167,60 +177,82 @@ def validate_sql(sql: str, *, config: SQLToolConfig | None = None) -> DataToolRe
     if "LIMIT" not in clean.upper():
         clean = f"{clean} LIMIT {cfg.max_rows}"
 
-    return {"valid": True, "sql": clean}
+    return SQLResult(success=True, valid=True, sql=clean)
 
 
-def execute_sql(sql: str, *, config: SQLToolConfig) -> DataToolResult:
+def execute_sql(sql: str, *, config: SQLToolConfig) -> SQLResult:
     """Execute validated SQL via the project-provided ``db_executor``.
 
     Returns dict with ``columns``, ``rows``, ``row_count``, ``elapsed_ms``
     or ``{"error": "..."}`` on failure.
     """
     if config.db_executor is None:
-        return {"error": "No db_executor configured"}
+        return SQLResult(success=False, error="No db_executor configured")
 
     # Validate first
     result = validate_sql(sql, config=config)
     if not result.get("valid"):
-        return {"error": result.get("error", "Validation failed")}
+        return SQLResult(success=False, error=result.get("error", "Validation failed"))
 
-    clean_sql = result["sql"]
+    clean_sql = result.get("sql", "")
 
     start = time.monotonic()
     try:
         data = config.db_executor(clean_sql)
     except Exception as e:
         logger.warning("SQL execution failed: %s | SQL: %.100s…", e, clean_sql)
-        return {"error": f"SQL execution error: {e}"}
+        return SQLResult(success=False, error=f"SQL execution error: {e}")
 
-    # Propagate error from db_executor (e.g. stream returned {"error": "..."})
-    if isinstance(data, dict) and data.get("error"):
-        logger.warning("SQL execution error: %s | SQL: %.100s…", data["error"], clean_sql)
-        return {"error": data["error"]}
+    if not is_json_dict(data):
+        return SQLResult(success=False, error="db_executor returned non-object payload")
+
+    error_raw = data.get("error")
+    if error_raw is not None:
+        logger.warning("SQL execution error: %s | SQL: %.100s…", error_raw, clean_sql)
+        return SQLResult(success=False, error=str(error_raw))
 
     elapsed = (time.monotonic() - start) * 1000
 
-    return {
-        "columns": data.get("columns", []),
-        "rows": data.get("rows", []),
-        "row_count": data.get("row_count", len(data.get("rows", []))),
-        "elapsed_ms": round(elapsed, 1),
-        "sql_executed": clean_sql,
-    }
+    columns_raw = data.get("columns", [])
+    columns = [str(col) for col in columns_raw] if isinstance(columns_raw, list) else []
+
+    rows_raw = data.get("rows", [])
+    rows: list[list[JsonValue]] = []
+    if isinstance(rows_raw, list):
+        for row in rows_raw:
+            if not isinstance(row, list):
+                continue
+            row_out: list[JsonValue] = []
+            for cell in row:
+                if is_json_value(cell):
+                    row_out.append(cell)
+            rows.append(row_out)
+
+    row_count_raw = data.get("row_count")
+    row_count = int(row_count_raw) if isinstance(row_count_raw, (int, float)) else len(rows)
+
+    return SQLResult(
+        success=True,
+        columns=columns,
+        rows=rows,
+        row_count=row_count,
+        elapsed_ms=round(elapsed, 1),
+        sql_executed=clean_sql,
+    )
 
 
 # ── LangChain Tool wrappers ─────────────────────────────────────────
 
 
-def create_sql_tools(config: SQLToolConfig) -> list:
+def create_sql_tools(config: SQLToolConfig) -> list[BaseTool]:
     """Create LangChain-compatible SQL tools bound to a specific config.
 
     Returns list of tool instances ready for ``llm.bind_tools(tools)``.
     """
-    from langchain_core.tools import ToolException, tool
+    from langchain_core.tools import ToolException
 
     @tool
-    def validate_sql_tool(sql: str) -> dict:
+    def validate_sql_tool(sql: str) -> SQLResult:
         """Validate a SQL query for safety. Returns {valid, sql} or {valid, error}."""
         res = validate_sql(sql, config=config)
         if not res.get("valid"):
@@ -228,7 +260,7 @@ def create_sql_tools(config: SQLToolConfig) -> list:
         return res
 
     @tool
-    def execute_sql_tool(sql: str) -> dict:
+    def execute_sql_tool(sql: str) -> SQLResult:
         """Execute a validated read-only SQL query against the database.
         Returns {columns, rows, row_count, elapsed_ms} or {error}.
         """
@@ -246,76 +278,9 @@ def create_sql_tools(config: SQLToolConfig) -> list:
     return [validate_sql_tool, execute_sql_tool]
 
 
-# ── Column label translation helper ─────────────────────────────────
-
-DEFAULT_COLUMN_LABELS: dict[str, str] = {
-    "doctor_name": "Лікар",
-    "department_name": "Відділення",
-    "rejections": "Кількість відмов",
-    "rejection_count": "Кількість відмов",
-    "package_number": "Пакет",
-    "package_name": "Назва пакету",
-    "tariff": "Тариф (грн)",
-    "total_tariff": "Сума тарифу (грн)",
-    "total_loss": "Втрати (грн)",
-    "inclusion_status": "Статус",
-    "diagnosis_code": "Код діагнозу",
-    "diagnosis_name": "Діагноз",
-    "patient_code": "Код пацієнта",
-    "doctor_id": "ID лікаря",
-    "department_id": "ID відділення",
-    "cnt": "Кількість",
-    "count": "Кількість",
-    "doctor_count": "Кількість лікарів",
-    "patient_records_count": "Кількість записів",
-    "error_comment": "Причина відхилення",
-}
-
-HIDDEN_COLUMNS = {"rn", "row_number", "rank", "sub", "row_num"}
-
-
-def humanize_columns(
-    query_result: dict[str, Any],
-    *,
-    labels: dict[str, str] | None = None,
-    hidden: set[str] | None = None,
-) -> DataToolResult:
-    """Translate column keys to human labels and hide service columns.
-
-    Args:
-        query_result: Dict with 'columns' and 'rows' keys.
-        labels: Column key → label mapping. Defaults to DEFAULT_COLUMN_LABELS.
-        hidden: Column keys to hide. Defaults to HIDDEN_COLUMNS.
-
-    Returns:
-        Dict with translated 'columns' list and filtered 'rows'.
-    """
-    _labels = labels or DEFAULT_COLUMN_LABELS
-    _hidden = hidden or HIDDEN_COLUMNS
-
-    columns = [
-        {"key": c, "label": _labels.get(c, c)}
-        for c in query_result.get("columns", [])
-        if c not in _hidden
-    ]
-    visible_keys = {col["key"] for col in columns}
-    rows = [
-        {k: v for k, v in row.items() if k in visible_keys} for row in query_result.get("rows", [])
-    ]
-
-    return {
-        **query_result,
-        "columns": columns,
-        "rows": rows,
-    }
-
-
 __all__ = [
     "SQLToolConfig",
     "validate_sql",
     "execute_sql",
     "create_sql_tools",
-    "humanize_columns",
-    "DEFAULT_COLUMN_LABELS",
-    "HIDDEN_COLUMNS",
 ]

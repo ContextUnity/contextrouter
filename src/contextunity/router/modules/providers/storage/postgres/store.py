@@ -2,20 +2,66 @@
 
 from __future__ import annotations
 
-from typing import Iterable, List
+from collections.abc import Iterable
+from typing import override
 
+import psycopg
+from contextunity.core.exceptions import SecurityError
 from psycopg import sql
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
+from contextunity.router.core.types import StructData, coerce_struct_data
+
 from .models import GraphEdge, GraphNode, KnowledgeStoreInterface, SearchResult, TaxonomyPath
 
+type DictRow = dict[str, object]
+type DictConnection = psycopg.AsyncConnection[DictRow]
+type _DictPool = AsyncConnectionPool[DictConnection]
 
-def _format_vector(vec: List[float]) -> str:
+
+def _optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    return value if isinstance(value, str) else str(value)
+
+
+def _required_str(value: object, *, default: str = "") -> str:
+    if isinstance(value, str):
+        return value
+    return default if value is None else str(value)
+
+
+def _to_float(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _to_struct_data(value: object) -> StructData:
+    if value is None:
+        return {}
+    coerced = coerce_struct_data(value)
+    if isinstance(coerced, dict):
+        return coerced
+    return {}
+
+
+def _format_vector(vec: list[float]) -> str:
+    """Serialize a float list to pgvector literal ``[0.12,0.34,...]``."""
     return "[" + ",".join(f"{float(x):.8f}" for x in vec) + "]"
 
 
 class PostgresKnowledgeStore(KnowledgeStoreInterface):
+    """pgvector + ltree knowledge store backed by an async connection pool."""
+
     def __init__(
         self,
         *,
@@ -23,34 +69,38 @@ class PostgresKnowledgeStore(KnowledgeStoreInterface):
         pool_min_size: int = 2,
         pool_max_size: int = 10,
     ) -> None:
-        self._pool = AsyncConnectionPool(
+        """Create a deferred ``AsyncConnectionPool`` with the given *dsn* and size bounds."""
+        self._pool: _DictPool = AsyncConnectionPool(
             dsn,
             min_size=pool_min_size,
             max_size=pool_max_size,
             open=False,
         )
 
-    async def _get_pool(self) -> AsyncConnectionPool:
-        if not self._pool.opened:
+    async def _get_pool(self) -> _DictPool:
+        """Return the connection pool, lazily opening it on first call."""
+        if getattr(self._pool, "closed", True):
             await self._pool.open()
         return self._pool
 
+    @override
     async def upsert_graph(
         self,
-        nodes: List[GraphNode],
-        edges: List[GraphEdge],
+        nodes: list[GraphNode],
+        edges: list[GraphEdge],
         *,
         tenant_id: str,
         user_id: str | None = None,
     ) -> None:
+        """Insert or update langgraph graph definitions."""
         if not tenant_id:
-            raise ValueError("tenant_id is required")
+            raise SecurityError("tenant_id is required")
         pool = await self._get_pool()
         async with pool.connection() as conn:
             async with conn.transaction():
-                conn.row_factory = dict_row
+                setattr(conn, "row_factory", dict_row)
                 for node in nodes:
-                    await conn.execute(
+                    _ = await conn.execute(
                         """
                         INSERT INTO knowledge_nodes (
                             id, tenant_id, user_id, node_kind, source_type, source_id, title,
@@ -86,7 +136,7 @@ class PostgresKnowledgeStore(KnowledgeStoreInterface):
                         },
                     )
                 for edge in edges:
-                    await conn.execute(
+                    _ = await conn.execute(
                         """
                         INSERT INTO knowledge_edges (
                             tenant_id, source_id, target_id, relation, weight, metadata
@@ -106,27 +156,38 @@ class PostgresKnowledgeStore(KnowledgeStoreInterface):
                         },
                     )
 
+    @override
     async def hybrid_search(
         self,
         *,
         query_text: str,
-        query_vec: List[float],
+        query_vec: list[float],
         candidate_k: int = 50,
         limit: int = 8,
         scope: TaxonomyPath | None = None,
-        source_types: List[str] | None = None,
+        source_types: list[str] | None = None,
         graph_depth: int = 2,
-        allowed_relations: List[str] | None = None,
+        allowed_relations: list[str] | None = None,
         fusion: str = "weighted",
         rrf_k: int = 60,
         vector_weight: float = 0.8,
         text_weight: float = 0.2,
         tenant_id: str,
         user_id: str | None = None,
-    ) -> List[SearchResult]:
+    ) -> list[SearchResult]:
+        """Run vector + full-text search, fuse scores, and return ranked nodes.
+
+        Retrieves ``candidate_k`` hits from each channel (cosine distance for vectors,
+        ``ts_rank_cd`` for text), merges them via the chosen ``fusion`` strategy
+        (weighted linear or reciprocal rank fusion), then hydrates the top ``limit``
+        node objects.
+
+        Raises:
+            ValueError: If ``tenant_id`` is empty.
+        """
         _ = graph_depth, allowed_relations
         if not tenant_id:
-            raise ValueError("tenant_id is required")
+            raise SecurityError("tenant_id is required")
         if candidate_k <= 0 or limit <= 0:
             return []
         candidate_k = max(1, candidate_k)
@@ -134,7 +195,7 @@ class PostgresKnowledgeStore(KnowledgeStoreInterface):
 
         pool = await self._get_pool()
         async with pool.connection() as conn:
-            conn.row_factory = dict_row
+            setattr(conn, "row_factory", dict_row)
             vector_hits = await self._fetch_vector_hits(
                 conn=conn,
                 tenant_id=tenant_id,
@@ -164,7 +225,9 @@ class PostgresKnowledgeStore(KnowledgeStoreInterface):
             )
             if not ranked_ids:
                 return []
-            nodes = await self._fetch_nodes(conn=conn, tenant_id=tenant_id, ids=ranked_ids)
+            nodes = await self._fetch_nodes(
+                conn=conn, tenant_id=tenant_id, ids=[rid for rid, _ in ranked_ids]
+            )
             node_map = {n.id: n for n in nodes}
             return [
                 SearchResult(
@@ -180,14 +243,15 @@ class PostgresKnowledgeStore(KnowledgeStoreInterface):
     async def _fetch_vector_hits(
         self,
         *,
-        conn,
+        conn: DictConnection,
         tenant_id: str,
         user_id: str | None,
-        query_vec: List[float],
+        query_vec: list[float],
         candidate_k: int,
         scope: TaxonomyPath | None,
-        source_types: List[str] | None,
+        source_types: list[str] | None,
     ) -> dict[str, float]:
+        """Run a cosine-similarity query and return ``{node_id: score}``."""
         clauses, params = self._build_scope_filters(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -223,14 +287,15 @@ class PostgresKnowledgeStore(KnowledgeStoreInterface):
     async def _fetch_text_hits(
         self,
         *,
-        conn,
+        conn: DictConnection,
         tenant_id: str,
         user_id: str | None,
         query_text: str,
         candidate_k: int,
         scope: TaxonomyPath | None,
-        source_types: List[str] | None,
+        source_types: list[str] | None,
     ) -> dict[str, float]:
+        """Run a ``websearch_to_tsquery`` full-text search and return ``{node_id: score}``."""
         if not query_text.strip():
             return {}
         clauses, params = self._build_scope_filters(
@@ -272,19 +337,23 @@ class PostgresKnowledgeStore(KnowledgeStoreInterface):
         )
 
     async def _fetch_scores(
-        self, *, conn, sql: sql.Composed, params: list, score_key: str
+        self, *, conn: DictConnection, sql: sql.Composed, params: list[object], score_key: str
     ) -> dict[str, float]:
+        """Execute a scoring query and collect ``{id: score}`` from the result rows."""
         rows = await conn.execute(sql, params)
         out: dict[str, float] = {}
         async for row in rows:
-            rid = str(row["id"])
-            score = row.get(score_key)
+            rid = _required_str(row["id"])
+            score = _to_float(row.get(score_key))
             if score is None:
                 continue
-            out[rid] = float(score)
+            out[rid] = score
         return out
 
-    async def _fetch_nodes(self, *, conn, tenant_id: str, ids: Iterable[str]) -> List[GraphNode]:
+    async def _fetch_nodes(
+        self, *, conn: DictConnection, tenant_id: str, ids: Iterable[str]
+    ) -> list[GraphNode]:
+        """Hydrate ``GraphNode`` objects for the given IDs within a tenant."""
         rows = await conn.execute(
             """
             SELECT id, node_kind, source_type, source_id, title, content, struct_data, taxonomy_path, tenant_id, user_id
@@ -297,16 +366,16 @@ class PostgresKnowledgeStore(KnowledgeStoreInterface):
         async for row in rows:
             nodes.append(
                 GraphNode(
-                    id=row["id"],
-                    node_kind=row["node_kind"],
-                    source_type=row.get("source_type"),
-                    source_id=row.get("source_id"),
-                    title=row.get("title"),
-                    content=row.get("content") or "",
-                    metadata=row.get("struct_data") or {},
-                    taxonomy_path=row.get("taxonomy_path"),
-                    tenant_id=row.get("tenant_id"),
-                    user_id=row.get("user_id"),
+                    id=_required_str(row["id"]),
+                    node_kind=_required_str(row["node_kind"], default="concept"),
+                    source_type=_optional_str(row.get("source_type")),
+                    source_id=_optional_str(row.get("source_id")),
+                    title=_optional_str(row.get("title")),
+                    content=_required_str(row.get("content")),
+                    metadata=_to_struct_data(row.get("struct_data")),
+                    taxonomy_path=_optional_str(row.get("taxonomy_path")),
+                    tenant_id=_optional_str(row.get("tenant_id")),
+                    user_id=_optional_str(row.get("user_id")),
                 )
             )
         return nodes
@@ -322,9 +391,15 @@ class PostgresKnowledgeStore(KnowledgeStoreInterface):
         text_weight: float,
         limit: int,
     ) -> list[tuple[str, float]]:
+        """Merge vector and text hit maps into a ranked ``[(id, score)]`` list.
+
+        Supports ``"rrf"`` (reciprocal rank fusion) and ``"weighted"`` (linear
+        combination using ``vector_weight`` / ``text_weight``).
+        """
         ids = set(vector_hits) | set(text_hits)
         if not ids:
             return []
+        scored: list[tuple[str, float]]
         if fusion == "rrf":
             vec_rank = {rid: rank for rank, rid in enumerate(vector_hits.keys(), start=1)}
             text_rank = {rid: rank for rank, rid in enumerate(text_hits.keys(), start=1)}
@@ -354,10 +429,14 @@ class PostgresKnowledgeStore(KnowledgeStoreInterface):
         tenant_id: str,
         user_id: str | None,
         scope: TaxonomyPath | None,
-        source_types: List[str] | None,
-    ) -> tuple[list[sql.Composed], list]:
-        where: list[sql.Composed] = [sql.SQL("tenant_id = %s")]
-        params: list = [tenant_id]
+        source_types: list[str] | None,
+    ) -> tuple[list[sql.Composable], list[object]]:
+        """Build WHERE clauses for tenant, user, taxonomy scope, and source type.
+
+        Returns a ``(clauses, params)`` pair ready for ``sql.SQL.join``.
+        """
+        where: list[sql.Composable] = [sql.SQL("tenant_id = %s")]
+        params: list[object] = [tenant_id]
         if user_id:
             where.append(sql.SQL("(user_id = %s OR user_id IS NULL)"))
             params.append(user_id)

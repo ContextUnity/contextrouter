@@ -17,12 +17,57 @@ Contract:
 
 from __future__ import annotations
 
-from typing import Any
+import inspect
+from collections.abc import Awaitable
+from contextvars import Token
+from typing import ClassVar, TypeGuard
 
-from contextunity.core import get_contextunit_logger
+from contextunity.core import ContextToken, get_contextunit_logger
+from contextunity.core.exceptions import SecurityError
+from contextunity.core.types import is_object_dict, is_object_list
+from langchain_core.callbacks import CallbackManagerForToolRun
+from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tools import BaseTool
+from pydantic import ConfigDict
+from typing_extensions import override
+
+from contextunity.router.langchain_boundaries import tool_arun_method, tool_run_method
 
 logger = get_contextunit_logger(__name__)
+
+
+def _mapping_str_keys(fields: object) -> frozenset[str]:
+    if is_object_dict(fields):
+        return frozenset(fields)
+    return frozenset()
+
+
+def _schema_field_names(schema: object) -> frozenset[str]:
+    if isinstance(schema, type) and hasattr(schema, "model_fields"):
+        model_fields_obj: object = getattr(schema, "model_fields", None)
+        return _mapping_str_keys(model_fields_obj)
+    return _mapping_str_keys(getattr(schema, "model_fields", None)) or _mapping_str_keys(
+        getattr(schema, "__fields__", None)
+    )
+
+
+def _tag_strings(raw: object) -> list[str]:
+    if not is_object_list(raw):
+        return []
+    tags: list[str] = []
+    for element in raw:
+        tags.append(str(element))
+    return tags
+
+
+def _callable_param_names(func: object) -> frozenset[str]:
+    if not callable(func):
+        return frozenset()
+    return frozenset(inspect.signature(func).parameters.keys())
+
+
+def _is_awaitable_object(value: object) -> TypeGuard[Awaitable[object]]:
+    return inspect.isawaitable(value)
 
 
 class SecureTool(BaseTool):
@@ -77,17 +122,35 @@ class SecureTool(BaseTool):
     # external tool names itself "log_execution_trace" to bypass auth.
     skip_auth: bool = False
 
-    # Tenant binding — if set, the tool can only be executed by tokens
-    # that include this tenant in their ``allowed_tenants``.
-    # Set during registration (project_id from RegisterManifest payload).
-    # Empty string = no tenant restriction (internal Router tools).
+    # Tenant binding — tokens must intersect this set to execute the tool.
+    bound_allowed_tenants: tuple[str, ...] = ()
+    # Legacy single-tenant binding; prefer bound_allowed_tenants.
     bound_tenant: str = ""
 
-    model_config = {"arbitrary_types_allowed": True}
+    model_config: ClassVar[ConfigDict] = ConfigDict(arbitrary_types_allowed=True)
 
     def _effective_permission(self) -> str:
         """Return the permission string, defaulting to ``tool:{name}``."""
         return self.required_permission or f"tool:{self.name}"
+
+    def _effective_bound_tenants(self) -> tuple[str, ...]:
+        """Return tool-bound tenant scope (multi-tenant preferred over legacy single)."""
+        if self.bound_allowed_tenants:
+            return self.bound_allowed_tenants
+        if self.bound_tenant:
+            return (self.bound_tenant,)
+        return ()
+
+    def _resolve_execution_tenants(self, token: ContextToken) -> tuple[str, ...] | None:
+        """Intersect token scope with tool binding; None means no tenant attenuation."""
+        bound = self._effective_bound_tenants()
+        token_tenants = token.allowed_tenants
+        if not bound:
+            return None
+        if not token_tenants:
+            return bound
+        intersected = tuple(tenant for tenant in bound if tenant in set(token_tenants))
+        return intersected
 
     def _enforce_permission(self) -> None:
         """Check access token permissions AND tenant binding before execution.
@@ -105,36 +168,35 @@ class SecureTool(BaseTool):
         if self.skip_auth:
             return
 
-        from contextunity.router.cortex.runtime_context import get_current_access_token
+        from contextunity.router.core.context import get_current_access_token
 
         token = get_current_access_token()
         if token is None:
-            raise PermissionError(
-                f"No access token — tool '{self.name}' blocked (fail-closed). "
-                f"Required permission: {self._effective_permission()}"
+            raise SecurityError(
+                (
+                    f"No access token — tool '{self.name}' blocked (fail-closed). "
+                    f"Required permission: {self._effective_permission()}"
+                )
             )
 
         # ── Tenant isolation ─────────────────────────────────────────
-        # If tool is bound to a tenant, verify the token is allowed.
-        # admin:all bypasses tenant isolation (god-mode for dashboard).
-        if self.bound_tenant:
+        allowed_scope = self._effective_bound_tenants()
+        if allowed_scope:
             allowed = getattr(token, "allowed_tenants", ()) or ()
             perms = getattr(token, "permissions", ()) or ()
-            if "admin:all" not in perms and self.bound_tenant not in allowed:
-                raise PermissionError(
-                    f"Tenant isolation: tool '{self.name}' is bound to "
-                    f"tenant '{self.bound_tenant}', but token allows: "
-                    f"{list(allowed)}.  Cross-project access denied."
+            if "admin:all" not in perms and not set(allowed_scope).intersection(allowed):
+                raise SecurityError(
+                    (
+                        f"Tenant isolation: tool '{self.name}' is bound to tenants "
+                        f"{list(allowed_scope)}, but token allows: {list(allowed)}. "
+                        "Cross-project access denied."
+                    )
                 )
 
         # ── Permission check (fail-closed) ────────────────────────────
         from contextunity.core.authz import authorize
 
         effective_perm = self._effective_permission()
-
-        # If a tool has an explicit permission in a non-tool namespace
-        # (e.g. zero:anonymize for privacy tools), use permission-only check.
-        # tool_name-based check would incorrectly look for tool:{name}.
         use_tool_name = effective_perm.startswith("tool:")
 
         decision = authorize(
@@ -142,15 +204,18 @@ class SecureTool(BaseTool):
             tool_name=self.name if use_tool_name else None,
             permission=effective_perm,
             service="router",
+            tool_scope=self.required_scope or None,
         )
         if decision.denied:
-            raise PermissionError(
-                f"Permission denied for tool '{self.name}'. "
-                f"{decision.reason}. "
-                f"Required: {effective_perm}"
+            raise SecurityError(
+                (
+                    f"Permission denied for tool '{self.name}'. "
+                    f"{decision.reason}. "
+                    f"Required: {effective_perm}"
+                )
             )
 
-    def _inject_authoritative_context(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+    def _inject_authoritative_context(self, kwargs: dict[str, object]) -> dict[str, object]:
         """Overwrite sensitive kwargs with authoritative values from the access token.
 
         This prevents LLM prompt injection from spoofing tenant_id, user_id, or permissions.
@@ -159,42 +224,42 @@ class SecureTool(BaseTool):
         if self.skip_auth:
             return kwargs
 
-        from contextunity.router.cortex.runtime_context import get_current_access_token
+        from contextunity.router.core.context import get_current_access_token
 
         token = get_current_access_token()
         if not token:
             return kwargs
 
-        secure_kwargs = dict(kwargs)
+        secure_kwargs: dict[str, object] = dict(kwargs)
 
-        # Determine valid parameters for this tool
         allowed_keys = set(secure_kwargs.keys())
-        schema = getattr(self, "args_schema", getattr(self.wrapped_tool, "args_schema", None))
-        if schema:
-            if hasattr(schema, "model_fields"):  # Pydantic v2
-                allowed_keys.update(schema.model_fields.keys())
-            elif hasattr(schema, "__fields__"):  # Pydantic v1
-                allowed_keys.update(schema.__fields__.keys())
-        elif self.wrapped_tool and hasattr(self.wrapped_tool, "func"):
-            import inspect
+        schema_obj: object | None = getattr(self, "args_schema", None)
+        if schema_obj is None and self.wrapped_tool is not None:
+            schema_obj = getattr(self.wrapped_tool, "args_schema", None)
+        if schema_obj is not None:
+            allowed_keys.update(_schema_field_names(schema_obj))
+        elif self.wrapped_tool is not None:
+            func_obj: object | None = getattr(self.wrapped_tool, "func", None)
+            if func_obj is not None:
+                allowed_keys.update(_callable_param_names(func_obj))
 
-            sig = inspect.signature(self.wrapped_tool.func)
-            allowed_keys.update(sig.parameters.keys())
-
-        # 1. Tenant ID forgery prevention
         if "tenant_id" in allowed_keys:
-            requested = secure_kwargs.get("tenant_id")
-            if getattr(token, "allowed_tenants", ()):
-                if not requested or not token.can_access_tenant(requested):
-                    secure_kwargs["tenant_id"] = token.allowed_tenants[0]
+            allowed = token.allowed_tenants
+            requested_raw = secure_kwargs.get("tenant_id")
+            if allowed:
+                allowed_set = set(allowed)
+                if isinstance(requested_raw, str) and requested_raw in allowed_set:
+                    secure_kwargs["tenant_id"] = requested_raw
+                else:
+                    secure_kwargs["tenant_id"] = sorted(allowed)[0]
+            else:
+                _ = secure_kwargs.pop("tenant_id", None)
 
-        # 2. User ID forgery prevention
         if "user_id" in allowed_keys:
             user_id = getattr(token, "user_id", None)
             if user_id:
                 secure_kwargs["user_id"] = user_id
 
-        # 3. Permissions & Token ID
         if "permissions" in allowed_keys:
             secure_kwargs["permissions"] = list(getattr(token, "permissions", []))
         if "token_id" in allowed_keys:
@@ -208,20 +273,26 @@ class SecureTool(BaseTool):
         This is purely an observability concern — it does NOT affect permissions.
         Permissions always use the canonical 'tool:' prefix.
         """
-        my_tags = getattr(self, "tags", None) or []
-        wrapped_tags = (getattr(self.wrapped_tool, "tags", None) or []) if self.wrapped_tool else []
+        my_tags = _tag_strings(getattr(self, "tags", None))
+
+        wrapped_tags: list[str] = []
+        if self.wrapped_tool is not None:
+            wrapped_tags = _tag_strings(getattr(self.wrapped_tool, "tags", None))
+
         if "federated" in my_tags or "federated" in wrapped_tags:
             return "federated_tool"
 
         eff_perm = self._effective_permission()
-        if eff_perm.startswith("zero:"):
-            return "zero_tool"
+        if eff_perm.startswith("privacy:"):
+            return "privacy_tool"
         if eff_perm.startswith("shield:"):
             return "shield_tool"
 
         return "tool"
 
-    def _prepare_execution(self, kwargs: dict[str, Any]) -> tuple[dict[str, Any], Any]:
+    def _prepare_execution(
+        self, kwargs: dict[str, object]
+    ) -> tuple[dict[str, object], Token[ContextToken | None] | None]:
         """Shared provenance + attenuation logic for _run/_arun.
 
         Returns:
@@ -229,7 +300,7 @@ class SecureTool(BaseTool):
         """
         from contextunity.core.tokens import TokenBuilder
 
-        from contextunity.router.cortex.runtime_context import (
+        from contextunity.router.core.context import (
             append_provenance,
             get_current_access_token,
             set_current_access_token,
@@ -239,11 +310,10 @@ class SecureTool(BaseTool):
         secure_kwargs = self._inject_authoritative_context(kwargs)
 
         token = get_current_access_token()
-        token_ref = None
+        token_ref: Token[ContextToken | None] | None = None
 
         prefix = self._resolve_provenance_prefix()
 
-        # Extract execution mode from token permissions (canonical: tool:name:mode)
         mode = getattr(self, "required_scope", "execute")
         if token and not self.skip_auth:
             if getattr(token, "permissions", None):
@@ -253,37 +323,55 @@ class SecureTool(BaseTool):
                         break
 
             try:
-                attenuated = TokenBuilder().attenuate(
-                    token,
-                    permissions=None,
-                    agent_id=f"{prefix}:{self.name}:{mode}",
-                )
+                narrowed_tenants = self._resolve_execution_tenants(token)
+                agent_id = f"{prefix}:{self.name}:{mode}"
+                if narrowed_tenants is not None:
+                    attenuated = TokenBuilder().attenuate(
+                        token,
+                        permissions=None,
+                        allowed_tenants=narrowed_tenants,
+                        agent_id=agent_id,
+                    )
+                else:
+                    attenuated = TokenBuilder().attenuate(
+                        token,
+                        permissions=None,
+                        agent_id=agent_id,
+                    )
                 token_ref = set_current_access_token(attenuated)
-            except Exception as e:
-                logger.warning("Failed to attenuate token for tool '%s': %s", self.name, e)
+            except (SecurityError, ValueError, TypeError, AttributeError) as e:
+                # Fail-closed: if attenuation cannot be produced we must not run
+                # the tool with the un-attenuated parent token (capability-strip
+                # would be bypassed). Refuse execution and surface the error.
+                raise SecurityError(
+                    (
+                        f"Token attenuation failed for tool '{self.name}': {e}. "
+                        "Refusing to execute with un-attenuated parent token."
+                    )
+                ) from e
 
-        # Record tool execution step (flat string for accumulator)
-        append_provenance(f"{prefix}:{self.name}:{mode}")
+        if prefix != "privacy_tool":
+            append_provenance(f"{prefix}:{self.name}:{mode}")
 
         return secure_kwargs, token_ref
 
     def _run(
         self,
-        *args: Any,
-        run_manager: Any = None,
-        config: Any = None,
-        **kwargs: Any,
-    ) -> Any:
+        *args: object,
+        run_manager: CallbackManagerForToolRun | None = None,
+        config: RunnableConfig | None = None,
+        **kwargs: object,
+    ) -> object:
         """Synchronous execution with permission enforcement."""
-        from contextunity.router.cortex.runtime_context import reset_current_access_token
+        from contextunity.router.core.context import reset_current_access_token
 
-        secure_kwargs, token_ref = self._prepare_execution(kwargs)
+        tool_kwargs: dict[str, object] = dict(kwargs)
+        secure_kwargs, token_ref = self._prepare_execution(tool_kwargs)
 
         try:
             if self.wrapped_tool is not None:
-                import inspect
-
-                sig = inspect.signature(self.wrapped_tool._run)
+                run_method = tool_run_method(self.wrapped_tool)
+                sig = inspect.signature(run_method)
                 if "run_manager" in sig.parameters or any(
                     p.kind == p.VAR_KEYWORD for p in sig.parameters.values()
                 ):
@@ -292,31 +380,31 @@ class SecureTool(BaseTool):
                     p.kind == p.VAR_KEYWORD for p in sig.parameters.values()
                 ):
                     secure_kwargs["config"] = config
-                return self.wrapped_tool._run(*args, **secure_kwargs)
+                return run_method(*args, **secure_kwargs)
             raise NotImplementedError(
                 f"SecureTool '{self.name}' has no _run implementation and no wrapped tool."
             )
         finally:
-            if token_ref:
+            if token_ref is not None:
                 reset_current_access_token(token_ref)
 
     async def _arun(
         self,
-        *args: Any,
-        run_manager: Any = None,
-        config: Any = None,
-        **kwargs: Any,
-    ) -> Any:
+        *args: object,
+        run_manager: CallbackManagerForToolRun | None = None,
+        config: RunnableConfig | None = None,
+        **kwargs: object,
+    ) -> object:
         """Async execution with permission enforcement."""
-        from contextunity.router.cortex.runtime_context import reset_current_access_token
+        from contextunity.router.core.context import reset_current_access_token
 
-        secure_kwargs, token_ref = self._prepare_execution(kwargs)
+        tool_kwargs: dict[str, object] = dict(kwargs)
+        secure_kwargs, token_ref = self._prepare_execution(tool_kwargs)
 
         try:
             if self.wrapped_tool is not None:
-                import inspect
-
-                sig = inspect.signature(self.wrapped_tool._arun)
+                arun_method = tool_arun_method(self.wrapped_tool)
+                sig = inspect.signature(arun_method)
                 if "run_manager" in sig.parameters or any(
                     p.kind == p.VAR_KEYWORD for p in sig.parameters.values()
                 ):
@@ -325,12 +413,15 @@ class SecureTool(BaseTool):
                     p.kind == p.VAR_KEYWORD for p in sig.parameters.values()
                 ):
                     secure_kwargs["config"] = config
-                return await self.wrapped_tool._arun(*args, **secure_kwargs)
+                pending: object = arun_method(*args, **secure_kwargs)
+                if _is_awaitable_object(pending):
+                    return await pending
+                return pending
             raise NotImplementedError(
                 f"SecureTool '{self.name}' has no _arun implementation and no wrapped tool."
             )
         finally:
-            if token_ref:
+            if token_ref is not None:
                 reset_current_access_token(token_ref)
 
     @classmethod
@@ -341,6 +432,7 @@ class SecureTool(BaseTool):
         permission: str = "",
         scope: str = "read",
         tenant: str = "",
+        allowed_tenants: tuple[str, ...] = (),
     ) -> SecureTool:
         """Wrap a raw BaseTool in SecureTool with permission enforcement.
 
@@ -361,30 +453,38 @@ class SecureTool(BaseTool):
             SecureTool instance wrapping the original.
         """
         if isinstance(tool, SecureTool):
-            # Already secure — update permission/tenant if provided
             if permission and not tool.required_permission:
                 tool.required_permission = permission
-            if tenant and not tool.bound_tenant:
+            if allowed_tenants and not tool.bound_allowed_tenants:
+                tool.bound_allowed_tenants = allowed_tenants
+            elif tenant and not tool.bound_tenant:
                 tool.bound_tenant = tenant
             return tool
 
         effective_permission = permission or f"tool:{tool.name}"
+        tool_schema = getattr(tool, "args_schema", None)
+        tool_description = getattr(tool, "description", None)
 
-        init_kwargs: dict[str, Any] = {
-            "name": tool.name,
-            "description": tool.description or f"Wrapped tool: {tool.name}",
-            "required_permission": effective_permission,
-            "required_scope": scope,
-            "wrapped_tool": tool,
-            "bound_tenant": tenant,
-            # skip_auth intentionally NOT set — always False for wrapped tools
-        }
-
-        # Preserve args_schema if present
-        if hasattr(tool, "args_schema") and tool.args_schema is not None:
-            init_kwargs["args_schema"] = tool.args_schema
-
-        return cls(**init_kwargs)
+        if tool_schema is not None:
+            return cls(
+                name=tool.name,
+                description=tool_description or f"Wrapped tool: {tool.name}",
+                args_schema=tool_schema,
+                required_permission=effective_permission,
+                required_scope=scope,
+                wrapped_tool=tool,
+                bound_allowed_tenants=allowed_tenants,
+                bound_tenant=tenant,
+            )
+        return cls(
+            name=tool.name,
+            description=tool_description or f"Wrapped tool: {tool.name}",
+            required_permission=effective_permission,
+            required_scope=scope,
+            wrapped_tool=tool,
+            bound_allowed_tenants=allowed_tenants,
+            bound_tenant=tenant,
+        )
 
     @classmethod
     def mark_infra(cls, tool: BaseTool) -> SecureTool:
@@ -406,9 +506,10 @@ class SecureTool(BaseTool):
             logger.debug("Marked tool '%s' as infra (skip_auth=True)", tool.name)
             return tool
 
+        tool_description = getattr(tool, "description", None)
         secure = cls(
             name=tool.name,
-            description=tool.description or f"Infra tool: {tool.name}",
+            description=tool_description or f"Infra tool: {tool.name}",
             required_permission=f"infra:{tool.name}",
             wrapped_tool=tool,
             skip_auth=True,
@@ -416,6 +517,7 @@ class SecureTool(BaseTool):
         logger.debug("Wrapped + marked tool '%s' as infra (skip_auth=True)", tool.name)
         return secure
 
+    @override
     def __repr__(self) -> str:
         wrapped_info = f", wrapped={self.wrapped_tool.name}" if self.wrapped_tool else ""
         skip_info = ", infra=True" if self.skip_auth else ""

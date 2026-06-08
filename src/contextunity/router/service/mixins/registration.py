@@ -3,154 +3,166 @@
 from __future__ import annotations
 
 import secrets
+import threading
+from typing import TYPE_CHECKING
 
-from contextunity.core import get_contextunit_logger
+import pydantic
+from contextunity.core import contextunit_pb2, get_contextunit_logger
+from contextunity.core.exceptions import (
+    ConfigurationError,
+    SecurityError,
+)
+from contextunity.core.sdk.payload import get_str
+from contextunity.core.types import ContextUnitPayload, JsonDict, is_json_dict
+from grpc.aio import ServicerContext
 
 from contextunity.router.service.decorators import grpc_error_handler
+from contextunity.router.service.graph_registration import (
+    deregister_project_graphs,
+    register_graph_for_project,
+)
 from contextunity.router.service.helpers import make_response, parse_unit
-from contextunity.router.service.tool_factory import create_tool_from_config
+from contextunity.router.service.mixins.execution.types import (
+    ProjectConfigMap,
+    ProjectGraphMap,
+    ProjectToolMap,
+    RouterCallbackMap,
+)
+from contextunity.router.service.payloads import GraphEntry, RegisterManifestPayload
+from contextunity.router.service.registration_auth import get_verified_registration_auth_context
+from contextunity.router.service.registration_projection import (
+    registered_project_config_from_bundle,
+)
+from contextunity.router.service.registration_tools import create_tools_from_bundle
 
 logger = get_contextunit_logger(__name__)
 
-# Module-level store for inline API keys (no-Shield fallback).
-# Populated by RegisterManifest when bundle includes inline secrets.
-# Accessed by ModelRegistry.create_llm() as Shield fallback.
-# Dict: project_id → {provider: api_key}
-_project_secrets: dict[str, dict[str, str]] = {}
+ContextUnit = contextunit_pb2.ContextUnit
 
 
-def _extract_registration_token_string(context) -> str:
-    """Extract bearer token from gRPC metadata for registration RPCs."""
-    metadata = dict(context.invocation_metadata() or [])
+def _validate_graph_key_field_consistency(
+    graph_key: str,
+    field_name: str,
+    field_value: str | None,
+) -> None:
+    """Validate that an explicit graph key-derived field matches its map key.
 
-    auth_header = str(metadata.get("authorization", "")).strip()
-    if auth_header.startswith("Bearer "):
-        return auth_header[7:].strip()
+    Auto-population pattern (v1alpha3): if id is None, the caller sets it from
+    the key. If id is explicitly provided and differs from the key, it is a
+    configuration error — the key IS the id.
 
-    token_str = str(metadata.get("x-context-token", "")).strip()
-    if token_str:
-        return token_str
+    Args:
+        graph_key: The YAML map key (e.g. 'cu-rag').
+        field_name: GraphEntry field name.
+        field_value: The explicit field value from GraphEntry, or None.
 
-    return ""
-
-
-async def _build_registration_verifier(
-    *,
-    token_str: str,
-    project_id: str,
-):
-    """Build a verifier backend for registration/auth bootstrap.
-
-    Resolution order:
-    1. Redis: stored project_secret or public_key (from previous registration)
-    2. Shield: fetch Ed25519 public key (Enterprise mode)
-    3. Env: CU_PROJECT_SECRET from SharedConfig (HMAC single-project mode)
+    Raises:
+        ConfigurationError: If field_value is set and does not match graph_key.
     """
-    parts = token_str.rsplit(".", 2)
-    if len(parts) != 3:
-        raise PermissionError("Registration token must use composite kid wire format")
-
-    kid = parts[0]
-    if ":" not in kid:
-        raise PermissionError(
-            "Registration token must use composite kid format '<project>:<key-version>'"
-        )
-
-    caller_project_id, key_version = kid.split(":", 1)
-    if caller_project_id != project_id:
-        raise PermissionError(
-            f"Registration token project mismatch: token project '{caller_project_id}' "
-            f"cannot register project '{project_id}'"
-        )
-
-    from contextunity.core.discovery import get_project_key
-
-    key_data = get_project_key(project_id) or {}
-    stored_secret = key_data.get("project_secret")
-
-    if "session" in key_version:
-        public_key_b64 = key_data.get("public_key_b64")
-        if not public_key_b64:
-            from contextunity.router.service.shield_client import _get_shield_url
-
-            shield_url = _get_shield_url()
-            if not shield_url:
-                raise PermissionError(
-                    f"No public key cached for project '{project_id}' and Shield is not configured"
-                )
-
-            from contextunity.core.token_utils import fetch_project_public_key_async
-
-            public_key_b64, returned_kid = await fetch_project_public_key_async(
-                project_id,
-                kid,
-                shield_url,
-                provenance="router:register_manifest:fetch_public_key",
+    if field_value is not None and field_value != graph_key:
+        raise ConfigurationError(
+            message=(
+                f"Graph entry {field_name} '{field_value}' does not match its map key "
+                f"'{graph_key}'. The map key is the canonical graph id. Either omit the field "
+                "(it will be auto-populated) or set it to the same value as the key."
             )
+        )
 
-            from contextunity.core.discovery import update_project_public_key
 
-            update_project_public_key(project_id, public_key_b64, returned_kid)
+def _validate_graph_id_consistency(graph_key: str, entry_id: str | None) -> None:
+    """Backward-compatible wrapper for tests and older internal imports."""
+    _validate_graph_key_field_consistency(graph_key, "id", entry_id)
 
+
+def _strict_graph_map(bundle: ContextUnitPayload) -> JsonDict:
+    """Return the registration graph map, failing closed on malformed bundles."""
+    graph_map = bundle.get("graph")
+    if not is_json_dict(graph_map) or not graph_map:
+        raise ConfigurationError(
+            message="RegisterManifest bundle missing non-empty 'graph' dictionary"
+        )
+    return graph_map
+
+
+def _validated_graph_entries(graph_map: JsonDict) -> dict[str, GraphEntry]:
+    """Validate all graph entries before mutating registries."""
+    entries: dict[str, GraphEntry] = {}
+    for graph_key, raw_entry in graph_map.items():
         try:
-            from contextunity.core.ed25519 import Ed25519Backend
-        except ImportError as exc:
-            raise PermissionError("contextunity.core.ed25519 failed to import") from exc
+            validated = GraphEntry.model_validate(raw_entry)
+        except pydantic.ValidationError as exc:
+            raise ConfigurationError(message=f"Invalid graph entry '{graph_key}': {exc}") from exc
 
-        return Ed25519Backend(public_key_b64=public_key_b64, kid=kid)
-
-    # HMAC mode: try stored secret first, then env fallback
-    if stored_secret:
-        from contextunity.core.signing import HmacBackend
-
-        return HmacBackend(project_id, stored_secret)
-
-    # Env fallback: CU_PROJECT_SECRET from SharedConfig
-    from contextunity.core.config import get_core_config
-
-    env_secret = get_core_config().security.project_secret
-    if env_secret:
-        from contextunity.core.signing import HmacBackend
-
-        return HmacBackend(project_id, env_secret)
-
-    raise PermissionError(
-        f"No HMAC secret available for project '{project_id}'. "
-        f"Set CU_PROJECT_SECRET env var or use Shield mode (Ed25519)."
-    )
+        _validate_graph_key_field_consistency(graph_key, "id", validated.id)
+        _validate_graph_key_field_consistency(graph_key, "name", validated.name)
+        if validated.id is None:
+            validated = validated.model_copy(update={"id": graph_key})
+        entries[graph_key] = validated.model_copy(update={"name": graph_key})
+    return entries
 
 
-async def _get_verified_registration_auth_context(
-    context,
-    *,
-    project_id: str,
-):
-    """Verify registration token and return canonical auth context."""
-    from contextunity.core.authz.context import VerifiedAuthContext
-    from contextunity.core.token_utils import verify_token_string
-
-    token_str = _extract_registration_token_string(context)
-    if not token_str:
-        raise PermissionError("Missing registration token in gRPC metadata")
-
-    backend = await _build_registration_verifier(
-        token_str=token_str,
-        project_id=project_id,
-    )
-    token = verify_token_string(token_str, backend)
-    if token is None:
-        raise PermissionError("Registration token cryptographic verification failed")
-    if token.is_expired():
-        raise PermissionError(f"Registration token expired for project '{project_id}'")
-
-    return VerifiedAuthContext.from_token(token, token_str, project_id=project_id)
+def _validate_default_graph(default_graph_id: str, graph_entries: dict[str, GraphEntry]) -> None:
+    """Ensure multi-graph bundles declare an unambiguous default graph."""
+    if default_graph_id:
+        if default_graph_id not in graph_entries:
+            raise ConfigurationError(
+                message=f"default_graph '{default_graph_id}' is not present in graph map"
+            )
+        return
+    if len(graph_entries) > 1:
+        raise ConfigurationError(
+            message="RegisterManifest multi-graph bundles must declare a valid default_graph"
+        )
 
 
 class RegistrationMixin:
     """Mixin providing RegisterManifest, and graph management."""
 
+    _project_graphs: ProjectGraphMap = {}
+    _project_configs: ProjectConfigMap = {}
+    _project_tools: ProjectToolMap = {}
+    _project_router_callbacks: RouterCallbackMap = {}
+    _stream_secrets: dict[str, str] = {}
+    _stream_secrets_lock: threading.Lock = threading.Lock()
+
+    def get_cached_stream_secret(self, project_id: str) -> str | None:
+        """Return in-memory stream auth secret for *project_id*, if cached."""
+        with self._stream_secrets_lock:
+            return self._stream_secrets.get(project_id)
+
+    def put_cached_stream_secret(self, project_id: str, secret: str) -> None:
+        """Cache stream auth secret for reconnecting project executors."""
+        with self._stream_secrets_lock:
+            self._stream_secrets[project_id] = secret
+
+    if TYPE_CHECKING:
+
+        async def _check_manifest_hash(self, project_id: str, current_hash: str) -> bool:
+            del project_id, current_hash
+            raise NotImplementedError
+
+        async def _persist_registration(self, project_id: str, payload: dict[str, object]) -> None:
+            del project_id, payload
+            raise NotImplementedError
+
+        async def _save_manifest_hash(self, project_id: str, new_hash: str) -> None:
+            del project_id, new_hash
+            raise NotImplementedError
+
+        async def _persist_stream_secret(self, project_id: str, stream_secret: str) -> None:
+            del project_id, stream_secret
+            raise NotImplementedError
+
+        async def _restore_project_from_persistence(self, project_id: str) -> bool:
+            del project_id
+            raise NotImplementedError
+
     @grpc_error_handler
-    async def RegisterManifest(self, request, context):
+    async def RegisterManifest(
+        self,
+        request: ContextUnit,
+        context: ServicerContext[ContextUnit, ContextUnit],
+    ) -> ContextUnit:
         """Register project tools and graph via manifest or pre-compiled bundle.
 
         Accepts either:
@@ -162,165 +174,270 @@ class RegistrationMixin:
         """
         unit = parse_unit(request)
 
-        from contextunity.router.service.payloads import RegisterManifestPayload
-
         try:
-            params = RegisterManifestPayload(**unit.payload)
-        except Exception as e:
-            raise ValueError(f"Invalid RegisterManifest payload: {e}") from e
+            params = RegisterManifestPayload.model_validate(unit.payload or {})
+        except pydantic.ValidationError as e:
+            raise ConfigurationError(
+                message=f"Invalid RegisterManifest payload: {e}",
+            ) from e
 
-        bundle = params.bundle
-        if not bundle:
-            raise ValueError(
-                "RegisterManifest requires 'bundle' — a pre-compiled registration bundle "
-                "from ArtifactGenerator (contextunity.core.manifest.generators)"
+        bundle_raw = params.bundle
+        if not bundle_raw:
+            raise ConfigurationError(
+                message=(
+                    "RegisterManifest requires 'bundle' — a pre-compiled registration bundle "
+                    "from ArtifactGenerator (contextunity.core.manifest.generators)"
+                ),
+            )
+        bundle: ContextUnitPayload = dict(bundle_raw)
+        from contextunity.core.manifest.bundle_hash import compute_registration_bundle_hash
+
+        server_manifest_hash = compute_registration_bundle_hash(dict(bundle_raw))
+
+        project_id = get_str(bundle, "project_id")
+        if not project_id:
+            raise ConfigurationError(
+                message="RegisterManifest bundle missing non-empty 'project_id'"
             )
 
-        project_id = bundle.get("project_id", "")
-        tenant_id = bundle.get("tenant_id", project_id)
+        from contextunity.core.manifest.tenants import (
+            require_token_covers_allowed_tenants,
+            resolve_bundle_allowed_tenants,
+        )
+
+        allowed_tenants = resolve_bundle_allowed_tenants(bundle)
+        bundle["allowed_tenants"] = allowed_tenants
 
         if "project_secret" in bundle:
-            raise ValueError(
-                "RegisterManifest payload must NOT contain 'project_secret'. "
-                "HMAC secrets are resolved from CU_PROJECT_SECRET env var. "
-                "Update your contextunity.core SDK."
+            raise SecurityError(
+                message=(
+                    "RegisterManifest payload must NOT contain 'project_secret'. "
+                    "HMAC secrets are resolved from CU_PROJECT_SECRET env var. "
+                    "Update your contextunity.core SDK."
+                ),
             )
 
         from contextunity.core.authz import authorize
-        from contextunity.core.discovery import register_project, verify_project_owner
+        from contextunity.core.discovery import (
+            get_or_create_project_stream_secret,
+            register_project,
+            verify_project_owner,
+        )
 
-        auth_ctx = await _get_verified_registration_auth_context(
+        auth_ctx = await get_verified_registration_auth_context(
             context,
+            project_id=project_id,
+        )
+        require_token_covers_allowed_tenants(
+            auth_ctx,
+            allowed_tenants=allowed_tenants,
             project_id=project_id,
         )
         decision = authorize(
             auth_ctx,
             registration_project_id=project_id,
-            tenant_id=tenant_id,
             service="router",
             rpc_name="RegisterManifest",
         )
         if decision.denied:
-            raise PermissionError(
+            raise SecurityError(
                 f"Registration denied for project '{project_id}': {decision.reason}"
             )
 
-        if not verify_project_owner(project_id, tenant_id):
-            raise PermissionError(
-                f"Project '{project_id}' is already registered to "
-                f"a different tenant. Cannot hijack identity."
+        if not verify_project_owner(project_id):
+            raise SecurityError(
+                f"Project '{project_id}' is already registered to a different owner. "
+                + "Cannot hijack identity."
             )
-        register_project(project_id, tenant_id, tools=[])
 
-        # Hash Idempotency check
+        # Server-computed hash is authoritative; a client-supplied hash is only a hint.
+        if params.hash and params.hash != server_manifest_hash:
+            logger.warning("Ignoring mismatched client manifest hash for project '%s'", project_id)
         if params.hash:
-            is_matched = await self._check_manifest_hash(project_id, params.hash)
+            is_matched = await self._check_manifest_hash(project_id, server_manifest_hash)
             if is_matched:
                 logger.debug(
                     "Project '%s' manifest hash matched. Skipping re-registration.", project_id
                 )
-                from contextunity.router.service.shield_client import _get_shield_url
+                from contextunity.router.service.shield_client import get_shield_url
 
-                stream_secret = self._stream_secrets.get(project_id)
+                # Idempotent re-registration: reuse the existing stream
+                # secret so active ToolExecutorStream sessions reconnect
+                # with the same key. A new manifest that changes the
+                # graph structure still goes through the non-hash-match
+                # path below and rotates the secret there.
+                stream_secret = get_or_create_project_stream_secret(project_id)
+                with self._stream_secrets_lock:
+                    self._stream_secrets[project_id] = stream_secret
+                await self._persist_stream_secret(project_id, stream_secret)
+
+                graph_map = self._project_graphs.get(project_id)
+                if not isinstance(graph_map, dict):
+                    _ = await self._restore_project_from_persistence(project_id)
+                    graph_map = self._project_graphs.get(project_id)
+                if not isinstance(graph_map, dict):
+                    raise ConfigurationError(
+                        message=f"Project '{project_id}' has no registered graph map"
+                    )
+                graph_entry = graph_map.get("default", "")
+
                 return make_response(
                     payload={
                         "registered_tools": self._project_tools.get(project_id, []),
-                        "graph": self._project_graphs.get(project_id, "").replace(
-                            f"project:{project_id}:", ""
-                        ),
+                        "graph": graph_entry.replace(f"project:{project_id}:", ""),
                         "status": "ok",
                         "hash_matched": True,
                         "stream_secret": stream_secret,
-                        "shield_url": _get_shield_url(),
+                        "shield_url": get_shield_url(),
                     },
                     trace_id=str(unit.trace_id),
                     security=unit.security,
                 )
 
         # ── Store inline secrets (no-Shield fallback) ──────────────
-        inline_secrets = bundle.pop("secrets", None)
-        if inline_secrets:
-            _project_secrets[project_id] = inline_secrets
-            logger.info(
-                "Stored %d inline API key(s) for project '%s' (no-Shield mode)",
-                len(inline_secrets),
-                project_id,
-            )
+        inline_secrets_raw = bundle.pop("secrets", None)
+        inline_secrets: dict[str, str] | None = None
+        if inline_secrets_raw is not None:
+            if not is_json_dict(inline_secrets_raw):
+                raise SecurityError("Inline registration secrets must be a JSON object")
+            inline_secrets = {}
+            for key, value in inline_secrets_raw.items():
+                if not isinstance(value, str) or not value:
+                    raise SecurityError("Inline registration secrets must be non-empty strings")
+                inline_secrets[str(key)] = value
 
-        # De-register existing tools
+        # Validate and instantiate everything before mutating global registries.
+        graph_map = _strict_graph_map(bundle)
+        graph_entries = _validated_graph_entries(graph_map)
+        default_graph_id = get_str(bundle, "default_graph")
+        _validate_default_graph(default_graph_id, graph_entries)
+        tool_instances = create_tools_from_bundle(bundle, project_id=project_id)
+
+        from contextunity.router.core.registry import graph_registry
+        from contextunity.router.modules.tools import (
+            get_tool_for_project,
+            list_project_tools,
+            register_tool,
+        )
+
+        had_old_tools = project_id in self._project_tools
+        had_old_graphs = project_id in self._project_graphs
+        had_old_config = project_id in self._project_configs
+        had_old_callbacks = project_id in self._project_router_callbacks
+        old_tool_names = list(self._project_tools.get(project_id, []))
+        old_project_tool_names = set(list_project_tools(project_id))
+        old_tool_instances = [
+            tool
+            for name in old_tool_names
+            if name in old_project_tool_names
+            if (tool := get_tool_for_project(project_id, name)) is not None
+        ]
+        old_graph_map = self._project_graphs.get(project_id, {})
+        old_project_config = self._project_configs.get(project_id, {})
+        old_callbacks = self._project_router_callbacks.get(project_id, {})
+        old_graph_factories = {
+            name: graph_registry.get(name)
+            for name in set(old_graph_map.values())
+            if graph_registry.has(name)
+        }
+
         if project_id in self._project_tools:
-            self._deregister_project(project_id)
+            _ = self._deregister_project(project_id)
+        _ = self._project_configs.pop(project_id, None)
 
         registered_tools: list[str] = []
+        graph_name = ""
 
-        from contextunity.router.service.payloads import GraphConfig, ToolConfig
-
-        for tool_dict in bundle.get("tools", []):
-            try:
-                tool_name = tool_dict.get("name")
-                tool_def = ToolConfig(**tool_dict)
-                tools = create_tool_from_config(
-                    name=tool_def.name,
-                    tool_type=tool_def.type,
-                    description=tool_def.description,
-                    config=tool_def.config,
+        try:
+            for tool_instance in tool_instances:
+                register_tool(
+                    tool_instance,
+                    allowed_tenants=tuple(allowed_tenants),
+                    project_id=project_id,
                 )
-                from contextunity.router.modules.tools import register_tool
+                registered_tools.append(tool_instance.name)
 
-                for tool_instance in tools:
-                    register_tool(tool_instance, tenant=tenant_id)
-                    registered_tools.append(tool_instance.name)
-            except Exception as e:
-                logger.error(
-                    "Failed to create tool '%s' for project '%s': %s", tool_name, project_id, e
+            self._project_tools[project_id] = registered_tools
+
+            registered_graph_map: dict[str, str] = {}
+            callbacks_map: dict[str, list[str]] = {}
+            for graph_key, validated in graph_entries.items():
+                g_name = self._register_graph(
+                    project_id,
+                    validated,
+                    available_tools=set(registered_tools),
                 )
-                raise ValueError(f"Failed to create tool '{tool_name}': {e}") from e
+                registered_graph_map[graph_key] = g_name
 
-        self._project_tools[project_id] = registered_tools
+                if validated.router_callbacks:
+                    callbacks_map[graph_key] = list(validated.router_callbacks)
 
-        graph_name = None
-        graph_dict = bundle.get("graph")
-        if graph_dict:
-            graph_config = GraphConfig(
-                name=graph_dict["id"],
-                template=graph_dict.get("template", "custom"),
-                nodes=graph_dict.get("nodes", []),
-                edges=graph_dict.get("edges", []),
-                config=graph_dict.get("config", {}),
+            if default_graph_id:
+                registered_graph_map["default"] = registered_graph_map[default_graph_id]
+            else:
+                registered_graph_map["default"] = next(iter(registered_graph_map.values()))
+
+            self._project_graphs[project_id] = registered_graph_map
+            self._project_router_callbacks[project_id] = callbacks_map
+            self._project_configs[project_id] = registered_project_config_from_bundle(
+                bundle, graph_map
             )
-            graph_name = self._register_graph(project_id, graph_config)
+            graph_name = registered_graph_map["default"]
+        except Exception:
+            _ = self._deregister_project(project_id)
+            _ = self._project_configs.pop(project_id, None)
+            for tool_instance in old_tool_instances:
+                register_tool(tool_instance, project_id=project_id)
+            for registry_name, graph_factory in old_graph_factories.items():
+                graph_registry.register(registry_name, graph_factory, overwrite=True)
+            if had_old_tools:
+                self._project_tools[project_id] = old_tool_names
+            if had_old_graphs:
+                self._project_graphs[project_id] = old_graph_map
+            if had_old_config:
+                self._project_configs[project_id] = old_project_config
+            if had_old_callbacks:
+                self._project_router_callbacks[project_id] = old_callbacks
+            raise
 
-            # Enrich the stored config with manifest-level metadata required for execution (policies, nodes)
-            if project_id not in self._project_configs:
-                self._project_configs[project_id] = {}
-            self._project_configs[project_id]["nodes"] = graph_dict.get("nodes", [])
-            self._project_configs[project_id]["policy"] = bundle.get("policy", {})
-            self._project_configs[project_id]["tools"] = bundle.get("tools", [])
+        persisted_bundle = dict(bundle)
+        persisted_bundle["__registration_hash"] = server_manifest_hash
+        await self._persist_registration(project_id, persisted_bundle)
 
-        await self._persist_registration(project_id, bundle)
+        # Update registered tools list in redis and persist inline secrets (open-source scale-safe)
+        from contextunity.core.config import get_core_config as _get_shared_config
 
-        if params.hash:
-            await self._save_manifest_hash(project_id, params.hash)
-
-        # Update registered tools list in redis
-        if len(registered_tools) > 0:
-            from contextunity.core.discovery import register_project
-
-            register_project(project_id, tenant_id, tools=registered_tools)
+        # Always pass the current project_secret so stale Redis entries
+        # (e.g. from a previous Shield/enterprise session) get overwritten.
+        _current_secret = _get_shared_config().security.project_secret or None
 
         stream_secret = secrets.token_urlsafe(32)
+        # First-time (or non-hash-match) registration. Mint a fresh
+        # stream secret. Active sessions cannot survive this — the
+        # executor must re-handshake with the new secret, which is the
+        # intended behavior when the manifest graph structure changes.
         with self._stream_secrets_lock:
             self._stream_secrets[project_id] = stream_secret
 
-        from contextunity.router.service.shield_client import _get_shield_url
+        await self._persist_stream_secret(project_id, stream_secret)
+
+        # Legacy discovery store: HMAC secret + inline API keys until SSOT migration completes.
+        _ = register_project(
+            project_id,
+            tools=registered_tools,
+            api_keys=inline_secrets,
+            project_secret=_current_secret,
+        )
+
+        from contextunity.router.service.shield_client import get_shield_url
 
         response_payload = {
             "registered_tools": registered_tools,
-            "graph": graph_name,
+            "graph": graph_name.replace(f"project:{project_id}:", ""),
             "status": "ok",
             "hash_matched": False,
             "stream_secret": stream_secret,
-            "shield_url": _get_shield_url(),
+            "shield_url": get_shield_url(),
         }
 
         return make_response(
@@ -329,119 +446,29 @@ class RegistrationMixin:
             security=unit.security,
         )
 
-    def _register_graph(self, project_id: str, graph_config: object) -> str:
-        """Register a graph from config.
-
-        v1alpha runtime supports template-based graphs only.
-        """
-        from contextunity.router.core.registry import graph_registry
-
-        # Namespace the graph name to prevent replacing core system graphs
-        original_name = graph_config.name
-        name = f"project:{project_id}:{original_name}"
-
-        if graph_config.template and graph_config.template != "custom":
-            template = graph_config.template
-            config = graph_config.config
-
-            if template == "sql_analytics":
-                builder = self._build_sql_analytics_graph_factory(config)
-            elif template == "gardener":
-                from contextunity.router.cortex.graphs.commerce.gardener.graph import (
-                    build_gardener_graph,
-                )
-
-                def builder(_config=config):
-                    return build_gardener_graph(_config)
-            elif template == "dispatcher":
-                from contextunity.router.cortex.graphs.dispatcher_agent import (
-                    build_dispatcher_graph,
-                )
-
-                builder = build_dispatcher_graph
-            elif template == "rag_retrieval":
-                from contextunity.router.cortex.graphs.rag_retrieval.graph import (
-                    build_graph as build_rag_graph,
-                )
-
-                builder = build_rag_graph
-            elif template == "news_engine":
-                from contextunity.router.cortex.graphs.news_engine.graph import (
-                    build_news_engine_graph,
-                )
-
-                builder = build_news_engine_graph
-            else:
-                raise ValueError(
-                    f"Unknown graph template: {template}. "
-                    f"Available: sql_analytics, gardener, dispatcher, rag_retrieval, news_engine"
-                )
-
-            # Prevent overwriting since it's already properly namespaced and deregistered first
-            graph_registry.register(name, builder, overwrite=True)
-            self._project_graphs[project_id] = name
-            if isinstance(config, dict):
-                self._project_configs[project_id] = config
-            logger.info(
-                "Registered graph '%s' (template=%s) for project '%s'",
-                name,
-                template,
-                project_id,
-            )
-            return original_name
-
-        elif graph_config.template == "custom":
-            name = f"project:{project_id}:{graph_config.name}"
-
-            def builder():
-                from contextunity.router.cortex.graphs.custom.builder import build_custom_graph
-
-                return build_custom_graph(
-                    graph_config.nodes, graph_config.edges, graph_config.config
-                )
-
-            from contextunity.router.core.registry import graph_registry
-
-            graph_registry.register(name, builder, overwrite=True)
-            self._project_graphs[project_id] = name
-            if isinstance(graph_config.config, dict):
-                self._project_configs[project_id] = graph_config.config
-
-            logger.info("Registered custom graph '%s' for project '%s'", name, project_id)
-            return graph_config.name
-
-        else:
-            raise ValueError("Graph config must have either template=<name> or template='custom'")
-
-    def _build_sql_analytics_graph_factory(self, config: dict):
-        """Create a graph builder function for sql_analytics template."""
-
-        def builder():
-            from contextunity.router.cortex.graphs.sql_analytics.builder import (
-                build_sql_analytics_graph,
-            )
-
-            return build_sql_analytics_graph(config)
-
-        return builder
+    def _register_graph(
+        self,
+        project_id: str,
+        graph_config: GraphEntry,
+        *,
+        available_tools: set[str] | None = None,
+    ) -> str:
+        """Register a graph from config."""
+        return register_graph_for_project(
+            project_id,
+            graph_config,
+            available_tools=available_tools,
+        )
 
     def _deregister_project(self, project_id: str) -> list[str]:
         """Remove all tools and graph for a project."""
-        from contextunity.router.modules.tools import deregister_tool
-
-        deregistered: list[str] = []
-
-        tool_names = self._project_tools.pop(project_id, [])
-        for name in tool_names:
-            if deregister_tool(name):
-                deregistered.append(name)
-
-        graph_name = self._project_graphs.pop(project_id, None)
-        if graph_name:
-            logger.info("Deregistered graph '%s' (project '%s')", graph_name, project_id)
-            deregistered.append(f"graph:{graph_name}")
-
-        return deregistered
+        return deregister_project_graphs(
+            project_tools=self._project_tools,
+            project_graphs=self._project_graphs,
+            project_router_callbacks=self._project_router_callbacks,
+            project_configs=self._project_configs,
+            project_id=project_id,
+        )
 
 
-__all__ = ["RegistrationMixin"]
+__all__ = ["RegistrationMixin", "_validate_graph_id_consistency"]

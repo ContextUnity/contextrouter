@@ -1,6 +1,8 @@
-"""A2UI protocol (agent-to-UI) stubs."""
+"""A2UI protocol -- agent-to-UI event streaming stubs for real-time frontend updates."""
 
 from __future__ import annotations
+
+from typing import ClassVar
 
 from contextunity.core import ContextUnit
 from pydantic import BaseModel, ConfigDict
@@ -9,7 +11,7 @@ from pydantic import BaseModel, ConfigDict
 class A2UIWidget(BaseModel):
     """Structured UI widget emitted by agents."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     widget_type: str
     data: ContextUnit

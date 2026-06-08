@@ -8,36 +8,17 @@ Keep these types *generic* and reusable across:
 
 from __future__ import annotations
 
-from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
+from typing import Literal, NotRequired, TypeAlias, TypedDict
 
 # ---- StructData typing -------------------------------------------------------
-#
-# We intentionally avoid `Any` in most of the codebase. When we deal with data
-# that must be JSON-serializable (e.g., JSONL ingestion artifacts), we use these
-# recursive aliases.
-type StructDataPrimitive = str | int | float | bool | None
-type StructDataValue = StructDataPrimitive | list["StructDataValue"] | dict[str, "StructDataValue"]
-type StructData = dict[str, StructDataValue]
-
-
-def coerce_struct_data(value: object) -> StructDataValue:
-    """Best-effort conversion into JSON-serializable StructDataValue.
-
-    This is intentionally conservative and used at integration boundaries where
-    external SDKs return loosely-typed Python objects.
-    """
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    if isinstance(value, dict):
-        out: StructData = {}
-        for k, v in value.items():
-            out[str(k)] = coerce_struct_data(v)
-        return out
-    if isinstance(value, (list, tuple, set)):
-        return [coerce_struct_data(v) for v in value]
-    # Fallback: stringify unknown objects (keeps JSON serializable)
-    return str(value)
-
+# Re-exported from core — canonical definition lives in core.sdk.types.
+from contextunity.core.sdk.types import (
+    StructData,
+    StructDataPrimitive,
+    StructDataValue,
+    coerce_struct_data,
+)
+from contextunity.core.types import JsonDict, is_object_dict
 
 SourceType: TypeAlias = str
 
@@ -73,7 +54,7 @@ Query: TypeAlias = TextQuery | SqlQuery | QueryPayload
 QueryLike: TypeAlias = str | Query
 
 
-def normalize_query(query: object) -> tuple[str, dict[str, Any] | None]:
+def normalize_query(query: object) -> tuple[str, JsonDict | None]:
     """Normalize QueryLike into `(query_text, extra_filters)` without breaking IRead/IWrite.
 
     Compatibility rule:
@@ -85,32 +66,40 @@ def normalize_query(query: object) -> tuple[str, dict[str, Any] | None]:
         return query, None
 
     # Runtime safety: callers should pass QueryLike, but integrations may pass arbitrary objects.
-    # Keep this defensive without making pyright consider branches unreachable.
-    if not isinstance(query, dict):
+    if not is_object_dict(query):
         return str(query), {"query_kind": "unknown"}
 
-    kind = str(query.get("kind") or "text").strip() or "text"
+    payload: dict[str, object] = query
+    kind_obj = payload.get("kind")
+    if isinstance(kind_obj, str):
+        kind = kind_obj.strip() or "text"
+    else:
+        kind = "text"
 
     if kind == "text":
-        text = query.get("text")
-        return (text if isinstance(text, str) else str(text)), {"query_kind": "text"}
+        text_obj = payload.get("text")
+        text = text_obj if isinstance(text_obj, str) else str(text_obj)
+        return text, {"query_kind": "text"}
 
     if kind == "sql":
-        sql = query.get("sql")
-        extra: dict[str, Any] = {"query_kind": "sql"}
-        extra["sql"] = sql if isinstance(sql, str) else str(sql)
-        if (dialect := query.get("dialect")) is not None:
-            extra["sql_dialect"] = dialect
-        if (params := query.get("params")) is not None:
-            extra["sql_params"] = params
-        # For compatibility: pass the SQL as the `query` string too.
-        return extra["sql"], extra
+        sql_obj = payload.get("sql")
+        sql_text = sql_obj if isinstance(sql_obj, str) else str(sql_obj)
+        sql_extra: JsonDict = {"query_kind": "sql", "sql": sql_text}
+        dialect_obj = payload.get("dialect")
+        if dialect_obj is not None:
+            sql_extra["sql_dialect"] = (
+                dialect_obj if isinstance(dialect_obj, str) else str(dialect_obj)
+            )
+        params_obj = payload.get("params")
+        if params_obj is not None:
+            sql_extra["sql_params"] = coerce_struct_data(params_obj)
+        return sql_text, sql_extra
 
-    # Unknown structured kind: stringify and attach payload into filters.
-    extra = {"query_kind": kind}
-    if "data" in query:
-        extra["query_data"] = query.get("data")
-    return kind, extra
+    kind_extra: JsonDict = {"query_kind": kind}
+    data_obj = payload.get("data")
+    if data_obj is not None:
+        kind_extra["query_data"] = coerce_struct_data(data_obj)
+    return kind, kind_extra
 
 
 class UserCtx(TypedDict, total=False):

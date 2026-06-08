@@ -1,4 +1,4 @@
-"""Reranker abstraction for RAG pipelines."""
+"""Reranker abstraction -- base class defining the reranking contract for RAG result re-scoring."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ from ..models import RetrievedDoc
 
 
 class BaseReranker(ABC):
+    """Abstract contract for reranking a list of ``RetrievedDoc`` by relevance."""
+
     @abstractmethod
     async def rerank(
         self,

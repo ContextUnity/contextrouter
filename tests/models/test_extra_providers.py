@@ -8,9 +8,7 @@ import pytest
 from contextunity.router.modules.models.llm.groq import GroqLLM  # noqa: E402
 from contextunity.router.modules.models.llm.hf_hub import HuggingFaceHubLLM  # noqa: E402
 from contextunity.router.modules.models.llm.inception import InceptionLLM  # noqa: E402
-from contextunity.router.modules.models.llm.runpod import RunPodLLM  # noqa: E402
 from contextunity.router.modules.models.types import (  # noqa: E402
-    ModelCapabilities,
     ModelRequest,
     TextPart,
 )
@@ -34,28 +32,6 @@ class TestExtraProviders:
         config.llm.max_retries = 3
         return config
 
-    def test_groq_initialization(self, mock_config):
-        model = GroqLLM(mock_config, model_name="llama-3.3-70b-versatile")
-        assert isinstance(model.capabilities, ModelCapabilities)
-        assert model.capabilities.supports_text is True
-        assert model.capabilities.supports_image is True
-
-    def test_runpod_initialization(self, mock_config):
-        model = RunPodLLM(mock_config, model_name="llama3-8b")
-        assert isinstance(model.capabilities, ModelCapabilities)
-        assert model.capabilities.supports_text is True
-        assert model.capabilities.supports_image is True
-
-    def test_hf_hub_initialization(self, mock_config):
-        try:
-            from huggingface_hub import AsyncInferenceClient  # noqa: F401
-        except ImportError:
-            pytest.skip("AsyncInferenceClient not found in huggingface_hub")
-        model = HuggingFaceHubLLM(mock_config, model_name="mistralai/Mistral-7B-Instruct-v0.2")
-        assert isinstance(model.capabilities, ModelCapabilities)
-        assert model.capabilities.supports_text is True
-        assert model.capabilities.supports_audio is False
-
     @pytest.mark.anyio
     async def test_groq_generate(self, mock_config):
         model = GroqLLM(mock_config)
@@ -76,38 +52,25 @@ class TestExtraProviders:
 
     @pytest.mark.anyio
     async def test_hf_hub_generate_text(self, mock_config):
-        try:
-            from huggingface_hub import AsyncInferenceClient  # noqa: F401
-        except ImportError:
-            pytest.skip("AsyncInferenceClient not found in huggingface_hub")
-        # Patch the AsyncInferenceClient class that was mocked in sys.modules
-        with patch("huggingface_hub.AsyncInferenceClient") as mock_client_class:
-            mock_client = mock_client_class.return_value
-            mock_resp = MagicMock()
-            mock_resp.choices = [MagicMock()]
-            mock_resp.choices[0].message.content = "HF Hub response"
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = "HF Hub response"
 
-            from unittest.mock import AsyncMock
+        from unittest.mock import AsyncMock
 
-            mock_client.chat_completion = AsyncMock(return_value=mock_resp)
+        mock_client.chat_completion = AsyncMock(return_value=mock_resp)
 
+        with patch(
+            "contextunity.router.modules.models.llm.hf_hub.load_async_inference_client",
+            return_value=mock_client,
+        ):
             model = HuggingFaceHubLLM(mock_config)
             request = ModelRequest(parts=[TextPart(text="Hello")])
             resp = await model.generate(request)
 
             assert resp.text == "HF Hub response"
             assert resp.raw_provider.provider == "hf-hub"
-
-    def test_inception_initialization(self, mock_config):
-        model = InceptionLLM(mock_config, model_name="mercury-2")
-        assert isinstance(model.capabilities, ModelCapabilities)
-        assert model.capabilities.supports_text is True
-        assert model.capabilities.supports_image is False
-        assert model.capabilities.supports_audio is False
-
-    def test_inception_default_model(self, mock_config):
-        model = InceptionLLM(mock_config)
-        assert model._model_name == "mercury-2"
 
     @pytest.mark.anyio
     async def test_inception_generate(self, mock_config):

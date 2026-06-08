@@ -7,14 +7,29 @@ Supports web, news, images search with filtering options.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import ClassVar, Literal
 
 import httpx
 from contextunity.core import get_contextunit_logger
+from contextunity.core.exceptions import ConfigurationError
+from contextunity.core.narrowing import as_str
+from contextunity.core.parsing import json_loads
+from contextunity.core.types import JsonDict, is_json_dict, is_object_dict, is_object_list
 
-from contextunity.router.core.config import Config
+from contextunity.router.core.config import RouterConfig
 
 logger = get_contextunit_logger(__name__)
+
+
+def _serper_result_rows(raw: object) -> list[dict[str, object]]:
+    """Narrow Serper API list payloads to object dict rows."""
+    if not is_object_list(raw):
+        return []
+    rows: list[dict[str, object]] = []
+    for item in raw:
+        if is_object_dict(item):
+            rows.append(item)
+    return rows
 
 
 class SerperSearchConnector:
@@ -35,7 +50,7 @@ class SerperSearchConnector:
         results = await connector.search_raw()
     """
 
-    BASE_URL = "https://google.serper.dev"
+    BASE_URL: ClassVar[str] = "https://google.serper.dev"
 
     def __init__(
         self,
@@ -46,8 +61,8 @@ class SerperSearchConnector:
         country: str = "us",
         language: str = "en",
         time_filter: str | None = None,
-        config: Config | None = None,
-    ):
+        config: RouterConfig | None = None,
+    ) -> None:
         """Initialize Serper connector.
 
         Args:
@@ -59,25 +74,26 @@ class SerperSearchConnector:
             time_filter: Time filter - "d" (day), "w" (week), "m" (month), "y" (year)
             config: Optional config for API key
         """
-        self.query = query
-        self.search_type = search_type
-        self.num_results = min(num_results, 100)
-        self.country = country
-        self.language = language
-        self.time_filter = time_filter
+        self.query: str = query
+        self.search_type: Literal["search", "news", "images"] = search_type
+        self.num_results: int = min(num_results, 100)
+        self.country: str = country
+        self.language: str = language
+        self.time_filter: str | None = time_filter
 
         # Get API key
         if config:
-            self.api_key = config.serper.api_key
+            api_key = config.serper.api_key
         else:
             from contextunity.router.core import get_core_config
 
-            self.api_key = get_core_config().serper.api_key
+            api_key = get_core_config().serper.api_key
 
-        if not self.api_key:
-            raise ValueError("Serper API key not configured")
+        if not api_key:
+            raise ConfigurationError("Serper API key not configured")
+        self.api_key: str = api_key
 
-    async def search_raw(self) -> list[dict[str, Any]]:
+    async def search_raw(self) -> list[dict[str, object]]:
         """Execute search and return raw results.
 
         Returns:
@@ -90,7 +106,7 @@ class SerperSearchConnector:
         """
         endpoint = f"{self.BASE_URL}/{self.search_type}"
 
-        payload: dict[str, Any] = {
+        payload: JsonDict = {
             "q": self.query,
             "gl": self.country,
             "hl": self.language,
@@ -111,17 +127,21 @@ class SerperSearchConnector:
                 json=payload,
                 headers=headers,
             )
-            response.raise_for_status()
-            data = response.json()
+            _ = response.raise_for_status()
+            data_raw: object = json_loads(response.text)
+
+        if not is_json_dict(data_raw):
+            return []
 
         # Extract results based on search type
         if self.search_type == "news":
-            results = data.get("news", [])
+            results_raw = data_raw.get("news", [])
         elif self.search_type == "images":
-            results = data.get("images", [])
+            results_raw = data_raw.get("images", [])
         else:
-            results = data.get("organic", [])
+            results_raw = data_raw.get("organic", [])
 
+        results = _serper_result_rows(results_raw)
         logger.debug("Serper returned %s results for '%s'", len(results), self.query)
         return results
 
@@ -137,13 +157,13 @@ class SerperSearchConnector:
         """
         raw_results = await self.search_raw()
 
-        normalized = []
+        normalized: list[dict[str, str]] = []
         for item in raw_results:
             normalized.append(
                 {
-                    "title": item.get("title", ""),
-                    "url": item.get("link", ""),
-                    "snippet": item.get("snippet", ""),
+                    "title": as_str(item.get("title")),
+                    "url": as_str(item.get("link")),
+                    "snippet": as_str(item.get("snippet")),
                     "source": "serper",
                 }
             )

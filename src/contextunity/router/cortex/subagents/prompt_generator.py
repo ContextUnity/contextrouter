@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from contextunity.core import BrainClient, get_contextunit_logger
+from contextunity.core.types import is_object_dict, is_object_list
 
-from contextunity.core import BrainClient, ContextUnit, get_contextunit_logger
+from .types import KnowledgeChunk, SpawnTask
 
 logger = get_contextunit_logger(__name__)
 
@@ -16,19 +17,32 @@ class SubAgentPromptGenerator:
     context-aware system prompts for sub-agents based on their task and agent type.
     """
 
+    _brain_endpoint: str
+    _brain_clients: dict[str, BrainClient]
+
     def __init__(self, brain_endpoint: str = "brain.contextunity.ts.net:50051"):
         """Initialize prompt generator.
 
         Args:
             brain_endpoint: Brain gRPC endpoint
         """
-        from contextunity.router.core.brain_token import get_brain_service_token
+        self._brain_endpoint = brain_endpoint
+        self._brain_clients = {}
 
-        self.brain = BrainClient(host=brain_endpoint, mode="grpc", token=get_brain_service_token())
+    def _brain_client(self, tenant_id: str) -> BrainClient:
+        """Return a Brain client with a token scoped to the requested tenant."""
+        if tenant_id not in self._brain_clients:
+            from contextunity.router.core.brain_token import get_brain_service_token
+
+            self._brain_clients[tenant_id] = BrainClient(
+                host=self._brain_endpoint,
+                token=get_brain_service_token(allowed_tenants=(tenant_id,)),
+            )
+        return self._brain_clients[tenant_id]
 
     async def generate_manifest(
         self,
-        task: Dict[str, Any],
+        task: SpawnTask,
         agent_type: str,
         tenant_id: str = "default",
         limit: int = 5,
@@ -86,7 +100,7 @@ class SubAgentPromptGenerator:
         query: str,
         tenant_id: str,
         limit: int = 5,
-    ) -> list[Dict[str, Any]]:
+    ) -> list[KnowledgeChunk]:
         """Query Semantic Memory for relevant knowledge.
 
         Args:
@@ -98,23 +112,20 @@ class SubAgentPromptGenerator:
             List of knowledge chunks
         """
         try:
-            unit = ContextUnit(
-                payload={
-                    "tenant_id": tenant_id,
-                    "query_text": query,
-                    "limit": limit,
-                    "source_types": ["semantic"],  # Filter for semantic memory
-                },
-                provenance=["router:subagent:prompt_generator"],
+            search_results = await self._brain_client(tenant_id).search(
+                tenant_id=tenant_id,
+                query_text=query,
+                limit=limit,
+                source_types=["semantic"],
             )
 
-            results = []
-            async for response in self.brain.query_memory(unit):
+            results: list[KnowledgeChunk] = []
+            for response in search_results:
                 results.append(
                     {
-                        "content": response.payload.get("content", ""),
-                        "metadata": response.payload.get("metadata", {}),
-                        "score": response.payload.get("score", 0.0),
+                        "content": response.content,
+                        "metadata": response.metadata,
+                        "score": response.score,
                     }
                 )
 
@@ -131,7 +142,7 @@ class SubAgentPromptGenerator:
         task_description: str,
         tenant_id: str,
         limit: int = 5,
-    ) -> list[Dict[str, Any]]:
+    ) -> list[KnowledgeChunk]:
         """Query Procedural Memory for relevant tools/examples.
 
         Args:
@@ -147,23 +158,20 @@ class SubAgentPromptGenerator:
             # Query for tools relevant to agent type and task
             query = f"{agent_type} {task_description} tools examples"
 
-            unit = ContextUnit(
-                payload={
-                    "tenant_id": tenant_id,
-                    "query_text": query,
-                    "limit": limit,
-                    "source_types": ["procedural"],  # Filter for procedural memory
-                },
-                provenance=["router:subagent:prompt_generator"],
+            search_results = await self._brain_client(tenant_id).search(
+                tenant_id=tenant_id,
+                query_text=query,
+                limit=limit,
+                source_types=["procedural"],
             )
 
-            results = []
-            async for response in self.brain.query_memory(unit):
+            results: list[KnowledgeChunk] = []
+            for response in search_results:
                 results.append(
                     {
-                        "content": response.payload.get("content", ""),
-                        "metadata": response.payload.get("metadata", {}),
-                        "score": response.payload.get("score", 0.0),
+                        "content": response.content,
+                        "metadata": response.metadata,
+                        "score": response.score,
                     }
                 )
 
@@ -176,10 +184,10 @@ class SubAgentPromptGenerator:
 
     def _build_manifest(
         self,
-        task: Dict[str, Any],
+        task: SpawnTask,
         agent_type: str,
-        semantic_knowledge: list[Dict[str, Any]],
-        procedural_knowledge: list[Dict[str, Any]],
+        semantic_knowledge: list[KnowledgeChunk],
+        procedural_knowledge: list[KnowledgeChunk],
     ) -> str:
         """Build manifest (system prompt) from knowledge.
 
@@ -192,10 +200,10 @@ class SubAgentPromptGenerator:
         Returns:
             Complete system prompt/manifest
         """
-        parts = []
+        parts: list[str] = []
 
         # Base role definition
-        role_map = {
+        role_map: dict[str, str] = {
             "task_executor": "You are a specialized task executor agent. Your role is to execute specific tasks efficiently and accurately.",
             "parallel_worker": "You are a parallel processing worker agent. Your role is to process tasks in parallel with other workers.",
             "specialized_agent": "You are a specialized domain agent. Your role is to handle domain-specific tasks with expertise.",
@@ -241,7 +249,7 @@ class SubAgentPromptGenerator:
 
         return "\n".join(parts)
 
-    def _format_context(self, context: Dict[str, Any]) -> str:
+    def _format_context(self, context: str | dict[str, object]) -> str:
         """Format context dictionary into readable text.
 
         Args:
@@ -250,11 +258,16 @@ class SubAgentPromptGenerator:
         Returns:
             Formatted context string
         """
-        if isinstance(context, dict):
-            lines = []
+        if is_object_dict(context):
+            lines: list[str] = []
             for key, value in context.items():
-                if isinstance(value, (dict, list)):
-                    value = str(value)
-                lines.append(f"- {key}: {value}")
+                lines.append(f"- {key}: {_format_context_value(value)}")
             return "\n".join(lines)
         return str(context)
+
+
+def _format_context_value(value: object) -> str:
+    """Format a context value for manifest rendering."""
+    if is_object_dict(value) or is_object_list(value):
+        return str(value)
+    return str(value)

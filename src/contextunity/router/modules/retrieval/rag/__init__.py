@@ -6,8 +6,7 @@ Import from here for DX; heavy modules are loaded on first attribute access.
 
 from __future__ import annotations
 
-import importlib
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from contextunity.router.modules.retrieval.rag.citations import CitationBuilder, build_citations
@@ -78,10 +77,79 @@ _EXPORTS: dict[str, str] = {
 }
 
 
-def __getattr__(name: str) -> Any:
-    if name not in _EXPORTS:
-        raise AttributeError(name)
-    path = _EXPORTS[name]
-    mod_name, attr = path.rsplit(".", 1)
-    mod = importlib.import_module(mod_name)
-    return getattr(mod, attr)
+def __getattr__(name: str) -> object:
+    if name == "RagPipeline":
+        from contextunity.router.modules.retrieval.rag.pipeline import RetrievalPipeline
+
+        return RetrievalPipeline
+    if name == "RagResult":
+        from contextunity.router.modules.retrieval.rag.pipeline import RetrievalResult
+
+        return RetrievalResult
+    if name == "rerank_documents":
+        from contextunity.router.modules.retrieval.rag.ranking import rerank_documents
+
+        return rerank_documents
+    if name == "RagRetrievalSettings":
+        from contextunity.router.modules.retrieval.rag.settings import RagRetrievalSettings
+
+        return RagRetrievalSettings
+    if name == "get_rag_retrieval_settings":
+        from contextunity.router.modules.retrieval.rag.settings import get_rag_retrieval_settings
+
+        return get_rag_retrieval_settings
+    if name == "resolve_data_store_id":
+        from contextunity.router.modules.retrieval.rag.settings import resolve_data_store_id
+
+        return resolve_data_store_id
+    if name == "get_effective_data_store_id":
+        from contextunity.router.modules.retrieval.rag.settings import get_effective_data_store_id
+
+        return get_effective_data_store_id
+    if name == "use_runtime_settings":
+        from contextunity.router.modules.retrieval.rag.runtime import use_runtime_settings
+
+        return use_runtime_settings
+    if name == "get_runtime_settings":
+        from contextunity.router.modules.retrieval.rag.runtime import get_runtime_settings
+
+        return get_runtime_settings
+    if name == "build_citations":
+        from contextunity.router.modules.retrieval.rag.citations import build_citations
+
+        return build_citations
+    if name == "CitationBuilder":
+        from contextunity.router.modules.retrieval.rag.citations import CitationBuilder
+
+        return CitationBuilder
+    if name == "format_citations_to_ui":
+        from contextunity.router.modules.retrieval.rag.formatting.citations import (
+            format_citations_to_ui,
+        )
+
+        return format_citations_to_ui
+    if name == "SourceType":
+        from contextunity.router.modules.retrieval.rag.types import SourceType
+
+        return SourceType
+    if name == "UICitation":
+        from contextunity.router.modules.retrieval.rag.types import UICitation
+
+        return UICitation
+    if name == "RetrievedDoc":
+        from contextunity.router.modules.retrieval.rag.models import RetrievedDoc
+
+        return RetrievedDoc
+    if name == "RawCitation":
+        from contextunity.router.modules.retrieval.rag.types import RawCitation
+
+        return RawCitation
+    if name == "RuntimeRagSettings":
+        from contextunity.router.modules.retrieval.rag.types import RuntimeRagSettings
+
+        return RuntimeRagSettings
+    if name == "Citation":
+        from contextunity.router.modules.retrieval.rag.models import Citation
+
+        return Citation
+    raise AttributeError(name)

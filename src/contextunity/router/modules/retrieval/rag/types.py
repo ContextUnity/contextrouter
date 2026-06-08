@@ -1,5 +1,4 @@
 """RAG-specific types and schemas (citations, retrieval metadata).
-
 These types are specific to the RAG implementation and should not be in the core.
 """
 
@@ -9,19 +8,21 @@ from typing import Literal, NotRequired, TypeAlias, TypedDict
 
 SourceType: TypeAlias = Literal["book", "video", "qa", "web", "knowledge", "unknown"]
 
-
 # ---- UI Citation Schemas (camelCase) ----------------------------------------
 # These mirror what the frontend expects after formatting.
 
 
 class UICitationBase(TypedDict, total=False):
+    """Base UI citation envelope (camelCase keys matching frontend contract)."""
+
     type: NotRequired[str]
     title: NotRequired[str]
     relevance: NotRequired[float]
 
 
 class UICitationVideo(UICitationBase, total=False):
-    type: NotRequired[Literal["video"]]
+    """Video-source citation with timestamp, video ID, and optional quote."""
+
     videoId: NotRequired[str | None]
     videoUrl: NotRequired[str | None]
     timestamp: NotRequired[str | None]
@@ -32,7 +33,8 @@ class UICitationVideo(UICitationBase, total=False):
 
 
 class UICitationBook(UICitationBase, total=False):
-    type: NotRequired[Literal["book"]]
+    """Book-source citation with chapter, page range, and optional quote."""
+
     chapter: NotRequired[str]
     chapterNumber: NotRequired[int | None]
     pageStart: NotRequired[int | None]
@@ -42,26 +44,34 @@ class UICitationBook(UICitationBase, total=False):
 
 
 class UICitationQA(UICitationBase, total=False):
-    type: NotRequired[Literal["qa"]]
+    """Q&A-source citation with original question and answer text."""
+
     question: NotRequired[str]
     answer: NotRequired[str]
     keywords: NotRequired[list[str]]
 
 
 class UICitationWeb(UICitationBase, total=False):
-    type: NotRequired[Literal["web"]]
+    """Web-source citation with URL and summary."""
+
     summary: NotRequired[str]
     url: NotRequired[str | None]
 
 
 class UICitationUnknown(UICitationBase, total=False):
-    type: NotRequired[Literal["unknown"]]
+    """Fallback citation for sources that don't match a known type."""
+
+    pass
 
 
 UICitation: TypeAlias = (
-    UICitationVideo | UICitationBook | UICitationQA | UICitationWeb | UICitationUnknown
+    UICitationVideo
+    | UICitationBook
+    | UICitationQA
+    | UICitationWeb
+    | UICitationUnknown
+    | UICitationBase
 )
-
 
 # ---- Retrieval & Brain Types (snake_case) -----------------------------------
 
@@ -128,7 +138,6 @@ class RawCitation(TypedDict, total=False):
     video_url: str
     timestamp: str
     timestamp_seconds: int
-    summary: str
 
     # Q&A
     session_title: str

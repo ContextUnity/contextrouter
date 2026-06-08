@@ -1,3 +1,5 @@
+"""CLI ``serve`` command — starts the ContextRouter gRPC server."""
+
 import asyncio
 
 import typer

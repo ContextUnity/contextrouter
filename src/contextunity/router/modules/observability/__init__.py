@@ -1,4 +1,4 @@
-"""Observability module (pluggable)."""
+"""Observability module -- pluggable tracing, metrics, and event handlers (Langfuse, Brain tracer)."""
 
 from __future__ import annotations
 

@@ -1,11 +1,13 @@
 """Unit tests for brain_trace_tools and log_execution_trace fallback logic."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
+from contextunity.core.tokens import ContextToken
 
 from contextunity.router.modules.tools.brain_trace_tools import (
-    _get_auth_token_string,
+    _get_auth_token,
     log_execution_trace,
 )
 from contextunity.router.service.mixins.execution.helpers import BrainAutoTracer
@@ -27,25 +29,26 @@ def dummy_auto_tracer():
 
 
 class TestBrainTraceToolsTokenExtraction:
-    def test_get_auth_token_string_success(self):
-        """Should resolve the token string correctly from the runtime context."""
+    def test_get_auth_token_success(self):
+        """Should resolve the token correctly from the runtime context."""
+        real_token = ContextToken(token_id="trace-test", permissions=("brain:write",))
         with patch("contextunity.core.authz.context.get_auth_context") as mock_ctx:
-            mock_ctx.return_value = MagicMock(token_string="mock_token_123")
-            token = _get_auth_token_string()
-            assert token == "mock_token_123"
+            mock_ctx.return_value = SimpleNamespace(token=real_token)
+            token = _get_auth_token()
+            assert token is real_token
 
-    def test_get_auth_token_string_none(self):
+    def test_get_auth_token_none(self):
         """Should return None if get_auth_context returns None."""
         with patch("contextunity.core.authz.context.get_auth_context") as mock_ctx:
             mock_ctx.return_value = None
-            token = _get_auth_token_string()
+            token = _get_auth_token()
             assert token is None
 
-    def test_get_auth_token_string_exception(self):
+    def test_get_auth_token_exception(self):
         """Exception during resolution should gracefully return None."""
         with patch("contextunity.core.authz.context.get_auth_context") as mock_ctx:
             mock_ctx.side_effect = RuntimeError("Context failure")
-            token = _get_auth_token_string()
+            token = _get_auth_token()
             assert token is None
 
 

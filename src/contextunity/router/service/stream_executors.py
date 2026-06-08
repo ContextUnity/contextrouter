@@ -1,9 +1,7 @@
 """Stream Executor Manager — manages bidi streams for project-side tool execution.
-
 Projects connect via ToolExecutorStream and register as remote executors
 for their tools. The manager dispatches execution requests to the
 appropriate project stream and awaits results.
-
 Usage:
     manager = get_stream_executor_manager()
     if manager.is_available("acme", "execute_analytics_sql"):
@@ -18,6 +16,10 @@ import uuid
 from dataclasses import dataclass, field
 
 from contextunity.core import get_contextunit_logger
+from contextunity.core.exceptions import SecurityError
+from contextunity.core.types import JsonDict
+
+from contextunity.router.service.stream_result import validate_stream_result
 
 logger = get_contextunit_logger(__name__)
 
@@ -27,7 +29,7 @@ class PendingRequest:
     """A pending tool execution request awaiting result from project."""
 
     request_id: str
-    future: asyncio.Future
+    future: asyncio.Future[JsonDict]
     created_at: float = field(default_factory=time.monotonic)
 
 
@@ -37,7 +39,7 @@ class StreamExecutor:
 
     project_id: str
     tool_names: list[str]
-    send_queue: asyncio.Queue  # Router → Project messages
+    send_queue: asyncio.Queue[dict[str, object] | None]  # Router → Project messages
     pending: dict[str, PendingRequest] = field(default_factory=dict)
 
 
@@ -49,24 +51,70 @@ class StreamExecutorManager:
     """
 
     def __init__(self) -> None:
+        """Initialize empty executor and stream tracking maps."""
         # project_id → StreamExecutor
         self._executors: dict[str, StreamExecutor] = {}
+        # stream_id → (send_queue, done_event). Tracks every open bidi stream,
+        # including streams that have not sent a valid ready message yet.
+        self._streams: dict[int, tuple[asyncio.Queue[dict[str, object] | None], asyncio.Event]] = {}
+
+    def track_stream(self, send_queue: asyncio.Queue[dict[str, object] | None]) -> asyncio.Event:
+        """Track a raw bidi stream for graceful shutdown draining.
+
+        Args:
+            send_queue: Outbound message queue for the stream.
+
+        Returns:
+            Done event — set when the stream closes.
+        """
+        done = asyncio.Event()
+        self._streams[id(send_queue)] = (send_queue, done)
+        return done
+
+    def untrack_stream(
+        self, send_queue: asyncio.Queue[dict[str, object] | None], done: asyncio.Event
+    ) -> None:
+        """Mark a bidi stream as closed and signal its done event.
+
+        Args:
+            send_queue: Queue used to identify the stream.
+            done: Event to signal on closure.
+        """
+        _ = self._streams.pop(id(send_queue), None)
+        done.set()
 
     def register(
         self,
         project_id: str,
         tool_names: list[str],
-        send_queue: asyncio.Queue,
+        send_queue: asyncio.Queue[dict[str, object] | None],
     ) -> StreamExecutor:
-        """Register an active stream executor for a project.
+        """Register an active bidi stream executor for a project.
 
-        Called when project sends 'ready' message on ToolExecutorStream.
+        Args:
+            project_id: Owning project identifier.
+            tool_names: Tools this stream can execute.
+            send_queue: Outbound message queue for dispatching requests.
+
+        Returns:
+            The registered ``StreamExecutor`` instance.
         """
         executor = StreamExecutor(
             project_id=project_id,
             tool_names=tool_names,
             send_queue=send_queue,
         )
+        previous = self._executors.get(project_id)
+        if previous is not None and previous.send_queue is not send_queue:
+            for request in previous.pending.values():
+                if not request.future.done():
+                    request.future.set_exception(
+                        ConnectionError(f"Stream replaced for project '{project_id}'")
+                    )
+            try:
+                previous.send_queue.put_nowait(None)
+            except asyncio.QueueFull:
+                pass
         self._executors[project_id] = executor
         logger.info(
             "Stream executor registered: project=%s tools=%s",
@@ -75,9 +123,24 @@ class StreamExecutorManager:
         )
         return executor
 
-    def unregister(self, project_id: str) -> None:
-        """Remove stream executor when project disconnects."""
-        executor = self._executors.pop(project_id, None)
+    def unregister(
+        self,
+        project_id: str,
+        *,
+        send_queue: asyncio.Queue[dict[str, object] | None] | None = None,
+    ) -> bool:
+        """Remove stream executor when project disconnects.
+
+        Args:
+            project_id (str): The identifier of the project.
+            send_queue: When provided, remove only if it is still the active stream.
+        """
+        executor = self._executors.get(project_id)
+        if executor is None:
+            return False
+        if send_queue is not None and executor.send_queue is not send_queue:
+            return False
+        _ = self._executors.pop(project_id, None)
         if executor:
             # Cancel any pending requests
             for req in executor.pending.values():
@@ -86,6 +149,8 @@ class StreamExecutorManager:
                         ConnectionError(f"Stream disconnected for project '{project_id}'")
                     )
             logger.info("Stream executor unregistered: project=%s", project_id)
+            return True
+        return False
 
     async def drain_all(self) -> None:
         """Signal all active streams to shut down gracefully.
@@ -95,10 +160,16 @@ class StreamExecutorManager:
         CancelledError tracebacks).
         """
         project_ids = list(self._executors.keys())
-        if not project_ids:
+        streams = list(self._streams.values())
+        if not project_ids and not streams:
             return
 
-        logger.info("Draining %s active stream(s): %s", len(project_ids), project_ids)
+        logger.debug(
+            "Draining %s registered executor(s), %s open stream(s): %s",
+            len(project_ids),
+            len(streams),
+            project_ids,
+        )
         for project_id in project_ids:
             executor = self._executors.get(project_id)
             if executor:
@@ -107,12 +178,29 @@ class StreamExecutorManager:
                     executor.send_queue.put_nowait(None)
                 except asyncio.QueueFull:
                     pass
+        for send_queue, _done in streams:
+            try:
+                send_queue.put_nowait(None)
+            except asyncio.QueueFull:
+                pass
 
-        # Give streams a moment to drain
-        await asyncio.sleep(0.5)
+        done_events = [done.wait() for _queue, done in streams if not done.is_set()]
+        if done_events:
+            try:
+                _ = await asyncio.wait_for(asyncio.gather(*done_events), timeout=1.5)
+            except TimeoutError:
+                logger.debug("Timed out waiting for %s stream(s) to drain", len(done_events))
 
     def is_available(self, project_id: str, tool_name: str) -> bool:
-        """Check if a project has an active stream for this tool."""
+        """Check if a project has an active stream capable of executing a tool.
+
+        Args:
+            project_id: Project to check.
+            tool_name: Tool name to look up.
+
+        Returns:
+            ``True`` if the tool is available for remote execution.
+        """
         executor = self._executors.get(project_id)
         if not executor:
             return False
@@ -122,9 +210,9 @@ class StreamExecutorManager:
         self,
         project_id: str,
         tool_name: str,
-        args: dict,
+        args: dict[str, object],
         timeout: float = 30.0,
-    ) -> dict:
+    ) -> JsonDict:
         """Send execution request to project via bidi stream and await result.
 
         Args:
@@ -146,7 +234,7 @@ class StreamExecutorManager:
 
         request_id = str(uuid.uuid4())[:8]
         loop = asyncio.get_running_loop()
-        future: asyncio.Future = loop.create_future()
+        future: asyncio.Future[JsonDict] = loop.create_future()
 
         pending = PendingRequest(request_id=request_id, future=future)
         executor.pending[request_id] = pending
@@ -157,27 +245,32 @@ class StreamExecutorManager:
         caller_tenant = ""
         user_id = ""
         try:
-            from contextunity.router.cortex.runtime_context import get_current_access_token
+            from contextunity.router.core.context import get_current_access_token
 
             token = get_current_access_token()
             if token:
                 caller_tenant = (getattr(token, "allowed_tenants", None) or ("",))[0]
                 user_id = getattr(token, "user_id", "") or ""
         except ImportError:
-            raise PermissionError("contextunity.core module unavailable (fail-closed)")
-        except Exception:
-            pass  # Best-effort extraction
+            raise SecurityError("contextunity.core module unavailable (fail-closed)")
+        except (AttributeError, TypeError, IndexError) as exc:
+            logger.debug(
+                "StreamExecutor: caller context extraction failed: %s",
+                exc,
+            )
 
         # Fail-closed: if we can't resolve the caller, reject
         # rather than forwarding with empty context.
         if not caller_tenant:
-            raise PermissionError(
-                f"Cannot forward execution to project '{project_id}': "
-                f"no caller_tenant resolved. "
-                f"Caller context is mandatory for stream execution."
+            raise SecurityError(
+                (
+                    f"Cannot forward execution to project '{project_id}': "
+                    f"no caller_tenant resolved. "
+                    f"Caller context is mandatory for stream execution."
+                )
             )
 
-        message = {
+        message: dict[str, object] = {
             "action": "execute",
             "tool": tool_name,
             "request_id": request_id,
@@ -199,16 +292,21 @@ class StreamExecutorManager:
             return result
         except asyncio.TimeoutError:
             raise TimeoutError(
-                f"Tool execution timed out ({timeout}s): "
-                f"project={project_id} tool={tool_name} request_id={request_id}"
+                (
+                    f"Tool execution timed out ({timeout}s): "
+                    f"project={project_id} tool={tool_name} request_id={request_id}"
+                )
             )
         finally:
-            executor.pending.pop(request_id, None)
+            _ = executor.pending.pop(request_id, None)
 
-    def resolve_result(self, project_id: str, request_id: str, result: dict) -> None:
-        """Resolve a pending request with the result from project.
+    def resolve_result(self, project_id: str, request_id: str, result: dict[str, object]) -> None:
+        """Resolve a pending execution request with the project's response.
 
-        Called when project sends 'result' or 'error' message.
+        Args:
+            project_id: Project that returned the result.
+            request_id: Correlation ID matching the pending request.
+            result: Result payload from the project.
         """
         executor = self._executors.get(project_id)
         if not executor:
@@ -229,10 +327,28 @@ class StreamExecutorManager:
             return
 
         if not pending.future.done():
-            pending.future.set_result(result)
+            try:
+                validated = validate_stream_result(result)
+            except ValueError as exc:
+                logger.warning(
+                    "Invalid stream result: project=%s request_id=%s error=%s",
+                    project_id,
+                    request_id,
+                    exc,
+                )
+                pending.future.set_exception(ValueError(f"Invalid stream result: {exc}"))
+                return
+            pending.future.set_result(validated)
 
     def get_executor(self, project_id: str) -> StreamExecutor | None:
-        """Get executor for a project (if connected)."""
+        """Get the active executor for a project, if connected.
+
+        Args:
+            project_id: Project identifier.
+
+        Returns:
+            ``StreamExecutor`` or ``None`` if no stream is active.
+        """
         return self._executors.get(project_id)
 
 
@@ -241,7 +357,11 @@ _manager: StreamExecutorManager | None = None
 
 
 def get_stream_executor_manager() -> StreamExecutorManager:
-    """Get or create the global StreamExecutorManager singleton."""
+    """Get or create the global ``StreamExecutorManager`` singleton.
+
+    Returns:
+        The singleton manager instance.
+    """
     global _manager
     if _manager is None:
         _manager = StreamExecutorManager()

@@ -1,8 +1,6 @@
 """Keyphrase extraction transformer.
-
 Extracts keyphrases/keywords from text and enriches document metadata with
 structured, JSON-serializable keyphrase information.
-
 Design goals (project conventions):
 - JSON-shaped outputs use TypedDict (no leaking Any).
 - Outputs are StructData-safe (only primitives/lists/dicts).
@@ -12,16 +10,18 @@ Design goals (project conventions):
 
 from __future__ import annotations
 
-import json
-from typing import NotRequired, TypedDict
+from typing import ClassVar, NotRequired, TypedDict, override
 
 from contextunity.core import ContextUnit, get_contextunit_logger
+from contextunity.core.parsing import json_loads
+from contextunity.core.types import ContextUnitPayload, is_json_dict, is_object_list
 from pydantic import BaseModel, ConfigDict, Field
 
-from contextunity.router.core import Config
+from contextunity.router.core import RouterConfig
 from contextunity.router.core.registry import register_transformer
 from contextunity.router.modules.models import model_registry
 from contextunity.router.modules.models.types import ModelRequest, TextPart
+from contextunity.router.modules.transformers._ingestion_helpers import payload_metadata
 
 from .base import Transformer
 
@@ -37,7 +37,7 @@ class Keyphrase(TypedDict):
 
 
 def _normalize_phrase(s: object) -> str:
-    # Conservative normalization: keep spaces, remove leading/trailing punctuation.
+    """Collapse whitespace and strip leading/trailing punctuation from a raw keyphrase."""
     t = " ".join(str(s or "").strip().split())
     return t.strip(" \t\r\n,.;:!?'\"()[]{}")
 
@@ -45,13 +45,13 @@ def _normalize_phrase(s: object) -> str:
 class KeyphraseConfig(BaseModel):
     """Configuration for KeyphraseTransformer."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     mode: str = "llm"
     max_phrases: int = Field(default=15, ge=1, le=50)
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)
     model: str = ""
-    core_cfg: Config | None = None
+    core_cfg: RouterConfig | None = None
 
 
 @register_transformer("keyphrases")
@@ -65,37 +65,46 @@ class KeyphraseTransformer(Transformer):
     - core_cfg: provide Config override; otherwise uses get_core_config()
     """
 
-    name = "keyphrases"
+    name: str = "keyphrases"
 
     def __init__(self) -> None:
+        """Initialize default ``KeyphraseConfig`` — override via ``configure()``."""
         super().__init__()
-        self.config = KeyphraseConfig()
+        self.config: KeyphraseConfig = KeyphraseConfig()
 
     @property
     def mode(self) -> str:
+        """Extraction backend (currently only ``llm`` is implemented)."""
         return self.config.mode
 
     @property
     def max_phrases(self) -> int:
+        """Maximum number of keyphrases to retain (1–50)."""
         return self.config.max_phrases
 
     @property
     def min_score(self) -> float:
+        """Score threshold below which extracted phrases are dropped."""
         return self.config.min_score
 
     @property
     def model(self) -> str:
+        """Explicit model override (empty string = use default from registry)."""
         return self.config.model
 
     @property
-    def _core_cfg(self) -> Config | None:
+    def _core_cfg(self) -> RouterConfig | None:
+        """Optional ``RouterConfig`` override; resolved lazily if not set."""
         return self.config.core_cfg
 
     @_core_cfg.setter
-    def _core_cfg(self, value: Config | None) -> None:
+    def _core_cfg(self, value: RouterConfig | None) -> None:
+        """Store a ``RouterConfig`` override in the underlying ``KeyphraseConfig``."""
         self.config.core_cfg = value
 
+    @override
     def configure(self, params: dict[str, object] | None) -> None:
+        """Validate *params* via ``KeyphraseConfig`` and replace the active config."""
         super().configure(params)
         if not params:
             return
@@ -103,10 +112,22 @@ class KeyphraseTransformer(Transformer):
         self.config = KeyphraseConfig.model_validate(params)
 
     async def _extract_with_llm(self, text: str) -> list[Keyphrase]:
+        """Prompt the default LLM to extract keyphrases as a JSON array.
+
+        Truncates input beyond 8 000 chars. Deduplicates case-insensitively,
+        filters by ``min_score`` and 80-char sanity bound, then sorts by
+        descending score.
+        """
         if not self._core_cfg:
             from contextunity.router.core import get_core_config
 
             self._core_cfg = get_core_config()
+
+        cfg = self._core_cfg
+        if not cfg:
+            from contextunity.core.exceptions import ConfigurationError
+
+            raise ConfigurationError("Failed to acquire core config")
 
         # Keep prompts bounded (cost + determinism)
         if len(text) > 8000:
@@ -127,12 +148,12 @@ TEXT:
 {text}
 """
 
-        model_key = self.model or self._core_cfg.models.default_llm
+        model_key = self.model or cfg.models.default_llm
         llm = model_registry.get_llm_with_fallback(
             key=model_key,
             fallback_keys=[],
             strategy="fallback",
-            config=self._core_cfg,
+            config=cfg,
         )
 
         request = ModelRequest(
@@ -148,14 +169,14 @@ TEXT:
                 lines = raw.split("\n")
                 raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
 
-            data = json.loads(raw)
-            if not isinstance(data, list):
+            data = json_loads(raw)
+            if not is_object_list(data):
                 return []
 
             out: list[Keyphrase] = []
             seen: set[str] = set()
             for item in data:
-                if not isinstance(item, dict):
+                if not is_json_dict(item):
                     continue
                 phrase = _normalize_phrase(item.get("text"))
                 if not phrase:
@@ -164,10 +185,8 @@ TEXT:
                 if key in seen:
                     continue
 
-                try:
-                    score = float(item.get("score", 0.0))
-                except Exception:
-                    score = 0.0
+                score_raw = item.get("score", 0.0)
+                score = float(score_raw) if isinstance(score_raw, (int, float)) else 0.0
 
                 if score < self.min_score:
                     continue
@@ -186,17 +205,26 @@ TEXT:
             logger.exception("Keyphrase extraction failed")
             return []
 
+    @override
     async def transform(self, unit: ContextUnit) -> ContextUnit:
-        payload = unit.payload or {}
-        if not isinstance(payload, dict):
-            payload = {}
-        metadata = payload.get("metadata", {}) if isinstance(payload.get("metadata"), dict) else {}
+        """Extract keyphrases from unit content via LLM and store them in
+        ``metadata.keyphrases``, ``metadata.keyphrase_texts``, and (if present)
+        ``struct_data``.
+        """
+        payload, metadata = payload_metadata(unit.payload)
 
-        unit = self._with_provenance(unit, self.name)
+        unit = self.with_provenance(unit, self.name)
 
         content = payload.get("content")
-        if isinstance(content, dict):
-            text = content.get("content") or content.get("text") or ""
+        if is_json_dict(content):
+            primary = content.get("content")
+            fallback = content.get("text")
+            if isinstance(primary, str):
+                text = primary
+            elif isinstance(fallback, str):
+                text = fallback
+            else:
+                text = ""
         elif isinstance(content, str):
             text = content
         else:
@@ -213,19 +241,22 @@ TEXT:
         if not phrases:
             return unit
 
-        metadata["keyphrases"] = phrases
-        metadata["keyphrase_texts"] = [p["text"] for p in phrases]
-        metadata["keyphrase_count"] = len(phrases)
-        metadata["keyphrase_mode"] = "llm"
+        metadata_payload: ContextUnitPayload = dict(metadata)
+        metadata_payload["keyphrases"] = [dict(p) for p in phrases]
+        metadata_payload["keyphrase_texts"] = [p["text"] for p in phrases]
+        metadata_payload["keyphrase_count"] = len(phrases)
+        metadata_payload["keyphrase_mode"] = "llm"
 
-        if "struct_data" in metadata and isinstance(metadata["struct_data"], dict):
-            struct_data = dict(metadata["struct_data"])
-            struct_data["keyphrases"] = phrases
-            struct_data["keyphrase_texts"] = [p["text"] for p in phrases]
-            struct_data["keyphrase_count"] = len(phrases)
-            metadata["struct_data"] = struct_data
+        if "struct_data" in metadata_payload:
+            struct_raw = metadata_payload["struct_data"]
+            if is_json_dict(struct_raw):
+                struct_data: ContextUnitPayload = dict(struct_raw)
+                struct_data["keyphrases"] = [dict(p) for p in phrases]
+                struct_data["keyphrase_texts"] = [p["text"] for p in phrases]
+                struct_data["keyphrase_count"] = len(phrases)
+                metadata_payload["struct_data"] = struct_data
 
-        payload["metadata"] = metadata
+        payload["metadata"] = metadata_payload
         unit.payload = payload
         return unit
 

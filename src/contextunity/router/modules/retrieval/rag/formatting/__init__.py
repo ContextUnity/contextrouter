@@ -1,4 +1,4 @@
-"""Citation formatting for RAG."""
+"""Citation formatting -- renders RAG source references into markdown, numbered lists, or inline annotations."""
 
 from __future__ import annotations
 

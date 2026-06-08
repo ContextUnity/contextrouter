@@ -12,22 +12,23 @@ points continue to live in `contextunity.router.cortex.*` until the final cleanu
 from __future__ import annotations
 
 import importlib
-import types
+import types as stdlib_types
+from typing import TYPE_CHECKING
 
 # Note: registry is imported dynamically via __getattr__ to avoid circular imports
 from contextunity.core import ContextUnit
+from contextunity.core.config import set_env_default
 from contextunity.core.tokens import ContextToken, TokenBuilder
 
 from contextunity.router.core.config import (
-    Config,
-    FlowConfig,
+    RouterConfig,
     get_bool_env,
     get_core_config,
     get_env,
+    load_config,
     set_core_config,
 )
-from contextunity.router.core.config.base import set_env_default
-from contextunity.router.core.flow_manager import FlowManager
+from contextunity.router.core.flow_manager import FlowConfig, FlowManager
 from contextunity.router.core.interfaces import (
     BaseAgent,
     BaseConnector,
@@ -42,9 +43,10 @@ from contextunity.router.core.types import UserCtx
 __all__ = [
     # Kernel
     "ContextUnit",
-    "Config",
+    "RouterConfig",
     "FlowConfig",
     "get_core_config",
+    "load_config",
     "set_core_config",
     "get_env",
     "get_bool_env",
@@ -77,8 +79,17 @@ __all__ = [
     "types",
 ]
 
+if TYPE_CHECKING:
+    from contextunity.router.core import config as config
+    from contextunity.router.core import env as env
+    from contextunity.router.core import exceptions as exceptions
+    from contextunity.router.core import interfaces as interfaces
+    from contextunity.router.core import plugins as plugins
+    from contextunity.router.core import registry as registry
+    from contextunity.router.core import types as types
 
-def __getattr__(name: str) -> types.ModuleType:
+
+def __getattr__(name: str) -> stdlib_types.ModuleType:
     """Lazy module attributes for backward compatibility.
 
     These names are listed in __all__ for historical reasons, but we avoid

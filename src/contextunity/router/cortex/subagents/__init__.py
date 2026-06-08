@@ -1,4 +1,4 @@
-"""Sub-Agent Orchestration for Router."""
+"""Sub-agent orchestration -- spawn, manage, and aggregate results from child agent instances."""
 
 from .orchestrator import SubAgentOrchestrator
 from .prompt_generator import SubAgentPromptGenerator

@@ -1,9 +1,10 @@
-"""File connector (source)."""
+"""File connector -- local and cloud file ingestion adapter (PDF, DOCX, CSV, etc.)."""
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import AsyncIterator
+from typing import override
 
 from contextunity.core import ContextUnit
 
@@ -11,6 +12,8 @@ from contextunity.router.core.interfaces import BaseConnector
 
 
 class FileConnector(BaseConnector):
+    """Walk a directory tree and yield each matching file as a binary ``ContextUnit``."""
+
     def __init__(
         self,
         *,
@@ -18,13 +21,19 @@ class FileConnector(BaseConnector):
         extensions: list[str] | None = None,
         recursive: bool = True,
     ) -> None:
-        self._root = Path(root)
-        self._extensions = [
-            e.lower() for e in (extensions or []) if isinstance(e, str) and e.strip()
+        """Set the scan *root*, optional extension filter, and recursion flag."""
+        self._root: Path = Path(root)
+        self._extensions: list[str] = [
+            extension.lower() for extension in (extensions or []) if extension.strip()
         ]
-        self._recursive = bool(recursive)
+        self._recursive: bool = recursive
 
-    async def connect(self) -> AsyncIterator[ContextUnit]:
+    @override
+    def connect(self) -> AsyncIterator[ContextUnit]:
+        return self._connect()
+
+    async def _connect(self) -> AsyncIterator[ContextUnit]:
+        """Glob the root directory, read each matching file as raw bytes, and yield a ``ContextUnit`` per file."""
         # Minimal async generator wrapper; downstream decides how to parse bytes/text.
         it = self._root.rglob("*") if self._recursive else self._root.glob("*")
         for p in sorted(it):
