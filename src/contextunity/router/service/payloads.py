@@ -259,15 +259,10 @@ class RegisterManifestPayload(StrictPayloadModel):
                 "policy": {...},
                 "secrets": {"openai": "sk-..."}  // present when Shield unavailable
             },
-            "hash": "a1b2c3d4..."
         }
     """
 
     bundle: JsonDict | None = Field(None, description="Pre-compiled registration bundle")
-    hash: str | None = Field(
-        None,
-        description="Optional client hash hint; Router recomputes the authoritative bundle hash.",
-    )
 
 
 __all__ = [

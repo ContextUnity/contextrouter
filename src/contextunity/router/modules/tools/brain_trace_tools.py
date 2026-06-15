@@ -55,7 +55,9 @@ def _get_brain_client(tenant_id: str) -> BrainClient:
     Uses the verified ``ContextToken`` from the current gRPC auth context.
     Recreates the client when the active token changes (rotation / new user).
     """
-    auth_token = _get_auth_token()
+    from contextunity.router.modules.tools.auth_context import resolve_tool_context_token
+
+    auth_token = resolve_tool_context_token()
     token_key = _auth_token_id(auth_token)
     cached_key = _brain_client_token_ids.get(tenant_id)
     if tenant_id in _brain_clients and cached_key == token_key:
@@ -69,17 +71,6 @@ def _get_brain_client(tenant_id: str) -> BrainClient:
     )
     _brain_client_token_ids[tenant_id] = token_key
     return _brain_clients[tenant_id]
-
-
-def _get_auth_token():
-    """Extract the verified ContextToken from the current gRPC auth context."""
-    try:
-        from contextunity.core.authz.context import get_auth_context
-
-        ctx = get_auth_context()
-        return ctx.token if ctx else None
-    except Exception:
-        return None
 
 
 # ============================================================================

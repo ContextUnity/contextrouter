@@ -74,10 +74,10 @@ def _reset_global_stub(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _patch_metadata(monkeypatch):
-    """Skip real token minting."""
+    """Skip real token minting (security_tools imports shield_metadata by name)."""
     monkeypatch.setattr(
-        "contextunity.router.service.shield_client._shield_metadata",
-        lambda: [],
+        "contextunity.router.service.shield_client.shield_metadata",
+        lambda **_kwargs: (),
     )
 
 

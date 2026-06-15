@@ -54,6 +54,36 @@ def _normalize_tenant_id(tenant_id: str | None) -> str:
     return tenant_id or "default"
 
 
+def _resolve_tenant(requested: str | None) -> str:
+    """Derive the effective tenant from the verified caller token.
+
+    The agent-supplied tenant_id is honored only when the token grants it;
+    resolution fails closed without a token. Matches Brain handler semantics:
+    empty allowed_tenants is never treated as cross-tenant access.
+    """
+    from contextunity.core.exceptions import SecurityError
+
+    from contextunity.router.modules.tools.auth_context import resolve_tool_context_token
+
+    token = resolve_tool_context_token()
+    if token.has_permission("admin:all"):
+        return _normalize_tenant_id(requested)
+    allowed = token.allowed_tenants
+    if not allowed:
+        raise SecurityError("Redis memory tool: token grants no tenant access")
+    if requested is None:
+        if len(allowed) == 1:
+            return allowed[0]
+        raise SecurityError(
+            "Redis memory tool: tenant_id is required when the token allows multiple tenants"
+        )
+    if requested not in allowed:
+        raise SecurityError(
+            f"Redis memory tool: tenant '{requested}' is not allowed by the caller token"
+        )
+    return requested
+
+
 # ============================================================================
 # Cache Key Strategies
 # ============================================================================
@@ -105,7 +135,7 @@ async def store_memory(
         Dict with success status and stored key
     """
     try:
-        tenant_id = _normalize_tenant_id(tenant_id)
+        tenant_id = _resolve_tenant(tenant_id)
         redis = get_redis_provider()
         memory_key = _make_memory_key(key, session_id, tenant_id)
 
@@ -150,6 +180,7 @@ async def retrieve_memory(
         Dict with value if found, or error if not found
     """
     try:
+        tenant_id = _resolve_tenant(tenant_id)
         redis = get_redis_provider()
         memory_key = _make_memory_key(key, session_id, tenant_id)
 
@@ -201,6 +232,7 @@ async def cache_query_result(
         Dict with success status and cache key
     """
     try:
+        tenant_id = _resolve_tenant(tenant_id)
         redis = get_redis_provider()
         cache_key = _make_query_cache_key(query, tenant_id)
 
@@ -241,6 +273,7 @@ async def get_cached_query(
         Dict with cached result if found, or not_found status
     """
     try:
+        tenant_id = _resolve_tenant(tenant_id)
         redis = get_redis_provider()
         cache_key = _make_query_cache_key(query, tenant_id)
 
@@ -281,6 +314,7 @@ async def get_session_data(
         Dict with session data
     """
     try:
+        tenant_id = _resolve_tenant(tenant_id)
         redis = get_redis_provider()
         session_key = _make_session_key(session_id, tenant_id)
 
@@ -326,8 +360,8 @@ async def clear_memory(
         Dict with success status and what was cleared
     """
     try:
+        tenant_id = _resolve_tenant(tenant_id)
         redis = get_redis_provider()
-        tenant_id = tenant_id or "default"
 
         if key and session_id:
             memory_key = _make_memory_key(key, session_id, tenant_id)

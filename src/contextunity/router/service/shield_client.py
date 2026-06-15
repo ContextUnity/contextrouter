@@ -60,36 +60,46 @@ def _shield_stub(shield_url: str | None = None):
 
 
 def shield_metadata(*, tenant_id: str | None = None) -> GrpcMetadata:
-    """Create gRPC metadata with service token for Shield authentication.
+    """Create gRPC metadata for Router → Shield calls (SPOT, fail-closed).
 
-    Single source of truth for all Router → Shield gRPC calls.
-    Propagates caller token if available (SPOT pattern).
+    Propagates the verified caller token from gRPC auth context, or the
+    attenuated graph token from ``secure_node``. Never mints a local service token.
+
+    Args:
+        tenant_id: Reserved for future tenant-scoped metadata hints (unused).
+
+    Raises:
+        SecurityError: When no caller token is available in the current context.
     """
+    _ = tenant_id
     from contextunity.core.authz.context import get_auth_context
-
-    # Ensure caller token gets propagated to Shield
-    ctx = get_auth_context()
-    if ctx and ctx.token_string:
-        return (("authorization", f"Bearer {ctx.token_string}"),)
-
-    # Fallback to local minting if background task
+    from contextunity.core.exceptions import SecurityError
     from contextunity.core.signing import get_signing_backend
-    from contextunity.core.token_utils import create_grpc_metadata_with_token
-    from contextunity.core.tokens import mint_service_token
+    from contextunity.core.token_utils import serialize_token
 
-    token = mint_service_token(
-        "router-shield-client",
-        permissions=(
-            "shield:check",
-            "shield:scan",
-            "shield:put_secret",
-            "shield:get_secret",
-            "shield:secrets:read",
-        ),
-        allowed_tenants=(tenant_id or "default",),
+    from contextunity.router.core.context import get_current_access_token
+
+    auth_ctx = get_auth_context()
+    if auth_ctx and auth_ctx.token_string:
+        return (("authorization", f"Bearer {auth_ctx.token_string}"),)
+
+    graph_token = get_current_access_token()
+    if graph_token is not None:
+        from contextunity.core.token_utils.serialization import LocalSigningBackend
+
+        backend = get_signing_backend(project_id="router")
+        if not isinstance(backend, LocalSigningBackend):
+            raise SecurityError(
+                "Router→Shield graph token requires a local signing backend; "
+                "cannot serialize ContextToken without sign()."
+            )
+        token_str = serialize_token(graph_token, backend=backend)
+        return (("authorization", f"Bearer {token_str}"),)
+
+    raise SecurityError(
+        "Router→Shield requires an active ContextToken; "
+        "background service-token minting is forbidden."
     )
-    backend = get_signing_backend(project_id="router")
-    return create_grpc_metadata_with_token(token, backend=backend)
 
 
 _shield_metadata = shield_metadata

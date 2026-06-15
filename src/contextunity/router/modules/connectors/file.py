@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import override
 
 from contextunity.core import ContextUnit
+from contextunity.core.exceptions import SecurityError
 
 from contextunity.router.core.interfaces import BaseConnector
 
@@ -20,9 +21,28 @@ class FileConnector(BaseConnector):
         root: str | Path = ".",
         extensions: list[str] | None = None,
         recursive: bool = True,
+        allowed_root: str | Path | None = None,
     ) -> None:
-        """Set the scan *root*, optional extension filter, and recursion flag."""
+        """Set the scan *root*, optional extension filter, and recursion flag.
+
+        Args:
+            allowed_root: Boundary the scan may never leave. ``root`` must
+                resolve inside it, and files whose resolved path (after
+                symlinks) escapes it are skipped. Defaults to the resolved
+                ``root`` itself, so symlinks cannot lead reads out of the tree.
+
+        Raises:
+            SecurityError: If ``root`` resolves outside ``allowed_root``.
+        """
         self._root: Path = Path(root)
+        resolved_root = self._root.resolve()
+        self._boundary: Path = (
+            Path(allowed_root).resolve() if allowed_root is not None else resolved_root
+        )
+        if not resolved_root.is_relative_to(self._boundary):
+            raise SecurityError(
+                f"FileConnector root '{resolved_root}' escapes allowed_root '{self._boundary}'"
+            )
         self._extensions: list[str] = [
             extension.lower() for extension in (extensions or []) if extension.strip()
         ]
@@ -40,6 +60,10 @@ class FileConnector(BaseConnector):
             if not p.is_file():
                 continue
             if self._extensions and p.suffix.lower() not in self._extensions:
+                continue
+            # Re-resolve per file: a symlink inside the tree must not pull
+            # reads from outside the boundary.
+            if not p.resolve().is_relative_to(self._boundary):
                 continue
             data = p.read_bytes()
             unit = ContextUnit(

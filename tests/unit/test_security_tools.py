@@ -45,8 +45,8 @@ class TestGrpcCallNoStub:
         module._grpc_stub = None
         monkeypatch.setattr("contextunity.core.grpc_utils.tls_enabled", lambda: False)
         monkeypatch.setattr(
-            "contextunity.router.service.shield_client._shield_metadata",
-            lambda: [],
+            "contextunity.router.service.shield_client.shield_metadata",
+            lambda **_kwargs: (),
         )
         from contextunity.router.modules.tools.security_tools import _grpc_call
 

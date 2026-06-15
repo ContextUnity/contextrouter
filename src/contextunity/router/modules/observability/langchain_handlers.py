@@ -25,6 +25,7 @@ from contextunity.router.modules.observability.contracts import (
     SpanDict,
     copy_object_dict,
     run_key,
+    span_children,
 )
 from contextunity.router.modules.observability.langchain_usage import (
     extract_generation_text,
@@ -32,6 +33,59 @@ from contextunity.router.modules.observability.langchain_usage import (
 )
 
 logger = get_contextunit_logger(__name__)
+
+
+def _int_field(raw: object) -> int:
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        return int(raw)
+    return 0
+
+
+def propagate_chain_tokens_to_assistants(span: SpanDict) -> None:
+    """Copy chain node token deltas onto assistant children still at zero."""
+    tin = _int_field(span.get("tokens_in"))
+    tout = _int_field(span.get("tokens_out"))
+    total = tin + tout
+    if total <= 0:
+        return
+
+    existing_cum = _int_field(span.get("cumulative_tokens"))
+    span["cumulative_tokens"] = max(existing_cum, total)
+
+    assistants = [
+        child
+        for child in span_children(span)
+        if not child.get("is_group")
+        and child.get("type") in {"assistant", "llm"}
+        and _int_field(child.get("tokens_in")) == 0
+        and _int_field(child.get("tokens_out")) == 0
+    ]
+    if len(assistants) == 1:
+        child = assistants[0]
+        child["tokens_in"] = tin
+        child["tokens_out"] = tout
+        child["tokens"] = total
+        return
+    if not assistants:
+        return
+
+    remaining_in = tin
+    remaining_out = tout
+    remaining_total = total
+    for idx, child in enumerate(assistants):
+        if idx == len(assistants) - 1:
+            cin, cout, ct = remaining_in, remaining_out, remaining_total
+        else:
+            share = 1.0 / len(assistants)
+            cin = int(tin * share)
+            cout = int(tout * share)
+            ct = int(total * share)
+            remaining_in -= cin
+            remaining_out -= cout
+            remaining_total -= ct
+        child["tokens_in"] = cin
+        child["tokens_out"] = cout
+        child["tokens"] = ct
 
 
 class LangchainCallbackMixin:
@@ -217,6 +271,7 @@ class LangchainCallbackMixin:
                 "output_tokens": current_out,
                 "total_cost": current_cost,
             }
+            propagate_chain_tokens_to_assistants(span)
 
     async def on_tool_start(
         self: LangchainCallbackMixinHost,

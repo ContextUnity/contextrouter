@@ -305,18 +305,32 @@ def make_secure_node(
         project_config = metadata_project_config(state)
         metadata: ExecutionMetadata = state.get("metadata", {})
 
-        # Dynamic resolution: prefer manifest config over build-time parameter
-        actual_signature = get_node_attr(
-            project_config, node_name, "prompt_signature", prompt_signature
-        )
-        if not actual_signature:
-            return
-
-        # Resolve the actual prompt text (same key convention as graph builder)
+        # Resolve the actual prompt text first (same key convention as the graph
+        # builder). A node that ships no LLM prompt has nothing to verify.
         graph_runtime = get_graph_runtime_config(project_config)
         prompt_text = graph_runtime.get(f"{node_name}_prompt")
         if not isinstance(prompt_text, str) or not prompt_text:
             return
+
+        # Dynamic resolution: prefer manifest config over build-time parameter.
+        actual_signature = get_node_attr(
+            project_config, node_name, "prompt_signature", prompt_signature
+        )
+        # Fail closed (WS-9): a node that ships an LLM prompt MUST carry a
+        # signature. Treat a missing/stripped signature on a prompted node as
+        # tampering — never silently skip — so an attacker cannot bypass
+        # integrity verification simply by removing the signature from config.
+        if not actual_signature:
+            from contextunity.core.exceptions import TamperDetectedError
+
+            raise TamperDetectedError(
+                message=(
+                    f"Prompt integrity check failed on node '{node_name}': the node "
+                    "defines an LLM prompt but carries no integrity signature. A "
+                    "stripped or missing signature is treated as tampering (fail-closed)."
+                ),
+                node_name=node_name,
+            )
 
         project_id_raw = project_config.get("project_id")
         project_id = (

@@ -15,15 +15,9 @@ def extract_registration_token_string(
     context: ServicerContext[ContextUnit, ContextUnit],
 ) -> str:
     """Extract bearer token from gRPC metadata for registration RPCs."""
-    metadata: dict[str, str] = {}
-    for key, value in context.invocation_metadata() or ():
-        metadata[str(key)] = value.decode() if isinstance(value, bytes) else str(value)
+    from contextunity.core.grpc_metadata import extract_bearer_token
 
-    auth_header = metadata.get("authorization", "").strip()
-    if auth_header.startswith("Bearer "):
-        return auth_header[7:].strip()
-
-    return ""
+    return extract_bearer_token(context)
 
 
 async def build_registration_verifier(

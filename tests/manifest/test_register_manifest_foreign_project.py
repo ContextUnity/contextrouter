@@ -103,7 +103,7 @@ async def test_register_manifest_rejects_token_scoped_to_other_project() -> None
 
     service = DummyService()
     mock_unit = MagicMock()
-    mock_unit.payload = {"bundle": bundle, "hash": "abc"}
+    mock_unit.payload = {"bundle": bundle}
     mock_unit.trace_id = __import__("uuid").uuid4()
     from contextunity.core import SecurityScopes
 

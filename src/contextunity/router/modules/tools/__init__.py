@@ -378,6 +378,15 @@ def discover_all_tools() -> list[BaseTool]:
     except ImportError as e:
         logger.debug("Could not import Brain trace tools: %s", e)
 
+    # Discover Brain admin platform tools (admin:read observability)
+    try:
+        from contextunity.router.modules.tools import brain_admin_tools as _brain_admin_tools
+
+        del _brain_admin_tools
+        logger.debug("Brain admin platform tools loaded")
+    except ImportError as e:
+        logger.debug("Could not import Brain admin platform tools: %s", e)
+
     # Add all tools that were registered via register_tool()
     # (by module imports above: security_tools, etc.)
     tools.extend(_tool_registry.values())

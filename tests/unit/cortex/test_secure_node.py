@@ -501,3 +501,67 @@ async def test_prompt_integrity_without_project_secret_fails_closed(_set_token, 
 
     with pytest.raises(TamperDetectedError, match="project-scoped HMAC key material"):
         await secure(state, {})
+
+
+@pytest.mark.asyncio
+async def test_prompt_integrity_stripped_signature_fails_closed(_set_token, monkeypatch):
+    """A node that ships an LLM prompt but no signature is treated as tampering.
+
+    Regression for WS-9: an attacker must not be able to bypass prompt-integrity
+    verification simply by removing ``prompt_signature`` from the manifest while
+    keeping (or injecting) the prompt text.
+    """
+    # A project key IS available — proving the failure is about the *missing
+    # signature*, not missing key material.
+    monkeypatch.setattr(
+        "contextunity.core.discovery.get_project_key",
+        lambda project_id: {"project_secret": "s3cr3t"},
+    )
+
+    secure = make_secure_node("planner", _sync_node, requires_llm=False)
+    state = {
+        "state": "init",
+        "metadata": {
+            "project_config": {
+                "project_id": "test-project",
+                "allowed_tenants": ["default"],
+                # Node carries NO prompt_signature …
+                "nodes": [{"name": "planner"}],
+                "graph": {
+                    "default": {
+                        # … but a prompt is present (possibly injected).
+                        "config": {"planner_prompt": "Injected unsigned prompt."},
+                        "nodes": [],
+                    }
+                },
+            }
+        },
+    }
+
+    with pytest.raises(TamperDetectedError, match="no integrity signature"):
+        await secure(state, {})
+
+
+@pytest.mark.asyncio
+async def test_prompt_integrity_no_prompt_is_skipped(_set_token, monkeypatch):
+    """A node without any LLM prompt has nothing to verify and must not raise."""
+    monkeypatch.setattr(
+        "contextunity.core.discovery.get_project_key",
+        lambda project_id: {},
+    )
+
+    secure = make_secure_node("planner", _sync_node, requires_llm=False)
+    state = {
+        "state": "init",
+        "metadata": {
+            "project_config": {
+                "project_id": "test-project",
+                "allowed_tenants": ["default"],
+                "nodes": [{"name": "planner"}],
+                "graph": {"default": {"config": {}, "nodes": []}},
+            }
+        },
+    }
+
+    # No prompt → no signature required → no TamperDetectedError.
+    await secure(state, {})

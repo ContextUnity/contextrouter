@@ -200,3 +200,60 @@ async def test_chain_end_reads_token_usage_from_update_envelope() -> None:
     assert span["tokens_in"] == 7
     assert span["tokens_out"] == 3
     assert span["cost_usd"] == 0.001
+
+
+@pytest.mark.asyncio
+async def test_chain_end_propagates_token_delta_to_assistant_child() -> None:
+    """Per-node delta on the chain group is copied to a zeroed assistant span."""
+    tracer = _make_tracer()
+    run_id = uuid.uuid4()
+    parent_id = uuid.uuid4()
+    assistant_id = uuid.uuid4()
+
+    tracer.spans[str(parent_id)] = {"ignore": True, "children": tracer.root_spans}
+    tracer.spans[str(run_id)] = {
+        "is_group": True,
+        "node": "planner",
+        "type": "chain",
+        "status": "ok",
+        "start_time": 0.0,
+        "args_json": "",
+        "children": [
+            {
+                "id": assistant_id,
+                "is_group": False,
+                "tool": "openai/gpt-5-mini",
+                "type": "assistant",
+                "status": "ok",
+                "tokens_in": 0,
+                "tokens_out": 0,
+                "tokens": 0,
+            },
+        ],
+        "cumulative_ms": 0,
+        "cumulative_usd": 0.0,
+        "cumulative_tokens": 0,
+        "timing_ms": 0,
+        "has_result": False,
+    }
+
+    await LangchainCallbackMixin.on_chain_end(
+        tracer,
+        {
+            "_token_usage": {
+                "input_tokens": 800,
+                "output_tokens": 200,
+                "total_cost": 0.002,
+            }
+        },
+        run_id=run_id,
+        parent_run_id=parent_id,
+    )
+
+    span = tracer.spans[str(run_id)]
+    assistant = span["children"][0]
+    assert span["tokens_in"] == 800
+    assert span["tokens_out"] == 200
+    assert assistant["tokens_in"] == 800
+    assert assistant["tokens_out"] == 200
+    assert assistant["tokens"] == 1000

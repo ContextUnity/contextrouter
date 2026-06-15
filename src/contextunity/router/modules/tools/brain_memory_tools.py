@@ -58,22 +58,13 @@ def _get_brain_client(tenant_id: str) -> BrainClient:
     if tenant_id not in _brain_clients:
         from contextunity.core.sdk import BrainClient
 
+        from contextunity.router.modules.tools.auth_context import resolve_tool_context_token
+
         _brain_clients[tenant_id] = BrainClient(
             tenant_id=tenant_id,
-            token=_get_auth_token(),
+            token=resolve_tool_context_token(),
         )
     return _brain_clients[tenant_id]
-
-
-def _get_auth_token():
-    """Extract the verified ContextToken from the current gRPC auth context."""
-    try:
-        from contextunity.core.authz.context import get_auth_context
-
-        ctx = get_auth_context()
-        return ctx.token if ctx else None
-    except Exception:
-        return None
 
 
 # ============================================================================

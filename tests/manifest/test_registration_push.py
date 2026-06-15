@@ -114,7 +114,7 @@ async def test_register_manifest_success(test_bundle):
     service = DummyService()
 
     mock_unit = MagicMock()
-    mock_unit.payload = {"bundle": test_bundle, "hash": "abcd123"}
+    mock_unit.payload = {"bundle": test_bundle}
     mock_unit.trace_id = __import__("uuid").uuid4()
     from contextunity.core import SecurityScopes
 
@@ -155,7 +155,7 @@ async def test_register_manifest_hash_match(test_bundle):
         "tenant_a": "project:tenant_a:tenant_a",
     }
     mock_unit = MagicMock()
-    mock_unit.payload = {"bundle": test_bundle, "hash": "abcd123"}
+    mock_unit.payload = {"bundle": test_bundle}
     mock_unit.trace_id = __import__("uuid").uuid4()
     from contextunity.core import SecurityScopes
 
@@ -199,7 +199,7 @@ async def test_register_manifest_rejects_bundle_with_project_secret():
     }
 
     mock_unit = MagicMock()
-    mock_unit.payload = {"bundle": bad_bundle, "hash": "abcd123"}
+    mock_unit.payload = {"bundle": bad_bundle}
     mock_unit.trace_id = __import__("uuid").uuid4()
     from contextunity.core import SecurityScopes
 
@@ -224,7 +224,7 @@ async def test_register_manifest_rejects_non_string_inline_secret(test_bundle):
     bad_bundle["secrets"] = {"CU_ROUTER_DEFAULT_MODEL_KEY": {"nested": "secret"}}
 
     mock_unit = MagicMock()
-    mock_unit.payload = {"bundle": bad_bundle, "hash": "abcd123"}
+    mock_unit.payload = {"bundle": bad_bundle}
     mock_unit.trace_id = __import__("uuid").uuid4()
     from contextunity.core import SecurityScopes
 
@@ -252,7 +252,7 @@ async def test_register_manifest_empty_permission_token_rejects(test_bundle):
     service = DummyService()
 
     mock_unit = MagicMock()
-    mock_unit.payload = {"bundle": test_bundle, "hash": "abcd123"}
+    mock_unit.payload = {"bundle": test_bundle}
     mock_unit.trace_id = __import__("uuid").uuid4()
     from contextunity.core import SecurityScopes
 
@@ -281,7 +281,7 @@ async def test_register_manifest_no_token_rejects(test_bundle):
     service = DummyService()
 
     mock_unit = MagicMock()
-    mock_unit.payload = {"bundle": test_bundle, "hash": "abcd123"}
+    mock_unit.payload = {"bundle": test_bundle}
     mock_unit.trace_id = __import__("uuid").uuid4()
     from contextunity.core import SecurityScopes
 

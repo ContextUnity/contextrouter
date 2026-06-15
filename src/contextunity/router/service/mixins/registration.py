@@ -250,49 +250,45 @@ class RegistrationMixin:
                 + "Cannot hijack identity."
             )
 
-        # Server-computed hash is authoritative; a client-supplied hash is only a hint.
-        if params.hash and params.hash != server_manifest_hash:
-            logger.warning("Ignoring mismatched client manifest hash for project '%s'", project_id)
-        if params.hash:
-            is_matched = await self._check_manifest_hash(project_id, server_manifest_hash)
-            if is_matched:
-                logger.debug(
-                    "Project '%s' manifest hash matched. Skipping re-registration.", project_id
-                )
-                from contextunity.router.service.shield_client import get_shield_url
+        is_matched = await self._check_manifest_hash(project_id, server_manifest_hash)
+        if is_matched:
+            logger.debug(
+                "Project '%s' manifest hash matched. Skipping re-registration.", project_id
+            )
+            from contextunity.router.service.shield_client import get_shield_url
 
-                # Idempotent re-registration: reuse the existing stream
-                # secret so active ToolExecutorStream sessions reconnect
-                # with the same key. A new manifest that changes the
-                # graph structure still goes through the non-hash-match
-                # path below and rotates the secret there.
-                stream_secret = get_or_create_project_stream_secret(project_id)
-                with self._stream_secrets_lock:
-                    self._stream_secrets[project_id] = stream_secret
-                await self._persist_stream_secret(project_id, stream_secret)
+            # Idempotent re-registration: reuse the existing stream
+            # secret so active ToolExecutorStream sessions reconnect
+            # with the same key. A new manifest that changes the
+            # graph structure still goes through the non-hash-match
+            # path below and rotates the secret there.
+            stream_secret = get_or_create_project_stream_secret(project_id)
+            with self._stream_secrets_lock:
+                self._stream_secrets[project_id] = stream_secret
+            await self._persist_stream_secret(project_id, stream_secret)
 
+            graph_map = self._project_graphs.get(project_id)
+            if not isinstance(graph_map, dict):
+                _ = await self._restore_project_from_persistence(project_id)
                 graph_map = self._project_graphs.get(project_id)
-                if not isinstance(graph_map, dict):
-                    _ = await self._restore_project_from_persistence(project_id)
-                    graph_map = self._project_graphs.get(project_id)
-                if not isinstance(graph_map, dict):
-                    raise ConfigurationError(
-                        message=f"Project '{project_id}' has no registered graph map"
-                    )
-                graph_entry = graph_map.get("default", "")
-
-                return make_response(
-                    payload={
-                        "registered_tools": self._project_tools.get(project_id, []),
-                        "graph": graph_entry.replace(f"project:{project_id}:", ""),
-                        "status": "ok",
-                        "hash_matched": True,
-                        "stream_secret": stream_secret,
-                        "shield_url": get_shield_url(),
-                    },
-                    trace_id=str(unit.trace_id),
-                    security=unit.security,
+            if not isinstance(graph_map, dict):
+                raise ConfigurationError(
+                    message=f"Project '{project_id}' has no registered graph map"
                 )
+            graph_entry = graph_map.get("default", "")
+
+            return make_response(
+                payload={
+                    "registered_tools": self._project_tools.get(project_id, []),
+                    "graph": graph_entry.replace(f"project:{project_id}:", ""),
+                    "status": "ok",
+                    "hash_matched": True,
+                    "stream_secret": stream_secret,
+                    "shield_url": get_shield_url(),
+                },
+                trace_id=str(unit.trace_id),
+                security=unit.security,
+            )
 
         # ── Store inline secrets (no-Shield fallback) ──────────────
         inline_secrets_raw = bundle.pop("secrets", None)

@@ -95,7 +95,6 @@ async def test_hash_match_reuses_existing_stream_secret_without_minting() -> Non
             "tools": [],
             "policy": {},
         },
-        "hash": "same-hash",
     }
     mock_unit.trace_id = __import__("uuid").uuid4()
     from contextunity.core import SecurityScopes

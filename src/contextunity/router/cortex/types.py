@@ -52,6 +52,15 @@ def _merge_dicts(a: dict[str, object], b: dict[str, object]) -> dict[str, object
 GRAPH_MERGE_DICT_KEYS: frozenset[str] = frozenset({"intermediate_results", "dynamic"})
 
 
+def _merge_token_usage(left: object, right: object) -> dict[str, object]:
+    """Reducer for ``_token_usage`` — node updates carry the full accumulated total."""
+    if is_object_dict(right) and right:
+        return dict(right)
+    if is_object_dict(left):
+        return dict(left)
+    return {}
+
+
 def _coerce_messages(raw: object) -> list[BaseMessage]:
     if not is_object_list(raw):
         return []
@@ -145,6 +154,7 @@ class BaseGraphStateUpdate(TypedDict, total=False):
     _last_node: str
     _raw_output: str
     dynamic: Annotated[dict[str, object], _merge_dicts]
+    _token_usage: Annotated[dict[str, object], _merge_token_usage]
 
 
 class GraphState(TypedDict):
@@ -177,6 +187,9 @@ class GraphState(TypedDict):
     _last_node: str
     _raw_output: str
     dynamic: Annotated[dict[str, object], _merge_dicts]
+
+    # Accumulated LLM token totals (merged by acc_tokens in node executors).
+    _token_usage: NotRequired[Annotated[dict[str, object], _merge_token_usage]]
 
 
 _StateT = TypeVar("_StateT", bound=GraphState)

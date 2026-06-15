@@ -4,12 +4,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from contextunity.core.exceptions import SecurityError
 from contextunity.core.tokens import ContextToken
 
-from contextunity.router.modules.tools.brain_trace_tools import (
-    _get_auth_token,
-    log_execution_trace,
-)
+from contextunity.router.modules.tools.auth_context import resolve_tool_context_token
+from contextunity.router.modules.tools.brain_trace_tools import log_execution_trace
 from contextunity.router.service.mixins.execution.helpers import BrainAutoTracer
 
 
@@ -29,27 +28,25 @@ def dummy_auto_tracer():
 
 
 class TestBrainTraceToolsTokenExtraction:
-    def test_get_auth_token_success(self):
+    def test_resolve_tool_context_token_success(self):
         """Should resolve the token correctly from the runtime context."""
         real_token = ContextToken(token_id="trace-test", permissions=("brain:write",))
-        with patch("contextunity.core.authz.context.get_auth_context") as mock_ctx:
-            mock_ctx.return_value = SimpleNamespace(token=real_token)
-            token = _get_auth_token()
+        with patch(
+            "contextunity.core.authz.context.get_auth_context",
+            return_value=SimpleNamespace(token=real_token),
+        ):
+            token = resolve_tool_context_token()
             assert token is real_token
 
-    def test_get_auth_token_none(self):
-        """Should return None if get_auth_context returns None."""
-        with patch("contextunity.core.authz.context.get_auth_context") as mock_ctx:
-            mock_ctx.return_value = None
-            token = _get_auth_token()
-            assert token is None
-
-    def test_get_auth_token_exception(self):
-        """Exception during resolution should gracefully return None."""
-        with patch("contextunity.core.authz.context.get_auth_context") as mock_ctx:
-            mock_ctx.side_effect = RuntimeError("Context failure")
-            token = _get_auth_token()
-            assert token is None
+    def test_resolve_tool_context_token_fail_closed(self):
+        """Missing auth context and graph token must raise SecurityError."""
+        with patch("contextunity.core.authz.context.get_auth_context", return_value=None):
+            with patch(
+                "contextunity.router.core.context.get_current_access_token",
+                return_value=None,
+            ):
+                with pytest.raises(SecurityError):
+                    resolve_tool_context_token()
 
 
 @pytest.mark.asyncio

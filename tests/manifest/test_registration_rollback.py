@@ -131,7 +131,7 @@ async def test_register_manifest_rolls_back_on_graph_failure(multi_graph_bundle)
     service._project_tools["tenant_a"] = ["old_tool"]
 
     mock_unit = MagicMock()
-    mock_unit.payload = {"bundle": multi_graph_bundle, "hash": "hash-1"}
+    mock_unit.payload = {"bundle": multi_graph_bundle}
     mock_unit.trace_id = __import__("uuid").uuid4()
     from contextunity.core import SecurityScopes
 

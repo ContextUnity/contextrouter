@@ -324,8 +324,21 @@ async def model_telemetry(
             from langchain_core.messages import AIMessage
             from langchain_core.outputs import ChatGeneration, LLMResult
 
+            usage_meta: dict[str, int] | None = None
+            if response.usage:
+                in_tok = response.usage.input_tokens or 0
+                out_tok = response.usage.output_tokens or 0
+                usage_meta = {
+                    "input_tokens": in_tok,
+                    "output_tokens": out_tok,
+                    "total_tokens": in_tok + out_tok,
+                }
+
             gen = ChatGeneration(
-                message=AIMessage(content=response.text),
+                message=AIMessage(
+                    content=response.text,
+                    usage_metadata=usage_meta,
+                ),
                 text=response.text,
             )
 
