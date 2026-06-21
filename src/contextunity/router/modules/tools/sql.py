@@ -5,6 +5,10 @@ or any project-specific code. Instead, they accept callbacks for:
 - DB execution (project provides its own connection)
 - Schema info (project provides table descriptions)
 
+Defense-in-depth: the regex blocklist here is **not** sufficient on its own.
+Hosts should also use a read-only database role and a server-side
+``statement_timeout`` (PostgreSQL) or equivalent engine limits.
+
 Usage in a graph:
     from contextunity.router.modules.tools.sql import (
         create_sql_tools,
@@ -21,6 +25,7 @@ Usage in a graph:
 
 from __future__ import annotations
 
+import concurrent.futures
 import re
 import time
 from typing import TYPE_CHECKING, Callable, ClassVar
@@ -121,6 +126,44 @@ def _split_statements(sql: str) -> list[str]:
     return statements
 
 
+def _strip_sql_comments(sql: str, *, dialect: str) -> str:
+    """Strip block/line comments; MySQL ``#`` lines only when *dialect* is mysql."""
+    clean = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)
+    clean = re.sub(r"--[^\n]*", " ", clean)
+    if dialect.strip().lower() == "mysql":
+        clean = re.sub(r"#[^\n]*", " ", clean)
+    return re.sub(r"\s+", " ", clean).strip().rstrip(";").strip()
+
+
+def _call_db_executor(
+    executor: Callable[[str], JsonDict],
+    sql: str,
+    *,
+    timeout_ms: int,
+) -> JsonDict:
+    """Run *executor* with a client-side timeout guard."""
+    if timeout_ms <= 0:
+        return executor(sql)
+
+    # NOTE: a context-managed pool calls shutdown(wait=True) on exit and would
+    # block until the runaway query finishes — defeating the timeout. Manage the
+    # pool manually and shut down with wait=False so the caller is freed
+    # immediately. The orphaned worker keeps its DB connection until the query
+    # ends, so a server-side statement_timeout remains the real protection.
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(executor, sql)
+    try:
+        result = future.result(timeout=timeout_ms / 1000.0)
+    except concurrent.futures.TimeoutError as exc:
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise TimeoutError(f"SQL execution timed out after {timeout_ms}ms") from exc
+    pool.shutdown(wait=False)
+
+    if not is_json_dict(result):
+        raise TypeError("db_executor returned non-object payload")
+    return result
+
+
 def validate_sql(sql: str, *, config: SQLToolConfig | None = None) -> SQLResult:
     """Validate and sanitize SQL.  Return ``{"valid": True, "sql": cleaned}``
     or ``{"valid": False, "error": reason}``.
@@ -132,10 +175,8 @@ def validate_sql(sql: str, *, config: SQLToolConfig | None = None) -> SQLResult:
     if not raw:
         return SQLResult(success=False, valid=False, error="Empty SQL")
 
-    # Strip comments
-    clean = re.sub(r"/\*.*?\*/", " ", raw, flags=re.DOTALL)
-    clean = re.sub(r"--[^\n]*", " ", clean)
-    clean = re.sub(r"\s+", " ", clean).strip().rstrip(";").strip()
+    # Strip comments (dialect-aware for MySQL ``#``)
+    clean = _strip_sql_comments(raw, dialect=cfg.dialect)
 
     if not clean:
         return SQLResult(success=False, valid=False, error="Empty SQL after stripping comments")
@@ -198,7 +239,14 @@ def execute_sql(sql: str, *, config: SQLToolConfig) -> SQLResult:
 
     start = time.monotonic()
     try:
-        data = config.db_executor(clean_sql)
+        data = _call_db_executor(
+            config.db_executor,
+            clean_sql,
+            timeout_ms=config.statement_timeout_ms,
+        )
+    except TimeoutError as e:
+        logger.warning("SQL execution timed out: %s | SQL: %.100s…", e, clean_sql)
+        return SQLResult(success=False, error=str(e))
     except Exception as e:
         logger.warning("SQL execution failed: %s | SQL: %.100s…", e, clean_sql)
         return SQLResult(success=False, error=f"SQL execution error: {e}")

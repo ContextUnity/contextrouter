@@ -188,7 +188,7 @@ class HuggingFaceLLM(BaseModel):
             prompt = f"{request.system}\n\n{prompt}"
 
         # Run in thread pool since transformers is synchronous
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, self._generate_sync, prompt)
 
         # Clean up common artifacts from text generation
@@ -211,7 +211,7 @@ class HuggingFaceLLM(BaseModel):
             raise ModelError("text-classification requires at least one TextPart")
 
         self._ensure_model_loaded()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _run() -> str:
             """Run the classification pipeline and format the top label/score pair."""
@@ -246,7 +246,7 @@ class HuggingFaceLLM(BaseModel):
             raise ModelError("AudioPart requires either uri or data_b64")
 
         self._ensure_model_loaded()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _run() -> str:
             """Decode audio from URI or base64 and run the ASR pipeline."""
@@ -292,7 +292,7 @@ class HuggingFaceLLM(BaseModel):
 
         part = image_parts[0]
         self._ensure_model_loaded()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _run() -> str:
             """Load the image from URI or base64 and run the vision pipeline."""

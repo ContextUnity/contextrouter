@@ -20,7 +20,9 @@ async def create_local_router() -> grpc.aio.Server:
     shield_url = config.shield_url
     logger.info("Local Router: shield_url=%s", shield_url or "(disabled)")
 
-    server = grpc.aio.server(interceptors=[RouterPermissionInterceptor(shield_url=shield_url)])
+    server = grpc.aio.server(
+        interceptors=[RouterPermissionInterceptor(shield_url=shield_url, config=config)]
+    )
     dispatcher = DispatcherService()
 
     router_pb2_grpc.add_RouterServiceServicer_to_server(dispatcher, server)

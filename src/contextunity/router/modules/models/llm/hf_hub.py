@@ -10,7 +10,8 @@ from collections.abc import AsyncIterator
 from typing import override
 
 from contextunity.core import get_contextunit_logger
-from contextunity.core.exceptions import ConfigurationError
+from contextunity.core.exceptions import ConfigurationError, ResourceFetchError, SecurityError
+from contextunity.core.security import fetch_safe_url
 
 from contextunity.router.core import RouterConfig
 from contextunity.router.modules.models.types import ModelError
@@ -46,6 +47,21 @@ def _object_text(obj: object, attr: str, default: str = "") -> str:
     if val is None:
         return default
     return str(val)
+
+
+async def _fetch_media_bytes(uri: str) -> bytes:
+    """Fetch caller-supplied media bytes with SSRF protection.
+
+    Routes through the shared ``fetch_safe_url`` guard so the provider never
+    performs an unvalidated fetch, and maps guard failures to ``ModelError``
+    without echoing internal addresses back to the model client.
+    """
+    try:
+        return await fetch_safe_url(uri)
+    except SecurityError as exc:
+        raise ModelError("Refusing to fetch unsafe media URL") from exc
+    except ResourceFetchError as exc:
+        raise ModelError("Failed to fetch media URL") from exc
 
 
 def _first_choice(obj: object) -> object | None:
@@ -201,11 +217,7 @@ class HuggingFaceHubLLM(BaseModel):
         part = audio_parts[0]
         data: bytes
         if part.uri:
-            import httpx
-
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(part.uri)
-                data = resp.content
+            data = await _fetch_media_bytes(part.uri)
         elif part.data_b64:
             data = base64.b64decode(part.data_b64)
         else:
@@ -243,11 +255,7 @@ class HuggingFaceHubLLM(BaseModel):
         part = image_parts[0]
         data: bytes
         if part.uri:
-            import httpx
-
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(part.uri)
-                data = resp.content
+            data = await _fetch_media_bytes(part.uri)
         elif part.data_b64:
             data = base64.b64decode(part.data_b64)
         else:

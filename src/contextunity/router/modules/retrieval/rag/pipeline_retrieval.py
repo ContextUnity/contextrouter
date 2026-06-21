@@ -13,6 +13,7 @@ from contextunity.router.cortex.types import GraphState
 from contextunity.router.modules.retrieval import BaseRetrievalPipeline
 
 from ..pipeline import PipelineResult
+from .background_tasks import spawn_background_task
 from .models import RetrievedDoc
 from .parity import DualReadHarness, ParityConfig
 from .pipeline_helpers import coerce_doc_from_envelope, get_type_limits
@@ -206,7 +207,7 @@ class RetrievalMixin:
             limit = int(cfg.general_retrieval_initial_count)
         else:
             limit = int(sum(get_type_limits(cfg).values()) or 15)
-        _ = asyncio.create_task(
+        spawn_background_task(
             harness.compare(
                 query=query,
                 primary_docs=primary_docs,

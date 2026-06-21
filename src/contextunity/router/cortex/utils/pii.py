@@ -100,6 +100,16 @@ class PiiSession:
             return 60
 
     @staticmethod
+    def _allow_plaintext_pii() -> bool:
+        """Return whether local dev plaintext PII storage is explicitly allowed."""
+        try:
+            from contextunity.router.core.config.main import get_core_config
+
+            return bool(get_core_config().privacy.allow_plaintext_pii)
+        except Exception:
+            return False
+
+    @staticmethod
     def _create_anonymizer(session_id: str) -> tuple[Anonymizer, _KeyDestroyer | None]:
         """Create an in-process Anonymizer with ephemeral AES-256 encryption.
 
@@ -121,10 +131,19 @@ class PiiSession:
         try:
             encryption = EphemeralAES256Backend(key_ttl_seconds=ttl)
         except ImportError:
-            logger.warning(
-                "cryptography not installed; PII values stored without encryption. Install `cryptography` for AES-256-GCM protection."
-            )
-            encryption = PlaintextBackend()
+            if PiiSession._allow_plaintext_pii():
+                logger.warning(
+                    "cryptography not installed; PII values stored without encryption "
+                    "(CU_ROUTER_ALLOW_PLAINTEXT_PII=true). Install `cryptography` for production."
+                )
+                encryption = PlaintextBackend(suppress_warning=True)
+            else:
+                from contextunity.core.exceptions import ConfigurationError
+
+                raise ConfigurationError(
+                    "cryptography is required for PII encryption. Install `cryptography` "
+                    "or set CU_ROUTER_ALLOW_PLAINTEXT_PII=true for local development only."
+                ) from None
 
         store = MappingStore(
             session_id=session_id,

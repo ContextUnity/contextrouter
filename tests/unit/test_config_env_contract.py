@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from contextunity.router.core.config import get_core_config, reset_core_config
+from contextunity.router.core.config.main import RouterConfig
 
 
 def test_router_nested_env_overrides_do_not_wipe_siblings(monkeypatch):
@@ -35,3 +39,8 @@ def test_router_brain_grpc_url_is_canonical(monkeypatch):
 
     reset_core_config()
     reset_shared_config()
+
+
+def test_router_config_rejects_unknown_security_field() -> None:
+    with pytest.raises(ValidationError, match="tls_require_client_authx"):
+        RouterConfig.model_validate({"tls_require_client_authx": False})

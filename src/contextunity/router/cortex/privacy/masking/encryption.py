@@ -286,17 +286,18 @@ class PlaintextBackend:
     Raises a warning on instantiation.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, suppress_warning: bool = False) -> None:
         """Create a no-op plaintext backend (development/testing only).
 
-        Emits a ``UserWarning`` on instantiation to prevent accidental
-        use in production environments.
+        Emits a ``UserWarning`` on instantiation unless *suppress_warning* is set
+        (e.g. when ``allow_plaintext_pii`` is explicitly enabled for local dev).
         """
-        warnings.warn(
-            "PlaintextBackend provides NO encryption. Use EphemeralAES256Backend in production.",
-            UserWarning,
-            stacklevel=2,
-        )
+        if not suppress_warning:
+            warnings.warn(
+                "PlaintextBackend provides NO encryption. Use EphemeralAES256Backend in production.",
+                UserWarning,
+                stacklevel=2,
+            )
 
     def encrypt(self, plaintext: str) -> bytes:
         """Return plaintext as UTF-8 bytes (no actual encryption).

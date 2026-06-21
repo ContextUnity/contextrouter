@@ -42,7 +42,7 @@ class HuggingFaceEmbeddings(BaseEmbeddings):
         if not text:
             return []
         model = self._ensure_model()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _encode_query() -> list[float]:
             batch = model.encode([text])
@@ -56,7 +56,7 @@ class HuggingFaceEmbeddings(BaseEmbeddings):
         if not texts:
             return []
         model = self._ensure_model()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         encoded = await loop.run_in_executor(None, lambda: model.encode(texts))
         return float_vectors_from_encode_batch(encoded)
 

@@ -8,6 +8,7 @@ Tests cover:
 
 from __future__ import annotations
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from contextunity.router.cortex.utils.pii import PiiSession
@@ -186,3 +187,45 @@ class TestPiiSessionLifecycle:
         revealed = session.reveal_text(hidden)
         # The token will remain because mappings are gone
         assert hidden in revealed or "john@example.com" not in revealed
+
+
+class TestPiiEncryptionFailClosed:
+    def test_missing_cryptography_raises_without_dev_flag(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from contextunity.core.exceptions import ConfigurationError
+
+        def _raise_import(*_args: object, **_kwargs: object) -> None:
+            raise ImportError("no cryptography")
+
+        monkeypatch.setattr(
+            "contextunity.router.cortex.privacy.masking.encryption.EphemeralAES256Backend",
+            _raise_import,
+        )
+        monkeypatch.setattr(
+            PiiSession,
+            "_allow_plaintext_pii",
+            staticmethod(lambda: False),
+        )
+
+        with pytest.raises(ConfigurationError, match="cryptography"):
+            PiiSession(session_id="fail-closed")
+
+    def test_allow_plaintext_pii_dev_flag_permits_session(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise_import(*_args: object, **_kwargs: object) -> None:
+            raise ImportError("no cryptography")
+
+        monkeypatch.setattr(
+            "contextunity.router.cortex.privacy.masking.encryption.EphemeralAES256Backend",
+            _raise_import,
+        )
+        monkeypatch.setattr(
+            PiiSession,
+            "_allow_plaintext_pii",
+            staticmethod(lambda: True),
+        )
+
+        session = PiiSession(session_id="dev-plain")
+        assert session._anonymizer is not None

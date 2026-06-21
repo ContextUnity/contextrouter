@@ -29,7 +29,8 @@ from email.message import Message
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 from contextunity.core import get_contextunit_logger
-from contextunity.core.exceptions import PlatformServiceError
+from contextunity.core.exceptions import PlatformServiceError, SecurityError
+from contextunity.core.security import validate_safe_url
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
@@ -48,13 +49,23 @@ def _download_http_content(
     headers: dict[str, str],
     timeout: int,
     max_bytes: int,
+    display_url: str | None = None,
 ) -> tuple[bytes, str, str | None]:
     """Download URL content through typed stdlib HTTP clients."""
-    parsed = urllib.parse.urlsplit(url)
+    try:
+        safe_url = validate_safe_url(url)
+    except SecurityError as exc:
+        raise PlatformServiceError(
+            message="router_file_download: unsafe URL rejected",
+            tool_binding="router_file_download",
+        ) from exc
+
+    log_url = display_url or safe_url
+    parsed = urllib.parse.urlsplit(safe_url)
     host = parsed.hostname
     if not host:
         raise PlatformServiceError(
-            message=f"router_file_download: missing host in URL: {url}",
+            message=f"router_file_download: missing host in URL: {log_url}",
             tool_binding="router_file_download",
         )
 
@@ -73,7 +84,7 @@ def _download_http_content(
         )
     else:
         raise PlatformServiceError(
-            message=f"router_file_download: invalid URL scheme: {url}",
+            message=f"router_file_download: invalid URL scheme: {log_url}",
             tool_binding="router_file_download",
         )
 
@@ -82,7 +93,7 @@ def _download_http_content(
         response = connection.getresponse()
         if response.status >= 400:
             raise PlatformServiceError(
-                message=f"router_file_download: HTTP {response.status} for {url}",
+                message=f"router_file_download: HTTP {response.status} for {log_url}",
                 tool_binding="router_file_download",
             )
         data = response.read(max_bytes + 1)
@@ -97,6 +108,21 @@ def _download_http_content(
         return data, content_type, filename
     finally:
         connection.close()
+
+
+def _redact_url_query_params(url: str, params: set[str]) -> str:
+    """Redact sensitive query params before logging or returning metadata."""
+    if not params:
+        return url
+    parsed = urllib.parse.urlsplit(url)
+    if not parsed.query:
+        return url
+    sensitive = {param.lower() for param in params}
+    query = [
+        (key, "REDACTED" if key.lower() in sensitive else value)
+        for key, value in urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    ]
+    return urllib.parse.urlunsplit(parsed._replace(query=urllib.parse.urlencode(query)))
 
 
 # ── Config Schema ───────────────────────────────────────────────────
@@ -172,6 +198,7 @@ async def _router_file_download_executor(
         headers: dict[str, str] = {
             "User-Agent": "Mozilla/5.0 (compatible; contextunity-router/1.0)",
         }
+        sensitive_query_params: set[str] = set()
 
         if config.auth_mode == "basic":
             username = as_text(state.get(config.username_key, ""))
@@ -187,11 +214,13 @@ async def _router_file_download_executor(
                 parsed = urllib.parse.urlparse(url)
                 query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
                 query[config.api_key_param] = [api_key]
+                sensitive_query_params.add(config.api_key_param)
                 url = urllib.parse.urlunparse(
                     parsed._replace(query=urllib.parse.urlencode(query, doseq=True))
                 )
 
         max_bytes = config.max_size_mb * 1024 * 1024
+        display_url = _redact_url_query_params(url, sensitive_query_params)
 
         # Download with retry
         last_error: Exception | None = None
@@ -202,6 +231,7 @@ async def _router_file_download_executor(
                     headers=headers,
                     timeout=config.timeout,
                     max_bytes=max_bytes,
+                    display_url=display_url,
                 )
                 if len(data) > max_bytes:
                     raise PlatformServiceError(
@@ -214,12 +244,12 @@ async def _router_file_download_executor(
                 else:
                     content = data.decode("utf-8", errors="replace")
 
-                logger.info("Downloaded %d bytes from %s", len(data), url)
+                logger.info("Downloaded %d bytes from %s", len(data), display_url)
 
                 return {
                     config.output_key: content,
                     "download_metadata": {
-                        "url": url,
+                        "url": display_url,
                         "size_bytes": len(data),
                         "content_type": content_type,
                         "filename": filename,
@@ -235,7 +265,9 @@ async def _router_file_download_executor(
                     continue
 
         raise PlatformServiceError(
-            message=(f"Failed to download {url} after {config.retries} attempts: {last_error}"),
+            message=(
+                f"Failed to download {display_url} after {config.retries} attempts: {last_error}"
+            ),
             tool_binding="router_file_download",
         )
 

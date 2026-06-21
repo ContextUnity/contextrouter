@@ -39,7 +39,7 @@ class VertexEmbeddings(BaseEmbeddings):
         if not text:
             return []
         model = self._ensure_model()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         rows = await loop.run_in_executor(None, lambda: vertex_embedding_values(model, [text]))
         return rows[0] if rows else []
 
@@ -49,7 +49,7 @@ class VertexEmbeddings(BaseEmbeddings):
         if not texts:
             return []
         model = self._ensure_model()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: vertex_embedding_values(model, texts))
 
     def _ensure_model(self) -> VertexTextEmbeddingModel:

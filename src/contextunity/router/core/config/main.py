@@ -1,8 +1,10 @@
 """Main configuration class that combines all config modules."""
 
+from typing import ClassVar
+
 from contextunity.core import get_contextunit_logger
 from contextunity.core.config import ServiceConfig, SharedSecurityConfig, set_env_default
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from .models import LLMConfig, ModelsConfig, PrivacyConfig, RouterSection
 from .providers import (
@@ -27,6 +29,8 @@ from .security import SecurityConfig
 
 class RouterConfig(ServiceConfig):
     """Main configuration class for contextunity.router."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(use_enum_values=True, extra="forbid")
 
     # Server settings
     port: int = 50050
@@ -115,6 +119,7 @@ def load_config(config_path: str | None = None) -> RouterConfig:
         "DEBUG_TOOLS_MESSAGES": "debug_tools_messages",
         "CU_ROUTER_DEBUG": "debug",
         "CU_ROUTER_PII_ENCRYPTION_TTL_SEC": "privacy.pii_encryption_ttl_seconds",
+        "CU_ROUTER_ALLOW_PLAINTEXT_PII": "privacy.allow_plaintext_pii",
         # Model configuration
         "CU_ROUTER_DEFAULT_LLM": "models.default_llm",
         "CU_ROUTER_ALLOW_GLOBAL_FALLBACK": "models.allow_global_fallback",

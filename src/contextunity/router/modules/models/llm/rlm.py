@@ -187,7 +187,7 @@ class RLMLLM(BaseModel):
         # RLM completion (synchronous, wrap in executor for async)
         import asyncio
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         result = await loop.run_in_executor(None, lambda: self._rlm.completion(prompt))
 

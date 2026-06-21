@@ -57,6 +57,8 @@ class PrivacyConfig(BaseModel):
 
     # Ephemeral AES key rotation for in-process PII mapping store (seconds).
     pii_encryption_ttl_seconds: int = Field(default=60, ge=10, le=86400)
+    # Local dev only — never enable in production.
+    allow_plaintext_pii: bool = Field(default=False)
 
 
 class RouterSection(BaseModel):
