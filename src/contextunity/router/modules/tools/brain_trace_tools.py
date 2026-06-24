@@ -127,8 +127,8 @@ def _trace_metadata(
     wire: JsonDict = {}
     if metadata:
         for key, value in metadata.items():
-            # Heavy runtime manifest — not needed in view; breaks json validation.
-            if key in {"project_config", "steps"}:
+            # Steps are supplied from the tracer below; avoid caller-provided duplicates.
+            if key == "steps":
                 continue
             sanitized = sanitize_for_struct(value)
             if is_json_value(sanitized):

@@ -68,7 +68,13 @@ def test_trace_metadata_preserves_steps_when_project_config_present():
     )
 
     assert wire.get("platform") == "grpc"
-    assert "project_config" not in wire
+    # project_config is surfaced in the trace wire (parity with the view's rich
+    # metadata): sanitize_for_struct keeps serializable parts and stringifies the
+    # rest, so nodes survive and the non-serializable graph becomes a string.
+    project_config = wire.get("project_config")
+    assert isinstance(project_config, dict)
+    assert project_config["nodes"] == [{"prompt_ref": "x"}]
+    assert isinstance(project_config["graph"], str)
     assert isinstance(wire.get("steps"), list)
     assert len(wire["steps"]) == 1
     assert wire["steps"][0]["node"] == "planner"

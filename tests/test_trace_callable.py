@@ -92,6 +92,56 @@ class TestLogExecutionTrace:
         assert result["tenant_id"] == "default"
 
     @patch("contextunity.router.modules.tools.brain_trace_tools._get_brain_client")
+    async def test_trace_metadata_keeps_project_config(self, mock_get_client):
+        """Raw metadata must keep redacted project_config for Forge trace detail parity."""
+        mock_client = AsyncMock()
+        captured: dict[str, object] = {}
+
+        async def mock_log(*args, **kwargs):
+            captured.update(kwargs)
+            return "tr-rich"
+
+        mock_client.log_trace = mock_log
+        mock_get_client.return_value = mock_client
+
+        result = await log_execution_trace.coroutine(
+            tenant_id="nszu",
+            agent_id="nszu",
+            session_id="session-123",
+            user_id="platform",
+            graph_name="planner",
+            tool_calls=[],
+            token_usage={},
+            timing_ms=100,
+            steps=[{"tool": "planner", "timing_ms": 10}],
+            platform="grpc",
+            model_key="gpt-5-mini",
+            iterations=1,
+            message_count=2,
+            user_query="hi",
+            final_answer="hello",
+            metadata={
+                "project_config": {
+                    "graph": {"planner": {"nodes": ["planner"]}},
+                    "tools": [{"name": "search", "type": "federated"}],
+                },
+                "steps": [{"tool": "stale"}],
+                "langfuse_enabled": False,
+            },
+            security_flags={},
+            record_episode=False,
+        )
+
+        assert result["success"] is True
+        metadata = captured["metadata"]
+        assert isinstance(metadata, dict)
+        assert metadata["project_config"] == {
+            "graph": {"planner": {"nodes": ["planner"]}},
+            "tools": [{"name": "search", "type": "federated"}],
+        }
+        assert metadata["steps"] == [{"tool": "planner", "timing_ms": 10}]
+
+    @patch("contextunity.router.modules.tools.brain_trace_tools._get_brain_client")
     async def test_trace_graceful_failure(self, mock_get_client):
         """Trace fails gracefully (e.g., PERMISSION_DENIED) returning success: False."""
         from unittest.mock import AsyncMock
